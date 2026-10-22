@@ -12,6 +12,14 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(evidence.gates['KAS_PREFLIGHT']['status'], 'FAIL')
         self.assertEqual(evidence.gates['KAS_INSTALL']['status'], 'NOT_TESTED')
 
+    def test_extra_check_exception_is_visible_after_completed_primary_gate(self):
+        evidence = Evidence()
+        evidence.set('KAS_DOCTOR', 'PASS', 'native_doctor_passed')
+        evidence.check('KAS_INSTALL_INTERRUPTION', 'NOT_TESTED', 'unattempted')
+        phase_failure(evidence, 'KAS_DOCTOR')
+        self.assertEqual(evidence.gates['KAS_DOCTOR']['status'], 'PASS')
+        self.assertEqual(evidence.checks['KAS_INSTALL_INTERRUPTION']['status'], 'FAIL')
+
     def test_login_requires_password_prompt_and_actual_version_response(self):
         steps = login_steps()
         user = next(i for i, s in enumerate(steps) if s.get('credential') == 'username')

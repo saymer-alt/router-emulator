@@ -38,6 +38,9 @@ def login_steps():
 
 def phase_failure(evidence, gate):
     # A later controller error cannot rewrite an already completed gate.
+    for name, value in tuple(evidence.checks.items()):
+        if value['status'] == 'NOT_TESTED':
+            evidence.check(name, 'FAIL', 'runner_failure')
     if evidence.gates[gate]['status'] == 'NOT_TESTED':
         evidence.set(gate, 'FAIL', 'runner_failure')
 

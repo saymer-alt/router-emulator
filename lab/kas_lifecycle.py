@@ -207,6 +207,7 @@ def foreign_resources(guest):
 
 
 def idempotence(guest, mirror, revision, evidence, foreign):
+    evidence.check('KAS_IDEMPOTENCE', 'NOT_TESTED', 'unattempted')
     before = contract(guest, mirror, foreign)
     code, output, errors = guest.execute('KEENETIC_AUTO_SETUP_REF=' + revision +
         ' sh /opt/lab/install.sh disk', timeout=600)
@@ -238,6 +239,7 @@ def reboot(guest, mirror, evidence, context, foreign):
 
 
 def interrupted_repeat(guest, mirror, revision, evidence):
+    evidence.check('KAS_INSTALL_INTERRUPTION', 'NOT_TESTED', 'unattempted')
     before = contract(guest, mirror)
     pending = b''
     signalled = False
@@ -273,6 +275,7 @@ def interrupted_repeat(guest, mirror, revision, evidence):
 
 
 def wan_guard(guest, evidence):
+    evidence.check('KAS_WAN_RESTART_GUARD', 'NOT_TESTED', 'unattempted')
     def identity():
         pid = guest.command('pidof mihomo')
         if not pid.isdigit():
@@ -304,6 +307,7 @@ def wan_guard(guest, evidence):
 
 
 def update_and_rollback(guest, mirror, revision, evidence, foreign):
+    evidence.check('KAS_UPDATE', 'NOT_TESTED', 'unattempted')
     before = contract(guest, mirror, foreign)
     command = 'export KEENETIC_AUTO_SETUP_REF=' + revision + '; echo $$ > /opt/lab/update.pid; exec sh /opt/lab/update-mihomo.sh --force'
     code, output, errors = guest.execute(command, timeout=600)
@@ -431,6 +435,7 @@ def foreign_profile(args, private, credentials, coldboot, mirror, port, tls_port
     from lab.gates import Evidence
     from lab.guest import Guest
     from lab.run import run
+    evidence.check('KAS_FOREIGN_RESOURCES', 'NOT_TESTED', 'unattempted')
     root = private / 'foreign-profile'
     root.mkdir(mode=0o700)
     scenario = root / 'scenario.json'
