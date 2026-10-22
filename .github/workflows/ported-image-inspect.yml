@@ -1,5 +1,6 @@
 # Inspection only: no flashing, no emulation and no redistributing firmware.
 # This is an explicitly experimental user-requested evaluation of the format.
+# Only public source archive URLs, no device data, no image/artifact upload.
 name: Ported WR3000P - firmware format inspection
 
 on:
