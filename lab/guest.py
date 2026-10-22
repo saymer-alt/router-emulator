@@ -64,7 +64,7 @@ class Guest:
             self.client.close()
             self.client = None
 
-    def command(self, text, timeout=30, input_data=None):
+    def execute(self, text, timeout=30, input_data=None, on_stdout=None):
         until = time.monotonic() + timeout
         if self.deadline is not None:
             until = min(until, self.deadline)
@@ -84,7 +84,10 @@ class Guest:
                 if time.monotonic() >= until:
                     raise TimeoutError('guest command time budget exceeded')
                 if channel.recv_ready():
-                    data = (data + channel.recv(65536))[-262144:]
+                    chunk = channel.recv(65536)
+                    data = (data + chunk)[-262144:]
+                    if on_stdout:
+                        on_stdout(chunk)
                 if channel.recv_stderr_ready():
                     errors = (errors + channel.recv_stderr(65536))[-65536:]
                 if channel.exit_status_ready() and not channel.recv_ready() and not channel.recv_stderr_ready():
@@ -97,9 +100,13 @@ class Guest:
         with (self.private / 'ssh-private.log').open('ab') as log:
             os.chmod(self.private / 'ssh-private.log', 0o600)
             log.write(data + errors + b'\n')
+        return code, data.decode('utf8', errors='replace').strip(), errors.decode('utf8', errors='replace').strip()
+
+    def command(self, text, timeout=30, input_data=None):
+        code, data, errors = self.execute(text, timeout, input_data)
         if code != 0:
             raise RuntimeError('guest probe returned nonzero')
-        return data.decode('utf8', errors='replace').strip()
+        return data
 
     def entware(self, marker=None):
         if self.command('uname -m') != 'aarch64':

@@ -109,6 +109,28 @@ def serial_payload(step, credentials=None):
     return text.encode() + (b"\r" if step.get("enter", True) else b"")
 
 
+def monitor_wait(path, command):
+    """Wait for the monitor acknowledgement before copying paused disks."""
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+        sock.settimeout(5)
+        sock.connect(str(path))
+        greeting = b''
+        while b'(qemu)' not in greeting:
+            part = sock.recv(65536)
+            if not part:
+                raise RuntimeError('monitor disconnected')
+            greeting += part
+        sock.sendall(command.encode() + b'\n')
+        response = b''
+        while b'(qemu)' not in response:
+            part = sock.recv(65536)
+            if not part:
+                raise RuntimeError('monitor disconnected')
+            response += part
+        if b'Error:' in response:
+            raise RuntimeError('monitor command rejected')
+
+
 def drain_serial(reader):
     """Keep socket TX flowing; evidence is stored by QEMU's private logfile."""
     while True:
@@ -195,6 +217,20 @@ def run(args):
     cursor = 0
     logfile = None
     app_fd = None
+
+    def snapshot(destination):
+        destination = Path(destination).resolve()
+        if destination.exists():
+            raise ValueError('private snapshot destination must be new')
+        destination.mkdir(parents=True, mode=0o700)
+        monitor_wait(monitor, 'stop')
+        try:
+            shutil.copytree(nand, destination / 'flash')
+            if (work / 'opt.img').is_file():
+                shutil.copyfile(work / 'opt.img', destination / 'opt.img')
+                os.chmod(destination / 'opt.img', 0o600)
+        finally:
+            monitor_wait(monitor, 'cont')
 
     def ensure_running():
         if time.monotonic() >= hard_deadline:
@@ -290,6 +326,11 @@ def run(args):
             if not 1024 <= port <= 65535:
                 raise ValueError("invalid loopback mirror port")
             env["LAN_EXTRA"] = ",guestfwd=tcp:192.168.1.100:80-cmd:socat STDIO TCP4:127.0.0.1:%d" % port
+            if getattr(args, 'mirror_tls_port', None):
+                tls_port = int(args.mirror_tls_port)
+                if not 1024 <= tls_port <= 65535:
+                    raise ValueError('invalid loopback TLS mirror port')
+                env['LAN_EXTRA'] += ',guestfwd=tcp:192.168.1.100:443-cmd:socat STDIO TCP4:127.0.0.1:%d' % tls_port
         proc = subprocess.Popen(command, cwd=root, stdout=app_fd,
                                 stderr=subprocess.STDOUT, start_new_session=True, env=env,
                                 umask=0o077)
@@ -345,7 +386,8 @@ def run(args):
         if failure is None and getattr(args, "after_scenario", None):
             # Trusted Python controller hook, never loaded from scenario data.
             # Used for authenticated guest probes while the disposable VM lives.
-            args.after_scenario(monitor=monitor, console_dir=logdir, deadline=hard_deadline)
+            args.after_scenario(monitor=monitor, console_dir=logdir, deadline=hard_deadline,
+                                snapshot=snapshot)
     except Exception as error:
         failure = "%s: setup or emulator start failed" % type(error).__name__
         rows.append({"action": "setup", "outcome": "FAIL",

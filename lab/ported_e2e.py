@@ -33,11 +33,19 @@ def login_steps():
         send('show version'), wait(r'release:\s+5\.01\.C\.8\.0-2', 30), wait(r'\(config\)>', 30)]
 
 
+def phase_failure(evidence, gate):
+    # A later controller error cannot rewrite an already completed gate.
+    if evidence.gates[gate]['status'] == 'NOT_TESTED':
+        evidence.set(gate, 'FAIL', 'runner_failure')
+
+
 def run_entware(args, private, credentials, coldboot, evidence):
     # Import only for the actual guest phase; baseline harness tests need no SSH.
-    from lab.build_entware import build
+    from lab.build_entware import build, add_packages
     from lab.guest import Guest
     from lab.mirror import Mirror
+    phase = {'name': 'ENTWARE_READY'}
+    evidence.set('ENTWARE_READY', 'NOT_TESTED', 'unattempted')
     nand = private / 'entware-nand'
     shutil.copytree(args.nand_dir, nand)
     files = [next(nand.glob('mt7981.mtd%d.*.bin' % n)) for n in range(6)]
@@ -45,6 +53,7 @@ def run_entware(args, private, credentials, coldboot, evidence):
     write_at(files, CONFIG_OFFSET, config_image(synthetic_config(secret['username'], secret['password'], entware_config())))
     image, mirror = private / 'opt.img', private / 'mirror'
     build(image, mirror, private / 'cache', credentials)
+    add_packages(mirror, private / 'cache', Path(__file__).with_name('kas-packages.lock.json'))
     steps = coldboot + [wait('Core::Server: system ready', 240),
         {'action': 'wait_serial', 'pattern': r'\[5/5\] "Entware" installed!',
          'reject_pattern': 'Critical error:|Please use ext2/ext3/ext4', 'timeout_sec': 600}]
@@ -66,6 +75,16 @@ def run_entware(args, private, credentials, coldboot, evidence):
             guest.entware(marker)
             evidence.set('ENTWARE_READY', 'PASS', 'ext4_opkg_abi_and_reboot')
             print('ENTWARE: authenticated SSH, filesystem and packages survived reset', flush=True)
+            phase['name'] = 'KAS_PREFLIGHT'
+            evidence.set('KAS_PREFLIGHT', 'NOT_TESTED', 'unattempted')
+            guest.command('opkg update && opkg install ca-bundle curl jq iptables ip-full nano cron socat', timeout=240)
+            guest.command('/bin/ndmc -c "system configuration save"; sync')
+            context['snapshot'](private / 'prepared-entware')
+            from lab.preflight import verify
+            if verify(guest, evidence):
+                print('KAS PREFLIGHT: native runtime capabilities verified', flush=True)
+            else:
+                print('KAS PREFLIGHT: BLOCKED by an actual capability probe', flush=True)
         finally:
             guest.close()
 
@@ -74,8 +93,11 @@ def run_entware(args, private, credentials, coldboot, evidence):
             nand_dir=nand, output_dir=private / 'entware-uart', max_seconds=1500,
             preset='cudy-wr3000p-v1', lan_forwards='8080:80;8022:222',
             opt_image=image, mirror_port=port, after_scenario=probes))
-    if result != 0 or evidence.gates['ENTWARE_READY']['status'] != 'PASS':
+    if evidence.gates['ENTWARE_READY']['status'] != 'PASS':
         evidence.set('ENTWARE_READY', 'FAIL', 'entware_install_failed')
+        return 1
+    if result != 0:
+        phase_failure(evidence, phase['name'])
         return 1
     return 0
 

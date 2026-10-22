@@ -1,10 +1,11 @@
 """Read-only loopback server for explicitly pinned package files."""
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import datetime
 import threading
 
 
 class Mirror:
-    def __init__(self, directory):
+    def __init__(self, directory, extra_routes=None):
         files = {}
         for feed in ('entware', 'keenetic'):
             for path in (directory / feed).iterdir():
@@ -18,8 +19,14 @@ class Mirror:
 
             def do_GET(self):
                 path = files.get(self.path)
-                if self.path == '/lab/health':
+                host = self.headers.get('Host', '').split(':', 1)[0].lower()
+                extra = (extra_routes or {}).get((host, self.path))
+                if extra is not None:
+                    data = extra
+                elif self.path == '/lab/health':
                     data = b'KEENETIC_LAB_HTTP_OK'
+                elif self.path == '/lab/clock':
+                    data = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M:%S').encode()
                 elif path is not None:
                     data = path.read_bytes()
                 else:

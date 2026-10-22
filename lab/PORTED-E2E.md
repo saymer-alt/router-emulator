@@ -107,6 +107,30 @@ BLOCKED/NOT_TESTED as skipped, never as successful execution. A successful boot
 cannot advance authentication, Entware or KAS gates. E4 must test actual kernel
 operations; a component name in `show version` alone is insufficient.
 
+## E4 native capability evidence
+
+Local runtime probes confirmed the required component set, native Proxy creation
+and deletion, MARK/CONNMARK rules in a temporary mangle chain, persistent TUN
+creation and a route in a separate table, mounted EXT4, working opkg mirror,
+local HTTP and a real DNS query to the native DNS proxy. Temporary resources are
+removed before KAS. The synthetic `lab.invalid` host is a local fixture.
+
+The guest reports 497680 kB MemTotal and one active `/dev/zram0` swap of 524284 kB.
+No external swap is enabled; dual-swap checks are not bypassed. Time is set by
+the real native date command from host UTC. External NTP, WAN/VPN traffic and
+physical hardware are not accepted by these probes.
+
+Before KAS, the controller saves a private NAND/EXT4 snapshot after guest `sync`
+and a synchronous QEMU stop acknowledgement, then resumes the VM. A later E4
+controller error must preserve an already proven ENTWARE_READY result; that
+regression is covered independently from the capability parser tests.
+
+Current pinned KAS commit `6dd6438e2b64bad0fe9205ab6575795f808dabd8` deliberately
+has no removal implementation: `uninstall.sh --remove/--purge` return code 3.
+Snapshot/transaction checks never grant removal authority. The lab must report
+that native contract as BLOCKED and must not substitute manual package removal
+or the fixture-only transaction rehearsal for actual uninstall/rollback.
+
 No schedule is enabled. No changes to real routers, networks, VPS, main/stable,
 tags, releases or automatic merges are part of this laboratory.
 
