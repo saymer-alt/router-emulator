@@ -1,0 +1,82 @@
+# Independent laboratory CI. Does not validate or install KeeneticOS.
+# Only changes to lab/ and this file trigger heavy tests on PRs.
+name: Keenetic lab - isolated QEMU regression
+
+on:
+  pull_request:
+    paths:
+      - "lab/**"
+      - ".github/workflows/keenetic-lab.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  harness-unit:
+    name: Lab runner tests (no guest firmware)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Python syntax and unit tests
+        run: |
+          python3 -m py_compile lab/run.py lab/test_runner.py
+          python3 -m unittest discover -s lab -p 'test_runner.py' -v
+
+  openwrt-boot-reset:
+    name: QEMU MT7981 - OpenWrt cold boot and reset
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      EMU_VERSION: "3.8"
+      OPENWRT_VERSION: "25.12.5"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends mtd-utils unzip socat curl wget python3
+
+      - name: Download checked upstream emulator (no private firmware)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/qemu-lab"
+          cd "$RUNNER_TEMP/qemu-lab"
+          base="https://github.com/stavultras/router-emulator/releases/download/v$EMU_VERSION"
+          curl --retry 3 -fL -o emulator.tar.gz "$base/Router-Emulator-$EMU_VERSION-linux-x86_64.tar.gz"
+          curl --retry 3 -fL -o presets.zip "$base/Router-Emulator-$EMU_VERSION-presets.zip"
+          echo '77fa6f8a6a00af1164c9e144dc2f8bda7154877271498666bb9f17355d2e74d6  emulator.tar.gz' | sha256sum -c -
+          echo 'ef98b33c7636b5e792dcb16bcd1ad54f247639fccc19e9d9662fd422954d0732  presets.zip' | sha256sum -c -
+          tar -xzf emulator.tar.gz
+          unzip -q presets.zip
+          echo "EMU_ROOT=$RUNNER_TEMP/qemu-lab/Router-Emulator" >> "$GITHUB_ENV"
+
+      - name: Prepare official OpenWrt flash
+        run: |
+          set -euo pipefail
+          cd "$EMU_ROOT"
+          tools/prepare-nand.sh cudy_wr3000p-v1 "$OPENWRT_VERSION"
+
+      - name: Run isolated scenario and produce JSON/JUnit
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 lab/run.py \
+            --emulator-root "$EMU_ROOT" \
+            --scenario lab/scenarios/openwrt-mt7981.json \
+            --preset cudy-wr3000p-v1 \
+            --nand-dir "$EMU_ROOT/nand-wr3000p" \
+            --output-dir "$RUNNER_TEMP/keenlab-report" \
+            --max-seconds 1500
+
+      - name: Publish public-firmware reports only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: openwrt-mt7981-lab-report
+          path: ${{ runner.temp }}/keenlab-report/
+          if-no-files-found: warn
+          retention-days: 7
