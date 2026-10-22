@@ -1,5 +1,6 @@
 """Real native capability probes. Failure cannot waive any KAS prerequisite."""
 import datetime
+import json
 import re
 import secrets
 
@@ -96,6 +97,9 @@ def verify(guest, evidence):
     finally:
         guest.command('ip route del 198.18.0.0/15 dev ' + tun + ' table 200001 2>/dev/null; ip link del ' + tun + ' 2>/dev/null || true')
     probe('local_http', 'curl -fSs --max-time 10 http://192.168.1.100/lab/health', lambda s: s == 'KEENETIC_LAB_HTTP_OK')
+    guest.command('/bin/ndmc -c "service http"')
+    probe('native_rci', 'for n in 1 2 3 4 5 6 7 8 9 10; do curl -fSs --max-time 3 http://127.0.0.1:79/rci/show/ip/policy && exit 0; sleep 1; done; exit 1',
+          lambda s: isinstance(json.loads(s), (list, dict)))
     probe('package_mirror', 'opkg update')
     # Exercise creation and deletion, without occupying KAS's Proxy0 candidate.
     existing = guest.command('/bin/ndmc -c "show running-config"')

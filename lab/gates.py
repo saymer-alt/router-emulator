@@ -1,12 +1,13 @@
 """Public evidence contains fixed labels only, never guest text or credentials."""
 import json
+import re
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
 GATES = ('BOOT_READY', 'AUTH_READY', 'ENTWARE_READY', 'KAS_PREFLIGHT',
          'KAS_INSTALL', 'KAS_DOCTOR', 'KAS_REBOOT', 'KAS_ROLLBACK', 'KAS_UNINSTALL')
 STATUSES = ('PASS', 'FAIL', 'BLOCKED', 'NOT_TESTED')
-CAPABILITIES = ('ndmc', 'dns_filter', 'opkg_kmod_netfilter', 'dns_tls_or_https',
+CAPABILITIES = ('ndmc', 'native_rci', 'dns_filter', 'opkg_kmod_netfilter', 'dns_tls_or_https',
                 'proxy_client', 'netfilter_mark', 'netfilter_connmark', 'tun',
                 'routing', 'ext4_opt', 'ram', 'zram', 'external_swap', 'clock',
                 'dns', 'local_http', 'package_mirror')
@@ -20,9 +21,9 @@ REASONS = {'unattempted', 'prerequisite_blocked', 'boot_stages_observed',
            'native_command_verified', 'execution_failed', 'component_absent', 'runtime_capability_unavailable',
            'native_installer_failed', 'native_doctor_failed', 'doctor_warning', 'verified_tls_source_failed',
            'native_remove_not_implemented', 'snapshot_gate_blocked', 'native_reboot_failed',
-           'native_rollback_failed', 'native_update_failed', 'idempotence_failed'}
-CHECKS = ('KAS_IDEMPOTENCE', 'KAS_UPDATE', 'KAS_FOREIGN_RESOURCES',
-          'KAS_UNINSTALL_SNAPSHOT', 'KAS_TRANSACTION_GATE', 'KAS_WAN_RESTART_GUARD')
+           'native_rollback_failed', 'native_update_failed', 'idempotence_failed', 'rollback_not_exercised'}
+CHECKS = ('KAS_IDEMPOTENCE', 'KAS_INSTALL_INTERRUPTION', 'KAS_UPDATE', 'KAS_FOREIGN_RESOURCES',
+          'KAS_UNINSTALL_SNAPSHOT', 'KAS_TRANSACTION_GATE', 'KAS_WAN_RESTART_GUARD', 'KAS_UNINSTALL_GUARD')
 
 
 class Evidence:
@@ -30,6 +31,20 @@ class Evidence:
         self.gates = {name: {'status': 'NOT_TESTED', 'reason': 'unattempted'} for name in GATES}
         self.capabilities = {name: {'status': 'NOT_TESTED', 'reason': 'unattempted'} for name in CAPABILITIES}
         self.checks = {}
+        self.references = {}
+        self.measurements = {}
+
+    def reference(self, name, value):
+        if name not in ('emulator_commit', 'kas_commit', 'qemu_source_commit', 'qemu_binary_sha256',
+                        'qemu_patches_sha256', 'firmware_sha256', 'keenboot_sha256',
+                        'entware_lock_sha256', 'kas_assets_lock_sha256') or not re.fullmatch(r'(?:[a-f0-9]{40}|[a-f0-9]{64})', value):
+            raise ValueError('invalid public source reference')
+        self.references[name] = value
+
+    def measurement(self, name, value):
+        if name not in ('doctor_ok', 'doctor_warn', 'doctor_fail') or not isinstance(value, int) or not 0 <= value <= 10000:
+            raise ValueError('invalid public measurement')
+        self.measurements[name] = value
 
     def check(self, name, status, reason):
         if name not in CHECKS or status not in STATUSES or reason not in REASONS:
@@ -49,15 +64,18 @@ class Evidence:
     def write(self, directory):
         out = Path(directory)
         out.mkdir(parents=True, exist_ok=True)
-        report = {'schema': 1, 'platform': 'WR3000P_PORTED_5_1_8_QEMU',
+        values = (*self.gates.values(), *self.checks.values())
+        outcome = 'FAIL' if any(v['status'] == 'FAIL' for v in values) else 'BLOCKED' if any(v['status'] != 'PASS' for v in values) else 'PASS'
+        report = {'schema': 1, 'platform': 'WR3000P_PORTED_5_1_8_QEMU', 'outcome': outcome,
                   'hardware_acceptance': 'NOT_TESTED', 'gates': self.gates,
-                  'capabilities': self.capabilities, 'checks': self.checks}
+                  'capabilities': self.capabilities, 'checks': self.checks,
+                  'references': self.references, 'measurements': self.measurements}
         (out / 'gates.json').write_text(json.dumps(report, indent=2) + '\n')
         results = {**self.gates, **self.checks}
         suite = ET.Element('testsuite', name='Ported Entware KAS', tests=str(len(results)),
                            failures=str(sum(v['status'] == 'FAIL' for v in results.values())),
                            skipped=str(sum(v['status'] in ('BLOCKED', 'NOT_TESTED') for v in results.values())))
-        lines = ['| Gate | Status | Evidence |', '|---|---|---|']
+        lines = ['Laboratory outcome: **' + outcome + '**', '', '| Gate | Status | Evidence |', '|---|---|---|']
         for name, value in results.items():
             case = ET.SubElement(suite, 'testcase', name=name)
             if value['status'] == 'FAIL':
@@ -69,4 +87,7 @@ class Evidence:
         lines += ['', '| Capability | Status | Evidence |', '|---|---|---|']
         lines += ['| %s | %s | %s |' % (name, value['status'], value['reason'])
                   for name, value in self.capabilities.items()]
+        if self.references:
+            lines += ['', '| Input | Immutable reference |', '|---|---|']
+            lines += ['| %s | `%s` |' % (name, value) for name, value in self.references.items()]
         (out / 'summary.md').write_text('\n'.join(lines) + '\n\nPhysical-router acceptance: NOT_TESTED.\n')

@@ -52,7 +52,9 @@ python3 -m lab.ported_e2e \
   --emulator-root /var/tmp/ported-assets/downloads/Router-Emulator \
   --nand-dir /var/tmp/ported-nand \
   --private-dir /var/tmp/ported-private \
-  --report-dir /var/tmp/ported-public
+  --report-dir /var/tmp/ported-public \
+  --kas-dir /path/to/keenetic-auto-setup \
+  --kas-ref 6dd6438e2b64bad0fe9205ab6575795f808dabd8
 ```
 
 `BOOT_READY` requires all eight ordered boot stages. `AUTH_READY` requires the
@@ -100,6 +102,12 @@ executed opkg version/architectures, all pinned installed packages and a writabl
 persistence marker. Reboot must preserve the marker, package versions and SSH
 host key. Merely copying a binary or constructing this disk is not E3 PASS.
 
+The bootstrap's lab SSH PID lives in native volatile `/var/run`, rather than
+persistent `/opt/var/run`. The original S51 script tests only whether that PID
+exists: after a reboot a stale PID can belong to an unrelated process and
+incorrectly suppress SSH startup. This transport-only configuration change
+does not change Mihomo or MagiTrickle service checks.
+
 ## Reports and limits
 
 Nine independent gates use PASS, FAIL, BLOCKED or NOT_TESTED. JUnit encodes
@@ -130,6 +138,87 @@ has no removal implementation: `uninstall.sh --remove/--purge` return code 3.
 Snapshot/transaction checks never grant removal authority. The lab must report
 that native contract as BLOCKED and must not substitute manual package removal
 or the fixture-only transaction rehearsal for actual uninstall/rollback.
+
+## Real KAS lifecycle and isolated delivery
+
+`kas_mirror.py` reads committed KAS blobs through `git archive`; it never executes
+candidate scripts on the host. The requested full SHA must equal checkout HEAD.
+`kas-assets.lock.json` pins the real Mihomo/MagiTrickle packages, repository helper,
+feed indexes and a complete upstream release API snapshot. These dependencies
+stay fixed while a KAS PR changes the actual scripts executed by native Entware.
+The native installer performs its ordinary package selection and validation.
+
+Only the four dependency domains are mapped to the isolated mirror. An ephemeral
+lab CA signs a certificate for their actual names; its public certificate enters
+the disposable guest trust store, while the private key stays on the host. Native
+curl uses normal certificate and hostname verification. The mirror serves only
+registered paths; it cannot proxy arbitrary Internet traffic. No public watchdog
+or VPN health target receives a fabricated successful response.
+
+KAS requires native HTTP/RCI at localhost:79 for live policy marks. The synthetic
+configuration enables `service http` on its private bridge, and preflight queries
+the real policy API. A lab init script restores actual host UTC through the local
+HTTP service after reboot, because QEMU has no accepted external NTP source here.
+
+The lifecycle runs the committed `install.sh disk`, verifies real package versions,
+one Mihomo and one `magitrickled`, private ownership records, actual Proxy upstream,
+`bypass_wa`, DNS interception, MARK/CONNMARK, installed source hashes and a real
+SOCKS request through Mihomo to local HTTP. It runs the real watchdog twice with
+WAN isolated, then the real Doctor with the same pinned source reference.
+
+Repeat installation compares persistent files, journal, Proxy and policy. A real
+TERM during another repeat install must release its real lifecycle lock, clean
+staging, preserve the live contract and allow a subsequent successful install.
+This handled-signal test does not establish power-loss or first-install atomicity.
+A real
+QEMU reset must restore the same contract without manually restarting services.
+The updater first completes a genuine same-version `--force` replacement. A
+second update receives TERM after its actual atomic commit; production rollback
+must restore binary and metadata hashes, configuration and live service. This is
+an update rollback test, not a claim of arbitrary interrupted-install recovery.
+
+Native snapshot creation/verification and transaction gate/prepare run before
+the uninstall guard. Fixture-only transaction rehearsal is excluded. A separate
+copy of the pre-install snapshot contains a disabled foreign Proxy0 and unrelated
+cron entry: installation, repeat, reboot and rejected removal must preserve them.
+Its result appears as `KAS_FOREIGN_RESOURCES`, separate from the clean profile.
+
+## GitHub execution and owner operation
+
+The workflow runs on laboratory changes and `workflow_dispatch`, and exposes
+`workflow_call` with full `emulator_ref` and `kas_ref` SHA inputs. The KAS caller
+pins the reusable workflow itself to an immutable emulator commit and passes the
+PR head SHA. Review the three public report files in the `ported-gates` artifact
+and the Actions job summary. Source and binary hashes are included in JSON.
+
+A green job means all attempted assertions, including an expected safe refusal,
+held. It does not override the JSON/JUnit outcome: unimplemented native removal
+remains `KAS_UNINSTALL=BLOCKED`, and the aggregate remains BLOCKED. Unexpected
+command failures or state changes fail the job. Doctor WARN is BLOCKED, never PASS.
+
+Merge order, when the owner authorizes it: boot-fix PR, laboratory PR, then KAS
+caller PR. Until merged, run the workflow on its feature branch. Once the caller
+is on the default branch, new KAS PRs trigger automatically while the owner's PC
+is off. Manual dispatch can test another full KAS SHA. Run it once on the default
+branch to seed its QEMU cache; subsequent PRs reuse the exact patch-series key.
+GitHub caches are repository/ref scoped, so the first KAS caller can require one
+AArch64 build even when Router Emulator already has a cache. No Windows/MIPS/PGO
+build or schedule is added. Normal GitHub-hosted runner access and Actions enabled
+in both public repositories suffice; no router credentials or PAT are required.
+
+## Acceptance still requiring separate evidence
+
+This is WR3000P Ported QEMU acceptance. Hardware reboot/power loss, Wi-Fi/radio,
+real USB wear/disconnect/fsck, switch offload, physical model compatibility,
+external NTP/DNS, Internet/VPN transport and real upstream failover remain
+NOT_TESTED. Native TUN creation is distinct from a working external VPN tunnel.
+External swap is NOT_TESTED; the observed native zRAM remains active.
+
+Useful next consumers are KeenWhite (native DNS/firewall ownership and persistence),
+WDTT (opt-in service lifecycle, loopback authentication, architecture and restart
+guards), and KNVR (storage/retention and daemon/resource recovery). Add their real
+packages and pinned local services as separate gates; this KAS result does not
+accept those projects automatically.
 
 No schedule is enabled. No changes to real routers, networks, VPS, main/stable,
 tags, releases or automatic merges are part of this laboratory.

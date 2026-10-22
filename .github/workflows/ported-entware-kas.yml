@@ -1,6 +1,14 @@
 name: Ported authenticated Entware KAS laboratory
 
 on:
+  workflow_call:
+    inputs:
+      emulator_ref:
+        type: string
+        required: true
+      kas_ref:
+        type: string
+        required: true
   workflow_dispatch:
   pull_request:
     paths:
@@ -18,10 +26,26 @@ concurrency:
 jobs:
   ported-lab:
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with:
+          repository: saymer-alt/router-emulator
+          ref: ${{ inputs.emulator_ref || github.sha }}
+          persist-credentials: false
+      - name: Validate immutable laboratory inputs
+        env:
+          EMULATOR_REF: ${{ inputs.emulator_ref || github.sha }}
+          KAS_REF: ${{ inputs.kas_ref || '6dd6438e2b64bad0fe9205ab6575795f808dabd8' }}
+        run: |
+          [[ "$EMULATOR_REF" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$KAS_REF" =~ ^[a-f0-9]{40}$ ]]
+      - name: Pinned KAS source as guest input
+        uses: actions/checkout@v4
+        with:
+          repository: saymer-alt/keenetic-auto-setup
+          ref: ${{ inputs.kas_ref || '6dd6438e2b64bad0fe9205ab6575795f808dabd8' }}
+          path: kas-source
           persist-credentials: false
       - name: Host tools and regression contracts
         run: |
@@ -41,6 +65,7 @@ jobs:
         run: bash lab/build_qemu.sh "$RUNNER_TEMP/ported-qemu"
       - name: Pinned emulator wrapper and evaluation firmware
         run: |
+          (cd "$RUNNER_TEMP/ported-qemu" && sha256sum -c qemu.sha256)
           bash lab/fetch_lab_assets.sh "$RUNNER_TEMP/ported-assets"
           cp "$RUNNER_TEMP/ported-qemu/qemu-system-aarch64" "$RUNNER_TEMP/ported-assets/downloads/Router-Emulator/qemu/qemu-system-aarch64"
       - name: OpenWrt regression with the same patched QEMU
@@ -65,7 +90,9 @@ jobs:
             --emulator-root "$RUNNER_TEMP/ported-assets/downloads/Router-Emulator" \
             --nand-dir "$RUNNER_TEMP/ported-nand" \
             --private-dir "$RUNNER_TEMP/ported-private" \
-            --report-dir "$RUNNER_TEMP/ported-public"
+            --report-dir "$RUNNER_TEMP/ported-public" \
+            --kas-dir "$GITHUB_WORKSPACE/kas-source" \
+            --kas-ref "${{ inputs.kas_ref || '6dd6438e2b64bad0fe9205ab6575795f808dabd8' }}"
       - name: Public fixed-label summary
         if: always()
         run: |

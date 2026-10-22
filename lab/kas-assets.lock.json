@@ -1,0 +1,52 @@
+{
+  "schema": 1,
+  "kas_sha": "6dd6438e2b64bad0fe9205ab6575795f808dabd8",
+  "uninstall_no_remove_sha256": "0a7cdbc368cb563b75cf6079aa0225818b615d8449e9a7c9e13abaaf3f2b0cfc",
+  "mihomo_version": "1.19.33-2",
+  "magitrickle_version": "0.8.2-1",
+  "assets": [
+    {
+      "url": "https://api.github.com/repos/saymer-alt/entware-go/releases/tags/latest",
+      "fetch_url": "https://api.github.com/repos/saymer-alt/entware-go/releases/tags/latest",
+      "filename": "entware-go-release.json",
+      "sha256": "85fcfa8332f6136c2f9f29fee4ea2f90c1e1e3ca4c61d8c2d9da18da71b31fe6",
+      "fixture": "fixtures/entware-go-release.json"
+    },
+    {
+      "url": "https://github.com/saymer-alt/entware-go/releases/download/latest/mihomo_1.19.33-2_aarch64-3.10.ipk",
+      "fetch_url": "https://github.com/saymer-alt/entware-go/releases/download/latest/mihomo_1.19.33-2_aarch64-3.10.ipk",
+      "filename": "mihomo_1.19.33-2_aarch64-3.10.ipk",
+      "sha256": "2b1ae771e400dd7a4c8d6924e0fa592026b08eb2fde8ccd99803df15a2a66e4b"
+    },
+    {
+      "url": "https://bin.magitrickle.dev/packages/add_repo.sh",
+      "fetch_url": "https://bin.magitrickle.dev/packages/add_repo.sh",
+      "filename": "magitrickle-add-repo.sh",
+      "sha256": "23a3a5ed92da77b79a2795ad16a7769787e8c5121023599f07c3bfcd58a9e766"
+    },
+    {
+      "url": "http://bin.magitrickle.dev/packages/entware/aarch64-3.10/Packages.gz",
+      "fetch_url": "https://bin.magitrickle.dev/packages/entware/aarch64-3.10/Packages.gz",
+      "filename": "magitrickle-aarch64-Packages.gz",
+      "sha256": "dc90d339cc5ea695a835009ff862370e25196663a5119308763d543503cdebc0"
+    },
+    {
+      "url": "http://bin.magitrickle.dev/packages/entware/aarch64-3.10/magitrickle_0.8.2-1_entware_aarch64-3.10.ipk",
+      "fetch_url": "https://bin.magitrickle.dev/packages/entware/aarch64-3.10/magitrickle_0.8.2-1_entware_aarch64-3.10.ipk",
+      "filename": "magitrickle_0.8.2-1_entware_aarch64-3.10.ipk",
+      "sha256": "82a6090c9d0162a2459723d1be306fec9576c46ee49ac2a46f2fa2662e14c1f2"
+    },
+    {
+      "url": "http://bin.magitrickle.dev/packages/entware/aarch64-3.10_kn/Packages.gz",
+      "fetch_url": "https://bin.magitrickle.dev/packages/entware/aarch64-3.10_kn/Packages.gz",
+      "filename": "magitrickle-aarch64-kn-Packages.gz",
+      "sha256": "1533cb2ee10f97ba51939915e2e78c2f4ca8bc88a50d754319fc502189c444f0"
+    },
+    {
+      "url": "http://bin.magitrickle.dev/packages/entware/aarch64-3.10_kn/magitrickle_0.8.2-1_entware_aarch64-3.10_kn.ipk",
+      "fetch_url": "https://bin.magitrickle.dev/packages/entware/aarch64-3.10_kn/magitrickle_0.8.2-1_entware_aarch64-3.10_kn.ipk",
+      "filename": "magitrickle_0.8.2-1_entware_aarch64-3.10_kn.ipk",
+      "sha256": "9ae3df3c33f8c836aa1adc34f79c5de4fd620dee5da96cef26015b0cec186c9b"
+    }
+  ]
+}

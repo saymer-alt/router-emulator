@@ -31,6 +31,7 @@ def entware_config():
                    'interface Bridge0\n    include GigabitEthernet0/Vlan1\n'
                    '    mac address 02:00:00:00:01:01\n    security-level private\n'
                    '    ip address 192.168.1.1 255.255.255.0\n    up\n!\n'
+                   'ip http security-level private\nservice http\n'
                    'opkg disk KASOPT:/\n')
 
 

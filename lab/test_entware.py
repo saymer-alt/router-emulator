@@ -14,6 +14,7 @@ class EntwareTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             source, target = pathlib.Path(td) / 'source.tar.gz', pathlib.Path(td) / 'target.tar.gz'
             members = {'etc/dropbear/dropbear_rsa_host_key': b'public-reused-private-key',
+                       'etc/config/dropbear.conf': b'PORT=222\nPIDFILE="/opt/var/run/dropbear.pid"\n',
                        'etc/opkg.conf': b'upstream-feed',
                        'bin/install': b'/opt/etc/init.d/S51dropbear start\nif grep -q "222"; then\necho default-secret\nfi\n'}
             with tarfile.open(source, 'w:gz') as archive:
@@ -35,6 +36,9 @@ class EntwareTests(unittest.TestCase):
                 config = archive.extractfile('etc/opkg.conf').read()
                 self.assertIn(b'http://192.168.1.100/entware', config)
                 self.assertNotIn(b'check_signature 0', config)
+                ssh = archive.extractfile('etc/config/dropbear.conf').read()
+                self.assertIn(b'PIDFILE="/var/run/lab-dropbear.pid"', ssh)
+                self.assertNotIn(b'/opt/var/run', ssh)
 
     def test_cached_asset_digest_and_origin_are_enforced(self):
         with tempfile.TemporaryDirectory() as td:

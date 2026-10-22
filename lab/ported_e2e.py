@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """Isolated Ported laboratory controller; all guest assets remain private."""
 import argparse
+from contextlib import ExitStack
+import hashlib
 import json
 import os
 from pathlib import Path
 import shutil
+import subprocess
 import time
 from types import SimpleNamespace
 
@@ -49,11 +52,19 @@ def run_entware(args, private, credentials, coldboot, evidence):
     nand = private / 'entware-nand'
     shutil.copytree(args.nand_dir, nand)
     files = [next(nand.glob('mt7981.mtd%d.*.bin' % n)) for n in range(6)]
+    for path in files:
+        os.chmod(path, 0o600)
     secret = json.loads(credentials.read_text())
     write_at(files, CONFIG_OFFSET, config_image(synthetic_config(secret['username'], secret['password'], entware_config())))
     image, mirror = private / 'opt.img', private / 'mirror'
     build(image, mirror, private / 'cache', credentials)
-    add_packages(mirror, private / 'cache', Path(__file__).with_name('kas-packages.lock.json'))
+    if args.stage != 'entware':
+        add_packages(mirror, private / 'cache', Path(__file__).with_name('kas-packages.lock.json'))
+    tls = None
+    if args.stage == 'kas':
+        from lab.kas_mirror import KASMirror
+        tls = KASMirror(args.kas_dir, args.kas_ref, private, private / 'cache')
+    completed = {'ok': True}
     steps = coldboot + [wait('Core::Server: system ready', 240),
         {'action': 'wait_serial', 'pattern': r'\[5/5\] "Entware" installed!',
          'reject_pattern': 'Critical error:|Please use ext2/ext3/ext4', 'timeout_sec': 600}]
@@ -75,31 +86,45 @@ def run_entware(args, private, credentials, coldboot, evidence):
             guest.entware(marker)
             evidence.set('ENTWARE_READY', 'PASS', 'ext4_opkg_abi_and_reboot')
             print('ENTWARE: authenticated SSH, filesystem and packages survived reset', flush=True)
+            if args.stage == 'entware':
+                return
             phase['name'] = 'KAS_PREFLIGHT'
             evidence.set('KAS_PREFLIGHT', 'NOT_TESTED', 'unattempted')
             guest.command('opkg update && opkg install ca-bundle curl jq iptables ip-full nano cron socat', timeout=240)
             guest.command('/bin/ndmc -c "system configuration save"; sync')
             context['snapshot'](private / 'prepared-entware')
             from lab.preflight import verify
-            if verify(guest, evidence):
-                print('KAS PREFLIGHT: native runtime capabilities verified', flush=True)
-            else:
+            if not verify(guest, evidence):
                 print('KAS PREFLIGHT: BLOCKED by an actual capability probe', flush=True)
+                completed['ok'] = False
+                return
+            print('KAS PREFLIGHT: native runtime capabilities verified', flush=True)
+            if args.stage == 'kas':
+                from lab.kas_lifecycle import lifecycle
+                completed['ok'] = lifecycle(guest, tls, args.kas_ref, evidence, context, private, phase)
         finally:
             guest.close()
 
-    with Mirror(mirror) as port:
+    with ExitStack() as stack:
+        tls_port = stack.enter_context(tls) if tls else None
+        port = stack.enter_context(Mirror(mirror, tls.http_routes if tls else None))
         result = run(SimpleNamespace(scenario=scenario, emulator_root=args.emulator_root,
-            nand_dir=nand, output_dir=private / 'entware-uart', max_seconds=1500,
+            nand_dir=nand, output_dir=private / 'entware-uart', max_seconds=2400,
             preset='cudy-wr3000p-v1', lan_forwards='8080:80;8022:222',
-            opt_image=image, mirror_port=port, after_scenario=probes))
+            opt_image=image, mirror_port=port, mirror_tls_port=tls_port, after_scenario=probes))
+        if result == 0 and completed['ok'] and args.stage == 'kas':
+            # A separate copy of the pre-install snapshot exercises collision
+            # handling without changing the clean profile's nine gate results.
+            from lab.kas_lifecycle import foreign_profile
+            completed['ok'] = foreign_profile(args, private, credentials, coldboot,
+                                              tls, port, tls_port, evidence)
     if evidence.gates['ENTWARE_READY']['status'] != 'PASS':
         evidence.set('ENTWARE_READY', 'FAIL', 'entware_install_failed')
         return 1
     if result != 0:
         phase_failure(evidence, phase['name'])
         return 1
-    return 0
+    return 0 if completed['ok'] else 1
 
 
 def main():
@@ -108,13 +133,29 @@ def main():
     parser.add_argument('--nand-dir', required=True)
     parser.add_argument('--private-dir', required=True)
     parser.add_argument('--report-dir', required=True)
+    parser.add_argument('--stage', choices=('entware', 'preflight', 'kas'), default='kas')
+    parser.add_argument('--kas-dir')
+    parser.add_argument('--kas-ref', default='6dd6438e2b64bad0fe9205ab6575795f808dabd8')
     args = parser.parse_args()
+    if args.stage == 'kas' and not args.kas_dir:
+        parser.error('--kas-dir is required for actual KAS execution')
     private = Path(args.private_dir).resolve()
     if private.exists():
         parser.error('private workspace must be new')
     private.mkdir(parents=True, mode=0o700)
     os.umask(0o077)
     evidence = Evidence()
+    repo = Path(__file__).parent.parent
+    evidence.reference('emulator_commit', subprocess.check_output(['git', '-C', str(repo), 'rev-parse', 'HEAD']).decode().strip())
+    evidence.reference('qemu_source_commit', 'f8b2f64e2336a28bf0d50b6ef8a7d8c013e9bcf3')
+    evidence.reference('qemu_binary_sha256', hashlib.sha256((Path(args.emulator_root) / 'qemu/qemu-system-aarch64').read_bytes()).hexdigest())
+    evidence.reference('qemu_patches_sha256', hashlib.sha256(b''.join(p.read_bytes() for p in sorted((repo / 'qemu-patches').glob('*.patch')))).hexdigest())
+    evidence.reference('firmware_sha256', '710e4a37b1aa9f3a65a5122edd0650f5c5ad3e6eca5df53b11ac28aab2664eb7')
+    evidence.reference('keenboot_sha256', '8b8615b345d912187853fea6bef6b1868760fd52ed92ba7c3a380ad5533cbf08')
+    for name, filename in (('entware_lock_sha256', 'entware.lock.json'), ('kas_assets_lock_sha256', 'kas-assets.lock.json')):
+        evidence.reference(name, hashlib.sha256(Path(__file__).with_name(filename).read_bytes()).hexdigest())
+    if args.stage == 'kas':
+        evidence.reference('kas_commit', args.kas_ref)
     try:
         nand = private / 'nand'
         shutil.copytree(args.nand_dir, nand)
@@ -148,7 +189,12 @@ def main():
         if evidence.gates['BOOT_READY']['status'] != 'PASS':
             evidence.set('BOOT_READY', 'FAIL', 'runner_failure')
         elif evidence.gates['AUTH_READY']['status'] == 'PASS':
-            evidence.set('ENTWARE_READY', 'FAIL', 'runner_failure')
+            attempted = next((name for name in tuple(evidence.gates)[2:]
+                              if evidence.gates[name]['status'] == 'NOT_TESTED'), None)
+            if attempted:
+                evidence.set(attempted, 'FAIL', 'runner_failure')
+            elif evidence.gates['ENTWARE_READY']['status'] != 'PASS':
+                evidence.set('ENTWARE_READY', 'FAIL', 'runner_failure')
         return 1
     finally:
         evidence.write(args.report_dir)

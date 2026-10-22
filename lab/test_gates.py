@@ -7,6 +7,22 @@ from lab.gates import Evidence
 
 
 class GateTests(unittest.TestCase):
+    def test_expected_uninstall_refusal_keeps_aggregate_blocked(self):
+        evidence = Evidence()
+        for name in evidence.gates:
+            evidence.set(name, 'PASS', 'native_command_verified')
+        evidence.set('KAS_UNINSTALL', 'BLOCKED', 'native_remove_not_implemented')
+        evidence.check('KAS_UNINSTALL_GUARD', 'PASS', 'native_command_verified')
+        with self.assertRaises(ValueError):
+            evidence.reference('kas_commit', 'private secret')
+        with tempfile.TemporaryDirectory() as directory:
+            evidence.write(directory)
+            report = json.loads((Path(directory) / 'gates.json').read_text())
+            self.assertEqual(report['outcome'], 'BLOCKED')
+            root = ET.parse(Path(directory) / 'junit.xml').getroot()
+            self.assertEqual(len(root.findall('testcase/failure')), 0)
+            self.assertEqual(len(root.findall('testcase/skipped')), 1)
+
     def test_boot_pass_never_implies_auth_or_entware(self):
         evidence = Evidence()
         evidence.set('BOOT_READY', 'PASS', 'boot_stages_observed')
