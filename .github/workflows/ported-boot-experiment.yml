@@ -98,6 +98,37 @@ jobs:
           else
             echo 'BLOCKED: candidate creation or QEMU launch did not produce report'
           fi
+          python3 - "$RUNNER_TEMP/ported-proof/console" <<'PY'
+          import re,sys
+          from pathlib import Path
+          console=Path(sys.argv[1])
+          items=sorted(console.glob('console_*.log')) if console.is_dir() else []
+          if items:
+              data=items[-1].read_bytes()[-2500000:].decode('utf-8','replace')
+              marks=[
+                  ('KeenBOOT_brand',r'KeenBOOT'),
+                  ('U_Boot',r'U-Boot'),
+                  ('BL31',r'BL31'),
+                  ('Linux_version',r'Linux version'),
+                  ('Starting_kernel',r'Starting kernel'),
+                  ('Autoboot_prompt',r'Hit any key to stop autoboot'),
+                  ('U_Boot_command_prompt',r'(?m)^\s*(?:=>|MT7981[^\n]{0,35}>|KeenBOOT[^\n]{0,35}>)'),
+                  ('Reading_NAND',r'(?i)(nand read|reading.*nand|spi.nand)'),
+                  ('UBI_attach',r'(?i)(ubi: attaching|ubi0:|UBI device)'),
+                  ('UBI_error',r'(?i)(no ubi|ubi.*error|ubi.*failed|invalid.*ubi)'),
+                  ('Bad_Magic',r'(?i)(bad magic|wrong image format|bad FIT|invalid FIT)'),
+                  ('Missing_Image',r'(?i)(no such.*image|no valid image|image.*not found|boot.*failed)'),
+                  ('NMBM',r'NMBM'),
+                  ('NAND_ECC',r'(?i)(ecc error|nand.*bad block|ecc uncorrectable)'),
+                  ('TFTP_request',r'(?i)(tftp.*request|tftpboot)'),
+                  ('Bootdelay',r'(?i)(bootdelay|bootcmd|autoboot)'),
+              ]
+              print('SAFE UART MARKER REPORT (pattern presence only; zero raw guest text):')
+              for label,pattern in marks:
+                  print('  '+label+': '+('YES' if re.search(pattern,data) else 'no'))
+          else:
+              print('SAFE UART MARKER REPORT: no local UART log available')
+          PY
 
       - name: Remove ALL Ported assets on ephemeral runner (no artifact upload)
         if: always()
