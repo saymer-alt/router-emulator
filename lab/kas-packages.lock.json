@@ -404,6 +404,25 @@
       "Description": " HTTP/2 C Library",
       "feed": "entware",
       "url": "https://bin.entware.net/aarch64-k3.10/libnghttp2_1.66.0-1_aarch64-3.10.ipk"
+    },
+    {
+      "Package": "gzip",
+      "Version": "1.14-1",
+      "Depends": "libc, libssp, librt, libpthread",
+      "Provides": "gzip-any",
+      "Alternatives": "300:/opt/bin/gunzip:/opt/libexec/gunzip-gnu, 300:/opt/bin/gzip:/opt/libexec/gzip-gnu, 300:/opt/bin/zcat:/opt/libexec/zcat-gnu",
+      "License": "GPL-3.0-or-later",
+      "Section": "utils",
+      "URL": "https://www.gnu.org/software/gzip/",
+      "CPE-ID": "cpe:/a:gnu:gzip",
+      "Architecture": "aarch64-3.10",
+      "Installed-Size": "102400",
+      "Filename": "gzip_1.14-1_aarch64-3.10.ipk",
+      "Size": "55607",
+      "SHA256sum": "2dc64aa9448b27d2d0b20cd78634e15d810525bd6a866094deba82878408c802",
+      "Description": " gzip (GNU zip) is a compression utility designed to be a replacement for compress.",
+      "feed": "entware",
+      "url": "https://bin.entware.net/aarch64-k3.10/gzip_1.14-1_aarch64-3.10.ipk"
     }
   ]
 }

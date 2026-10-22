@@ -138,6 +138,10 @@ has no removal implementation: `uninstall.sh --remove/--purge` return code 3.
 Snapshot/transaction checks never grant removal authority. The lab must report
 that native contract as BLOCKED and must not substitute manual package removal
 or the fixture-only transaction rehearsal for actual uninstall/rollback.
+The real native transaction gate additionally rejects this Ported profile's
+`ip global 32767`: its narrow accepted Proxy0 profile allows `ip global 350`.
+The laboratory preserves that rejection rather than changing the router's
+generated directive or widening the production uninstall allowlist.
 
 ## Real KAS lifecycle and isolated delivery
 
