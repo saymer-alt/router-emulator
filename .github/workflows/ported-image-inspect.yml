@@ -1,0 +1,57 @@
+# Inspection only: no flashing, no emulation and no redistributing firmware.
+# This is an explicitly experimental user-requested evaluation of the format.
+name: Ported WR3000P - firmware format inspection
+
+on:
+  pull_request:
+    paths:
+      - "lab/inspect_ported_image.py"
+      - ".github/workflows/ported-image-inspect.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  image-layout:
+    name: Inspect Ported WR3000P firmware 5.1.8
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download from project public archive and authenticate checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/ported"
+          cd "$RUNNER_TEMP/ported"
+          curl --fail --location --retry 2 --connect-timeout 10 --max-time 240 \
+            -o firmware.bin \
+            'https://osvault.project-athens.com/osvault/Cudy%20WR3000P/Cudy_WR3000P_5.1.8.bin'
+          echo 'c23c38f8abdb3b61a599d9b13ca88e23  firmware.bin' | md5sum -c -
+          python3 "$GITHUB_WORKSPACE/lab/inspect_ported_image.py" firmware.bin
+
+      - name: Inspect WR3000P installer archive manifest (filenames only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/ported"
+          curl --fail --location --retry 2 --connect-timeout 10 --max-time 240 \
+            -o installer.7z \
+            'https://osvault.project-athens.com/files/firmware/Cudy_WR3000P.7z'
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends p7zip-full >/dev/null
+          echo "Installer archive metadata (listing only, no extraction, no artifact upload):"
+          7z l -slt installer.7z | awk '
+            /^Path = / {p=$0; sub(/^Path = /,"",p); next}
+            /^Size = / {s=$0; sub(/^Size = /,"",s); if(p!=""){print p " | " s " bytes"; p=""}}
+          ' | head -70
+          python3 "$GITHUB_WORKSPACE/lab/inspect_ported_image.py" installer.7z
+
+      - name: Explicitly remove firmware from runner
+        if: always()
+        shell: bash
+        run: |
+          rm -rf "$RUNNER_TEMP/ported"
+          echo "No firmware, NAND, flash, passwords, keys or raw serial logs are uploaded."
