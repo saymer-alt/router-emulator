@@ -1,0 +1,39 @@
+{
+  "name": "Keenetic Ported MT7621 experimental boot (LOCAL IMAGE ONLY)",
+  "evidence": "KEENETIC_PORTED_EXPERIMENTAL",
+  "steps": [
+    {
+      "action": "wait_serial",
+      "pattern": "U-Boot|Breed|KeenBOOT",
+      "timeout_sec": 180
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Linux version",
+      "timeout_sec": 480
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "KeeneticOS|NDMS|ndm:",
+      "timeout_sec": 480
+    },
+    {
+      "action": "reset"
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "U-Boot|Breed|KeenBOOT",
+      "timeout_sec": 240
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Linux version",
+      "timeout_sec": 480
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "KeeneticOS|NDMS|ndm:",
+      "timeout_sec": 480
+    }
+  ]
+}
