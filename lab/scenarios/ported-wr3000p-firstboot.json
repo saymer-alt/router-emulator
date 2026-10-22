@@ -1,0 +1,31 @@
+{
+  "name": "Keenetic Ported WR3000P cold boot investigation",
+  "evidence": "KEENETIC_PORTED_EXPERIMENTAL",
+  "steps": [
+    {
+      "action": "wait_serial",
+      "pattern": "BL2:",
+      "timeout_sec": 100
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "NOTICE:.*BL31|BL31:",
+      "timeout_sec": 150
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "KeenBOOT|U-Boot",
+      "timeout_sec": 220
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Starting kernel|Linux version",
+      "timeout_sec": 300
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Keenetic|NDMS|ndm",
+      "timeout_sec": 300
+    }
+  ]
+}
