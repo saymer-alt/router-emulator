@@ -20,7 +20,7 @@
     {
       "action": "wait_serial",
       "pattern": "Starting kernel|Linux version",
-      "timeout_sec": 300
+      "timeout_sec": 90
     },
     {
       "action": "wait_serial",
