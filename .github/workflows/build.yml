@@ -28,9 +28,9 @@ name: Build/release
 
 on:
   push:
-    paths-ignore: ['**.md', 'lab/**', '.github/workflows/keenetic-lab.yml', '.github/workflows/build.yml']
+    paths-ignore: ['**.md', 'lab/**', '.github/workflows/keenetic-lab.yml', '.github/workflows/ported-boot-experiment.yml', '.github/workflows/build.yml']
   pull_request:
-    paths-ignore: ['**.md', 'lab/**', '.github/workflows/keenetic-lab.yml', '.github/workflows/build.yml']
+    paths-ignore: ['**.md', 'lab/**', '.github/workflows/keenetic-lab.yml', '.github/workflows/ported-boot-experiment.yml', '.github/workflows/build.yml']
   workflow_dispatch:
 
 permissions:
