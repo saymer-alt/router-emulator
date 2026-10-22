@@ -60,10 +60,15 @@ def load_scenario(path):
     return data
 
 
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None  # Never leave localhost via HTTP redirect.
+
+
 def probe_local_http(step):
     # Explicitly bypass proxy environment variables: never turn an HTTP probe
     # into a network request through a CI runner's configured proxy.
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
     req = urllib.request.Request(step["url"], headers={"User-Agent": "router-emulator-lab/1"})
     try:
         with opener.open(req, timeout=3) as response:
@@ -177,10 +182,14 @@ def run(args):
                     if new:
                         cursor += len(new)
                         pending = (pending + new)[-1048576:]
-                        if rx.search(pending):
+                        match = rx.search(pending)
+                        if match:
+                            # Preserve bytes after the match for the next step;
+                            # boot messages can arrive in a single log write.
+                            cursor = cursor - len(pending) + match.end()
                             return
             time.sleep(0.25)
-        raise TimeoutError("serial pattern did not appear: %s" % pattern)
+        raise TimeoutError("serial marker not reached")
 
     def ensure_serial():
         nonlocal conn
