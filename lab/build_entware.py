@@ -51,12 +51,6 @@ def bootstrap_archive(source, destination, password):
             if name.startswith("etc/dropbear/dropbear_") and name.endswith("_host_key"):
                 continue  # never reuse keys from the public installer archive
             data = original.extractfile(member).read() if member.isfile() else None
-            if name == "etc/config/dropbear.conf":
-                # External /opt persists PID files across resets. The stock
-                # script accepts any live PID as Dropbear, so a recycled PID
-                # can suppress lab SSH. Keep only this lab transport PID in
-                # native volatile /var/run; do not alter KAS service checks.
-                data = b'PORT=222\nPIDFILE="/var/run/lab-dropbear.pid"\n'
             if name == "etc/opkg.conf":
                 data = ("src/gz entware " + MIRROR + "/entware\n"
                         "src/gz keendev " + MIRROR + "/keenetic\n"
@@ -68,7 +62,11 @@ def bootstrap_archive(source, destination, password):
                 if text.count(needle) != 1:
                     raise ValueError("unexpected native Entware bootstrap")
                 text = text.replace(needle, "cat /opt/etc/.lab-passwd > /opt/etc/passwd\n"
-                                    "chmod 600 /opt/etc/passwd\nrm -f /opt/etc/.lab-passwd\n" + needle)
+                                    "chmod 600 /opt/etc/passwd\nrm -f /opt/etc/.lab-passwd\n"
+                                    # The source archive has no Dropbear config:
+                                    # opkg creates it earlier in bin/install.
+                                    # Set the lab transport PID only afterwards.
+                                    "printf '%s\\n' 'PORT=222' 'PIDFILE=\"/var/run/lab-dropbear.pid\"' > /opt/etc/config/dropbear.conf\n" + needle)
                 start = text.index('if grep -q "222"')
                 end = text.index("\nfi", start) + 3
                 text = text[:start] + "echo 'Lab SSH uses private per-run credentials.'" + text[end:]

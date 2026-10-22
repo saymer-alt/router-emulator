@@ -109,6 +109,9 @@ class Guest:
         return data
 
     def entware(self, marker=None):
+        ssh = self.command('cat /opt/etc/config/dropbear.conf')
+        if ssh != 'PORT=222\nPIDFILE="/var/run/lab-dropbear.pid"':
+            raise RuntimeError('lab SSH configuration is not reboot-safe')
         if self.command('uname -m') != 'aarch64':
             raise RuntimeError('guest ABI mismatch')
         if self.command('/bin/sh -c "id -u"') != '0':
