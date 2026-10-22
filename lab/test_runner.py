@@ -12,6 +12,19 @@ from lab import run as runner
 
 
 class LabRunnerTests(unittest.TestCase):
+    def test_private_credential_is_resolved_only_at_send(self):
+        step = {"credential": "password"}
+        self.assertEqual(runner.serial_payload(step, {"password": "runtime-only"}), b"runtime-only\r")
+        with self.assertRaises(ValueError):
+            runner.serial_payload(step)
+
+    def test_reject_ambiguous_or_arbitrary_credential(self):
+        with tempfile.TemporaryDirectory() as td:
+            for step in ({"action": "send_serial", "text": "x", "credential": "password"},
+                         {"action": "send_serial", "credential": "host_token"}):
+                with self.assertRaises(ValueError):
+                    runner.load_scenario(self.scenario(Path(td), step))
+
     def test_serial_menu_key_does_not_submit_default(self):
         self.assertEqual(runner.serial_payload({"text": "0", "enter": False}), b"0")
         self.assertEqual(runner.serial_payload({"text": "version"}), b"version\r")

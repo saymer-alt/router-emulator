@@ -53,10 +53,15 @@ def load_scenario(path):
             statuses = step.get("statuses", [200])
             if not isinstance(statuses, list) or not statuses or not all(isinstance(x, int) for x in statuses):
                 raise ValueError("step %d: statuses must be a nonempty list of codes" % index)
-        if action == "send_serial" and ("\n" in step["text"] or "\r" in step["text"]):
-            raise ValueError("step %d: one console command per step" % index)
-        if action == "send_serial" and not isinstance(step.get("enter", True), bool):
-            raise ValueError("step %d: enter must be boolean" % index)
+        if action == "send_serial":
+            if ("text" in step) == ("credential" in step):
+                raise ValueError("step %d: specify text or private credential, exclusively" % index)
+            if "text" in step and ("\n" in step["text"] or "\r" in step["text"]):
+                raise ValueError("step %d: one console command per step" % index)
+            if "credential" in step and step["credential"] not in ("username", "password"):
+                raise ValueError("step %d: unsupported credential field" % index)
+            if not isinstance(step.get("enter", True), bool):
+                raise ValueError("step %d: enter must be boolean" % index)
         if action in ("sleep", "wait_serial", "probe_http"):
             if float(step.get("seconds" if action == "sleep" else "timeout_sec", 0)) <= 0:
                 raise ValueError("step %d: positive timeout/seconds required" % index)
@@ -92,8 +97,14 @@ def send_monitor(path, text):
         sock.sendall(text.encode() + b"\n")
 
 
-def serial_payload(step):
-    return step["text"].encode() + (b"\r" if step.get("enter", True) else b"")
+def serial_payload(step, credentials=None):
+    if "credential" in step:
+        if credentials is None:
+            raise ValueError("private credentials required")
+        text = credentials[step["credential"]]
+    else:
+        text = step["text"]
+    return text.encode() + (b"\r" if step.get("enter", True) else b"")
 
 
 def drain_serial(reader):
@@ -110,6 +121,7 @@ def drain_serial(reader):
 
 def write_report(out, scenario, steps, outcome, reason, elapsed):
     out.mkdir(parents=True, exist_ok=True)
+    os.chmod(out, 0o700)
     report = {
         "scenario": scenario["name"],
         "evidence": scenario["evidence"],
@@ -135,6 +147,18 @@ def write_report(out, scenario, steps, outcome, reason, elapsed):
 
 def run(args):
     scenario = load_scenario(args.scenario)
+    credentials = None
+    if getattr(args, "credentials_file", None):
+        cp = Path(args.credentials_file)
+        if cp.is_symlink() or not cp.is_file():
+            raise ValueError("invalid private credentials file")
+        if os.name == "posix" and cp.stat().st_mode & 0o077:
+            raise ValueError("credentials file must be private (0600)")
+        credentials = json.loads(cp.read_text(encoding="utf8"))
+        if (not isinstance(credentials, dict)
+                or not re.fullmatch(r"[a-z][a-z0-9_-]{2,30}", credentials.get("username", ""))
+                or not re.fullmatch(r"[A-Za-z0-9_-]{24,128}", credentials.get("password", ""))):
+            raise ValueError("invalid lab credential format")
     root = Path(args.emulator_root).resolve()
     source = Path(args.nand_dir).resolve()
     if not (root / "emulator.sh").is_file():
@@ -240,8 +264,29 @@ def run(args):
             "-S", str(serial), "-m", str(monitor), "-L", str(logdir),
             "-o", "lan-forwards=%s" % args.lan_forwards,
         ]
+        if getattr(args, "opt_image", None):
+            source_opt = Path(args.opt_image)
+            if source_opt.is_symlink() or not source_opt.is_file() or source_opt.suffix != ".img":
+                raise ValueError("USB input must be a regular .img file")
+            source_opt = source_opt.resolve()
+            opt_copy = work / "opt.img"
+            shutil.copyfile(source_opt, opt_copy)
+            command += ["--", "-drive", "if=none,id=labopt,format=raw,file=" + str(opt_copy),
+                        "-device", "usb-storage,drive=labopt"]
+        env = os.environ.copy()
+        # Caller environment cannot silently add an external slirp tunnel.
+        env.pop("WAN_EXTRA", None)
+        env.pop("LAN_EXTRA", None)
+        if getattr(args, "mirror_port", None):
+            # A single explicit guest-to-loopback mapping. Both slirp networks
+            # remain restrict=on; no arbitrary WAN or host filesystem access.
+            port = int(args.mirror_port)
+            if not 1024 <= port <= 65535:
+                raise ValueError("invalid loopback mirror port")
+            env["LAN_EXTRA"] = ",guestfwd=tcp:192.168.1.100:80-cmd:socat STDIO TCP4:127.0.0.1:%d" % port
         proc = subprocess.Popen(command, cwd=root, stdout=app_fd,
-                                stderr=subprocess.STDOUT, start_new_session=True)
+                                stderr=subprocess.STDOUT, start_new_session=True, env=env,
+                                umask=0o077)
         if any(step["action"] == "send_serial" for step in scenario["steps"]):
             ensure_serial()
         for index, step in enumerate(scenario["steps"], 1):
@@ -266,7 +311,7 @@ def run(args):
                 elif action == "send_serial":
                     if conn is None:
                         ensure_serial()
-                    conn.sendall(serial_payload(step))
+                    conn.sendall(serial_payload(step, credentials))
                 elif action == "reset":
                     # Mark the log EOF BEFORE reset, so BL2 from first boot
                     # cannot be mistaken for a second boot.
@@ -291,6 +336,10 @@ def run(args):
                              "reason": reason})
                 failure = reason
                 break
+        if failure is None and getattr(args, "after_scenario", None):
+            # Trusted Python controller hook, never loaded from scenario data.
+            # Used for authenticated guest probes while the disposable VM lives.
+            args.after_scenario(monitor=monitor, console_dir=logdir)
     except Exception as error:
         failure = "%s: setup or emulator start failed" % type(error).__name__
         rows.append({"action": "setup", "outcome": "FAIL",
@@ -328,6 +377,9 @@ def main():
     ap.add_argument("--output-dir", required=True)
     ap.add_argument("--lan-forwards", default="8080:80;8443:443;8022:22")
     ap.add_argument("--max-seconds", type=int, default=1200)
+    ap.add_argument("--credentials-file", help="private runtime credentials; never included in reports")
+    ap.add_argument("--opt-image", help="disposable copy of a raw USB storage image")
+    ap.add_argument("--mirror-port", type=int, help="explicit loopback-only package mirror port")
     opts = ap.parse_args()
     if opts.max_seconds <= 0:
         ap.error("--max-seconds must be positive")

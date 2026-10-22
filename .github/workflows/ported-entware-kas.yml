@@ -1,0 +1,68 @@
+name: Ported authenticated Entware KAS laboratory
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'lab/**'
+      - '.github/workflows/ported-entware-kas.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ported-lab-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ported-lab:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Host tools and regression contracts
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends mtd-utils unzip socat curl wget python3 python3-paramiko e2fsprogs openssl
+          python3 -m unittest discover -s lab -p 'test*.py' -v
+      - name: Pinned emulator and evaluation firmware (no QEMU rebuild)
+        run: bash lab/fetch_lab_assets.sh "$RUNNER_TEMP/ported-assets"
+      - name: Disposable NAND
+        run: |
+          python3 -m lab.prepare_ported_wr3000p \
+            --stock-nand "$RUNNER_TEMP/ported-assets/downloads/Router-Emulator/nand-wr3000p" \
+            --ported "$RUNNER_TEMP/ported-assets/downloads/ported.bin" \
+            --keenboot "$RUNNER_TEMP/ported-assets/downloads/keenboot.bin" \
+            --out "$RUNNER_TEMP/ported-nand"
+      - name: Execute independent gates
+        run: |
+          python3 -m lab.ported_e2e \
+            --emulator-root "$RUNNER_TEMP/ported-assets/downloads/Router-Emulator" \
+            --nand-dir "$RUNNER_TEMP/ported-nand" \
+            --private-dir "$RUNNER_TEMP/ported-private" \
+            --report-dir "$RUNNER_TEMP/ported-public"
+      - name: Public fixed-label summary
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/ported-public/summary.md" ]; then
+            cat "$RUNNER_TEMP/ported-public/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'BLOCKED: host preparation did not produce gate evidence.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Publish sanitized evidence only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ported-gates
+          path: |
+            ${{ runner.temp }}/ported-public/gates.json
+            ${{ runner.temp }}/ported-public/junit.xml
+            ${{ runner.temp }}/ported-public/summary.md
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Destroy private firmware, USB, credentials and UART
+        if: always()
+        run: |
+          rm -rf "$RUNNER_TEMP/ported-assets" "$RUNNER_TEMP/ported-nand" "$RUNNER_TEMP/ported-private"
