@@ -176,9 +176,16 @@ def contract(guest, mirror, foreign=None):
             raise RuntimeError('foreign Proxy0 changed or was claimed')
         if foreign['cron'] not in guest.command('cat /opt/etc/crontab'):
             raise RuntimeError('foreign cron entry removed')
-    response = guest.command('curl -fSs --max-time 15 --proxy socks5h://127.0.0.1:7890 http://192.168.1.100/lab/health')
-    if response != 'KEENETIC_LAB_HTTP_OK':
-        raise RuntimeError('real Mihomo SOCKS fixture request failed')
+    # The real init script returns after spawning; PID existence precedes
+    # listener readiness. Retry the actual transport, without service writes.
+    until = time.monotonic() + 90
+    while True:
+        code, response, errors = guest.execute('curl -fSs --max-time 10 --proxy socks5h://127.0.0.1:7890 http://192.168.1.100/lab/health', timeout=15)
+        if code == 0 and response == 'KEENETIC_LAB_HTTP_OK':
+            break
+        if time.monotonic() >= until:
+            raise RuntimeError('real Mihomo SOCKS fixture request failed')
+        time.sleep(2)
     return {'files': hashes, 'proxy': proxy, 'policy': policy, 'ledger': ledger,
             'netfilter': rules, 'prerouting': links[0]}
 

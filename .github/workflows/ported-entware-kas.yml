@@ -63,6 +63,14 @@ jobs:
       - name: Build only the required QEMU target after FE IRQ source fix
         if: steps.qemu-cache.outputs.cache-hit != 'true'
         run: bash lab/build_qemu.sh "$RUNNER_TEMP/ported-qemu"
+      - name: Retain the built target even when a later guest assertion fails
+        if: steps.qemu-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ runner.temp }}/ported-qemu/qemu-system-aarch64
+            ${{ runner.temp }}/ported-qemu/qemu.sha256
+          key: ported-qemu-ubuntu24-v10.1.0-${{ hashFiles('qemu-patches/*.patch', 'lab/build_qemu.sh') }}
       - name: Pinned emulator wrapper and evaluation firmware
         run: |
           (cd "$RUNNER_TEMP/ported-qemu" && sha256sum -c qemu.sha256)
