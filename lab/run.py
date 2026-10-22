@@ -123,6 +123,9 @@ def run(args):
     if not source.is_dir():
         raise ValueError("NAND/flash input directory missing")
     out = Path(args.output_dir).resolve()
+    # Never reuse UART logs: a prior successful boot could fake a new PASS.
+    if out.exists() and any(out.iterdir()):
+        raise ValueError("output directory must be new or empty")
     out.mkdir(parents=True, exist_ok=True)
     if source == out or out in source.parents or source in out.parents:
         raise ValueError("flash input and reports must be in separate directories")
