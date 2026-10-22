@@ -1,8 +1,11 @@
 # WR3000P Ported laboratory
 
 This branch starts at `e38cf0ce0c15ba0ccdf9976e5b16e268956e6d0a`.
-It uses published QEMU 3.8, compatible KeenBOOT KB-41 and the unchanged
-Ported 5.1.8 FIT, all checked by SHA256. QEMU is not rebuilt.
+It uses the Router Emulator 3.8 wrapper/presets, compatible KeenBOOT KB-41 and
+the unchanged Ported 5.1.8 FIT, all checked by SHA256. E3 requires the minimal
+FE IRQ fix in patch 0059, built on pinned QEMU v10.1.0 commit
+`f8b2f64e2336a28bf0d50b6ef8a7d8c013e9bcf3` plus this repository's patch series.
+Only AArch64 is built; CI caches it by the exact patch-series hash.
 
 The virtual board is Cudy WR3000P/MT7981 with Ported. The firmware's own
 `show version` reports release `5.01.C.8.0-2`, `arch: aarch64` and model
@@ -34,6 +37,9 @@ private directory to troubleshoot a failure.
 Install `python3`, `python3-paramiko`, `mtd-utils`, `socat`, `curl`, `wget`,
 `unzip`, `e2fsprogs`, and `openssl`. Use a short private native Linux path for
 UNIX sockets. Source and output paths must differ.
+For the FE fix also install the build dependencies listed by the workflow,
+run `bash lab/build_qemu.sh /var/tmp/ported-qemu`, and replace only the private
+wrapper's `qemu/qemu-system-aarch64` with the resulting executable.
 
 ```sh
 bash lab/fetch_lab_assets.sh /var/tmp/ported-assets
@@ -54,6 +60,24 @@ real Login/Password protocol, a version response, configuration save, reset and
 another authenticated version response. E2's console is NDM CLI. The native
 `/bin/sh` dispatcher has no standalone ash in this image; a root shell is
 checked separately after genuine Entware bootstrap.
+
+## Why Ported needs the IRQ fix
+
+Published 3.8 selects its newer SDK interrupt path whenever FE_INT_GRP differs
+from `0x21021000`. Keenetic 4.9 sets `0x21021030`, changing only nibble 1, which
+the model does not route. This incorrectly suppresses the older FE receive
+interrupt path. Private packet capture showed slirp ARP replies and TCP SYN
+frames reaching the virtual LAN, while native `show ip arp` stayed empty.
+
+A disposable MMIO experiment changing only FE_INT_GRP to `0x21021000` immediately
+restored the native SSH banner. This diagnosis is not an E3 acceptance run.
+Patch 0059 compares only nibbles for modeled interrupt sources. It preserves
+the separate newer SDK layout `0x210ffff2`; the exact production C helper is
+compiled and tested for reset, mainline, Keenetic and SDK values.
+
+The source-built fix passed all 11 OpenWrt coldboot/HTTP/reset/repeated-HTTP
+checks locally. Native Entware acceptance uses an ordinary fresh boot with
+the source fix, without any debugger or runtime register modification.
 
 ## Entware preparation
 

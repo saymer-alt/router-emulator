@@ -1,0 +1,70 @@
+From fbd1ad4898545e4930baac562171ccc793732b9a Mon Sep 17 00:00:00 2001
+From: Saymer <260067927+saymer-alt@users.noreply.github.com>
+Date: Thu, 22 Oct 2026 23:24:13 +0300
+Subject: [PATCH] hw/arm/filogic: preserve Keenetic 4.9 FE receive IRQ routing
+
+Compare only the FE_INT_GRP nibbles for sources that this model routes. Keenetic 4.9 uses 0x21021030: its unused nibble 1 must not select the newer SDK routing path. The 0x210ffff2 SDK layout remains distinct.
+
+On unchanged Ported 5.1.8, QEMU 3.8 sent ARP replies and TCP SYN frames but the guest learned no ARP entries. A disposable MMIO experiment changing only 0x21021030 to 0x21021000 immediately restored the native SSH banner. No firmware, signature or authentication changes were involved.
+---
+ hw/arm/filogic/mtk_eth.c     |  4 ++--
+ hw/arm/filogic/mtk_eth_irq.h | 21 +++++++++++++++++++++
+ 2 files changed, 23 insertions(+), 2 deletions(-)
+ create mode 100644 hw/arm/filogic/mtk_eth_irq.h
+
+diff --git a/hw/arm/filogic/mtk_eth.c b/hw/arm/filogic/mtk_eth.c
+index f167cfb..954217c 100644
+--- a/hw/arm/filogic/mtk_eth.c
++++ b/hw/arm/filogic/mtk_eth.c
+@@ -31,6 +31,7 @@
+ #include "system/dma.h"
+ #include "system/address-spaces.h"
+ #include "filogic.h"
++#include "mtk_eth_irq.h"
+
+ #define FE_SIZE         0x80000
+ #define FE_SRAM_OFF     0x40000
+@@ -72,7 +73,6 @@
+ #define FE_INT_STATUS   0x0008
+ #define FE_INT_ENABLE   0x0010
+ #define FE_INT_GRP      0x0020
+-#define FE_INT_GRP_MAINLINE 0x21021000
+ #define MTK_PHY_IAC     0x10004
+ #define MAC_MCR(x)      (0x10100 + (x) * 0x100)
+ #define MAC_MSR(x)      (0x10108 + (x) * 0x100)
+@@ -1768,7 +1768,7 @@ static void fe_update_irq(MtkEthState *s)
+         return;
+     }
+     grp = ht_get(s->fe, FE_INT_GRP, 0);
+-    if (grp && grp != FE_INT_GRP_MAINLINE) {
++    if (mtk_eth_sdk_irq_routing(grp)) {
+         /*
+          * MediaTek's SDK driver (vendor firmware, e.g. SNR-CPE-AX2) routes
+          * the sources itself: FE_INT_GRP nibble 0 = fe line of the FE misc
+diff --git a/hw/arm/filogic/mtk_eth_irq.h b/hw/arm/filogic/mtk_eth_irq.h
+new file mode 100644
+index 0000000..edb6507
+--- /dev/null
++++ b/hw/arm/filogic/mtk_eth_irq.h
+@@ -0,0 +1,21 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#ifndef HW_ARM_FILOGIC_MTK_ETH_IRQ_H
++#define HW_ARM_FILOGIC_MTK_ETH_IRQ_H
++
++#include <stdbool.h>
++#include <stdint.h>
++
++static inline bool mtk_eth_sdk_irq_routing(uint32_t group)
++{
++    /* Only sources actually routed by fe_update_irq: misc, PDMA, QDMA.
++     * Keenetic 4.9 sets unused nibble 1 to 3 (0x21021030), while retaining
++     * the mainline routes. Treating that nibble as an SDK layout loses RX.
++     * The newer SDK layout 0x210ffff2 still takes the alternate path.
++     */
++    const uint32_t routed_sources = 0xff0ff00f;
++
++    return group && ((group & routed_sources) !=
++                     (0x21021000 & routed_sources));
++}
++
++#endif

@@ -5,11 +5,13 @@ import json
 import os
 from pathlib import Path
 import shutil
+import time
 from types import SimpleNamespace
 
 from lab.gates import Evidence
-from lab.provision_ported import provision
-from lab.run import run
+from lab.provision_ported import provision, config_image, synthetic_config, entware_config, CONFIG_OFFSET
+from lab.prepare_ported_wr3000p import write_at
+from lab.run import run, send_monitor
 
 
 def wait(pattern, timeout=120):
@@ -29,6 +31,53 @@ def login_steps():
         {'action': 'send_serial', 'credential': 'username'}, wait('Password:', 20),
         {'action': 'send_serial', 'credential': 'password'}, wait(r'\(config\)>', 40),
         send('show version'), wait(r'release:\s+5\.01\.C\.8\.0-2', 30), wait(r'\(config\)>', 30)]
+
+
+def run_entware(args, private, credentials, coldboot, evidence):
+    # Import only for the actual guest phase; baseline harness tests need no SSH.
+    from lab.build_entware import build
+    from lab.guest import Guest
+    from lab.mirror import Mirror
+    nand = private / 'entware-nand'
+    shutil.copytree(args.nand_dir, nand)
+    files = [next(nand.glob('mt7981.mtd%d.*.bin' % n)) for n in range(6)]
+    secret = json.loads(credentials.read_text())
+    write_at(files, CONFIG_OFFSET, config_image(synthetic_config(secret['username'], secret['password'], entware_config())))
+    image, mirror = private / 'opt.img', private / 'mirror'
+    build(image, mirror, private / 'cache', credentials)
+    steps = coldboot + [wait('Core::Server: system ready', 240),
+        {'action': 'wait_serial', 'pattern': r'\[5/5\] "Entware" installed!',
+         'reject_pattern': 'Critical error:|Please use ext2/ext3/ext4', 'timeout_sec': 600}]
+    scenario = private / 'entware-scenario.json'
+    scenario.write_text(json.dumps({'name': 'Native USB Entware and persistence',
+                                   'evidence': 'KEENETIC_PORTED_EXPERIMENTAL', 'steps': steps}))
+
+    def probes(**context):
+        guest = Guest(credentials, private, deadline=context['deadline'])
+        try:
+            guest.connect(120)
+            marker = guest.entware()
+            print('ENTWARE: native shell, real EXT4 and pinned opkg database verified', flush=True)
+            guest.command('/bin/ndmc -c "system configuration save"')
+            guest.close()
+            send_monitor(context['monitor'], 'system_reset')
+            time.sleep(5)
+            guest.connect(300)
+            guest.entware(marker)
+            evidence.set('ENTWARE_READY', 'PASS', 'ext4_opkg_abi_and_reboot')
+            print('ENTWARE: authenticated SSH, filesystem and packages survived reset', flush=True)
+        finally:
+            guest.close()
+
+    with Mirror(mirror) as port:
+        result = run(SimpleNamespace(scenario=scenario, emulator_root=args.emulator_root,
+            nand_dir=nand, output_dir=private / 'entware-uart', max_seconds=1500,
+            preset='cudy-wr3000p-v1', lan_forwards='8080:80;8022:222',
+            opt_image=image, mirror_port=port, after_scenario=probes))
+    if result != 0 or evidence.gates['ENTWARE_READY']['status'] != 'PASS':
+        evidence.set('ENTWARE_READY', 'FAIL', 'entware_install_failed')
+        return 1
+    return 0
 
 
 def main():
@@ -70,9 +119,14 @@ def main():
             evidence.set('AUTH_READY', 'BLOCKED', 'prerequisite_blocked')
         for name in tuple(evidence.gates)[2:]:
             evidence.set(name, 'BLOCKED', 'prerequisite_blocked')
+        if result == 0:
+            result = run_entware(args, private, credentials, coldboot, evidence)
         return result
     except Exception:
-        evidence.set('BOOT_READY', 'FAIL', 'runner_failure')
+        if evidence.gates['BOOT_READY']['status'] != 'PASS':
+            evidence.set('BOOT_READY', 'FAIL', 'runner_failure')
+        elif evidence.gates['AUTH_READY']['status'] == 'PASS':
+            evidence.set('ENTWARE_READY', 'FAIL', 'runner_failure')
         return 1
     finally:
         evidence.write(args.report_dir)

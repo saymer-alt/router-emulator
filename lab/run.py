@@ -44,6 +44,8 @@ def load_scenario(path):
         action = step["action"]
         if action == "wait_serial":
             re.compile(step["pattern"].encode())
+            if "reject_pattern" in step:
+                re.compile(step["reject_pattern"].encode())
         if action == "probe_http":
             url = urlsplit(step["url"])
             if url.scheme != "http" or url.hostname != "127.0.0.1" or url.username or url.password:
@@ -211,9 +213,10 @@ def run(args):
                 logfile = found[-1]
         return logfile
 
-    def wait_serial(pattern, seconds):
+    def wait_serial(pattern, seconds, reject_pattern=None):
         nonlocal cursor
         rx = re.compile(pattern.encode())
+        reject = re.compile(reject_pattern.encode()) if reject_pattern else None
         until = deadline(seconds)
         # Read in bytes: read cursor is valid despite guest reboot, and regex
         # cannot accidentally match a message from an earlier boot stage.
@@ -229,6 +232,9 @@ def run(args):
                         cursor += len(new)
                         pending = (pending + new)[-1048576:]
                         match = rx.search(pending)
+                        rejected = reject.search(pending) if reject else None
+                        if rejected and (not match or rejected.start() < match.start()):
+                            raise RuntimeError("guest rejected serial stage")
                         if match:
                             # Preserve bytes after the match for the next step;
                             # boot messages can arrive in a single log write.
@@ -295,7 +301,7 @@ def run(args):
             print("[%d/%d] %s" % (index, len(scenario["steps"]), action), flush=True)
             try:
                 if action == "wait_serial":
-                    wait_serial(step["pattern"], float(step["timeout_sec"]))
+                    wait_serial(step["pattern"], float(step["timeout_sec"]), step.get("reject_pattern"))
                 elif action == "probe_http":
                     until = deadline(float(step["timeout_sec"]))
                     while time.monotonic() < until:
@@ -339,7 +345,7 @@ def run(args):
         if failure is None and getattr(args, "after_scenario", None):
             # Trusted Python controller hook, never loaded from scenario data.
             # Used for authenticated guest probes while the disposable VM lives.
-            args.after_scenario(monitor=monitor, console_dir=logdir)
+            args.after_scenario(monitor=monitor, console_dir=logdir, deadline=hard_deadline)
     except Exception as error:
         failure = "%s: setup or emulator start failed" % type(error).__name__
         rows.append({"action": "setup", "outcome": "FAIL",
