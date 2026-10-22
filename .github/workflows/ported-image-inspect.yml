@@ -50,6 +50,29 @@ jobs:
           ' | head -70
           python3 "$GITHUB_WORKSPACE/lab/inspect_ported_image.py" installer.7z
 
+      - name: Inspect nested flasher data.zip partition manifest (no output binaries)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/ported"
+          7z x -y -so installer.7z data.zip > data.zip
+          python3 - <<'PY'
+          import io, hashlib, zipfile
+          from pathlib import Path
+          data=Path('data.zip').read_bytes()
+          print('NESTED ZIP size:',len(data),'sha256:',hashlib.sha256(data).hexdigest())
+          with zipfile.ZipFile(io.BytesIO(data)) as z:
+              for info in z.infolist()[:110]:
+                  if info.is_dir():
+                      continue
+                  if info.file_size > 65_000_000:
+                      print('SKIP oversized file',info.filename)
+                      continue
+                  with z.open(info) as f:
+                      head=f.read(64)
+                  print('entry',repr(info.filename),'bytes',info.file_size,'header32',head[:32].hex())
+          PY
+
       - name: Explicitly remove firmware from runner
         if: always()
         shell: bash
