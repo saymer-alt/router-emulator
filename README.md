@@ -5,7 +5,7 @@
 Это форк [stavultras/router-emulator](https://github.com/stavultras/router-emulator), а не отдельный
 эмулятор, написанный с нуля: базовый эмулятор плат MediaTek (QEMU v10.1.0 с патчами
 `qemu-patches/`) разработан upstream. Наш форк добавляет поверх него **экспериментальную
-лабораторную обвязку** (`lab/`, готовится к слиянию через PR #1–#3): автоматизированные сценарии,
+лабораторную обвязку** (`lab/`, часть `main` — слита через PR #1–#3): автоматизированные сценарии,
 изолированную сеть, JSON/JUnit-отчёты и проверочные гейты для интеграционных испытаний
 Keenetic/Ported, Entware и [Keenetic Auto Setup (KAS)](https://github.com/saymer-alt/keenetic-auto-setup).
 
@@ -51,8 +51,8 @@ JSON + JUnit + CI Artifacts     (9 гейтов PASS/FAIL/BLOCKED/NOT_TESTED, ф
 
 Реальная готовность слоёв (по коду и результатам CI):
 
-- **GitHub Actions / Test Runner** — работает: `lab/run.py`, `lab/test_runner.py`, пять workflow-файлов
-  (четыре лабораторных — на ветке PR #1–#3).
+- **GitHub Actions / Test Runner** — работает: `lab/run.py`, `lab/test_runner.py`, пять workflow-файлов,
+  все в `main`.
 - **QEMU Router Emulator** — работает: upstream-эмулятор загружает немодифицированные прошивки
   через реальную цепочку загрузки (BootROM → BL2 → BL31 → U-Boot/KeenBOOT → kernel).
 - **Keenetic/Ported Guest** — Ported 5.1.8 на WR3000P загружается до баннера NDMS
@@ -79,7 +79,7 @@ JSON + JUnit + CI Artifacts     (9 гейтов PASS/FAIL/BLOCKED/NOT_TESTED, ф
 
 - **Ported WR3000P — экспериментальная.** Публичная оценочная прошивка Cudy WR3000P 5.1.8 и
   отдельно опубликованный загрузчик KeenBOOT KB-41 (SHA-256 пиннинг), синтетический NAND
-  только для бутстрапа эмулятора, без реального EEPROM. Boot-цепочка и KAS-гейты — на ветке PR #3.
+  только для бутстрапа эмулятора, без реального EEPROM. Boot-цепочка и KAS-гейты — часть `main` (слиты PR #2, PR #3).
 - **Keenetic KN-1010 / KN-1012** — только как **целевые сценарии сопоставления**. Оригинальная
   KeeneticOS в эмуляции не подтверждена; аппаратные пресеты существуют, E2E не проводилось.
 
@@ -105,8 +105,12 @@ KAS_ROLLBACK, KAS_UNINSTALL` + дополнительные проверки). �
 | Оригинальная KeeneticOS (KN-1010/KN-1012) в эмуляции | **NOT_TESTED** | — | Подтверждённого E2E нет |
 | Аппаратное field acceptance (потеря питания, Wi-Fi, износ USB, switch offload, внешний NTP/DNS/VPN) | **NOT_TESTED** | `lab/PORTED-E2E.md` → «Acceptance still requiring separate evidence» | Требует физического железа |
 
-Всё, что касается KAS/Entware/Ported, — статус лабораторной ветки PR #3 (9/9 попытанных
-гейтов, из них два BLOCKED по причинам выше); на `main` пока только базовый эмулятор upstream.
+Вся лаборатория — часть `main` (слита через PR #1–#3). Контрольная матрица гейтов на
+интегрированном дереве: run [39975258142](https://github.com/saymer-alt/router-emulator/actions/runs/39975258142)
+— все 9 гейтов и 8 проверок жизненного цикла, `Doctor PASS`; из них `KAS_UNINSTALL=BLOCKED`
+(`native_remove_not_implemented`) и `KAS_TRANSACTION_GATE=BLOCKED` (`snapshot_gate_blocked`) —
+ожидаемые ограничения, агрегат честно BLOCKED. Прогон [39944171291](https://github.com/saymer-alt/router-emulator/actions/runs/39944171291)
+(PR #3) — те же статусы до интеграции.
 
 ## Быстрый запуск
 
@@ -132,9 +136,9 @@ tools/prepare-nand.sh cudy_wr3000p-v1 25.12.5   # официальные обр�
 
 ### 2. Лабораторная обвязка форка
 
-Файлы `lab/` добавляются PR #1–#3 и до слияния доступны на ветке
-[`feature/ported-entware-kas-e2e`](https://github.com/saymer-alt/router-emulator/tree/feature/ported-entware-kas-e2e)
-(документация: [`lab/README.ru.md`](https://github.com/saymer-alt/router-emulator/blob/feature/ported-entware-kas-e2e/lab/README.ru.md)).
+Каталог [`lab/`](lab/) — часть `main`. Документация лаборатории:
+[`lab/README.ru.md`](lab/README.ru.md) (сценарии и изоляция) и
+[`lab/PORTED-E2E.md`](lab/PORTED-E2E.md) (Ported/Entware/KAS E2E и его границы).
 Минимальный прогон OpenWrt-сценария на Linux x86_64 (после сборки upstream-эмулятора
 и подготовки флеш-папки `tools/prepare-nand.sh`):
 
@@ -162,15 +166,20 @@ WAN = `offline`, LAN = только loopback (`127.0.0.1`).
   отчёты в артефакте `ported-gates`.
 - **Ported WR3000P - firmware format inspection** (`ported-image-inspect.yml`) — проверка формата образов.
 
-Четыре лабораторных workflow до слияния PR #1–#3 запускаются на своих ветках
-(`workflow_dispatch`); полный отчёт о работе с ними — в `lab/PORTED-E2E.md` на ветке PR #3.
+Лабораторные workflow срабатывают на PR с изменениями `lab/**` и доступны для ручного
+запуска (`workflow_dispatch`) из `main`; порядок работы — в
+[`lab/PORTED-E2E.md`](lab/PORTED-E2E.md).
 
 ## Интеграция с нашими проектами
 
 - [keenetic-auto-setup](https://github.com/saymer-alt/keenetic-auto-setup) — **установщик KAS,
-  тестируемый в лаборатории.** PR #3 исполняет пиновый коммит KAS (`6dd6438e`) нативным
+  тестируемый в лаборатории.** Лаборатория исполняет пиновый коммит KAS (`6dd6438e`) нативным
   установщиком Entware и публикует только фиксированные метки результатов; KAS-PR запускают
-  кросс-проверку через `workflow_call` с пином на коммит эмулятора.
+  кросс-проверку через `workflow_call` с пином на коммит эмулятора. Связанные задачи:
+  [roadmap лаборатории #208](https://github.com/saymer-alt/keenetic-auto-setup/issues/208),
+  [безопасное удаление `uninstall --remove` #179](https://github.com/saymer-alt/keenetic-auto-setup/issues/179)
+  (снятие `KAS_UNINSTALL=BLOCKED` — работа в самом KAS), caller
+  [PR #213](https://github.com/saymer-alt/keenetic-auto-setup/pull/213).
 - [keenetic-nvr](https://github.com/saymer-alt/keenetic-nvr) — **потенциальный потребитель:**
   сценарии storage/retention и восстановления демонов после сбоев. Полный E2E KNVR в
   лаборатории **не проводился** — подтверждений зелёным прогоном нет.
@@ -194,13 +203,14 @@ WAN = `offline`, LAN = только loopback (`127.0.0.1`).
 
 - Базовый эмулятор разработан upstream: [stavultras/router-emulator](https://github.com/stavultras/router-emulator)
   (набор патчей QEMU v10.1.0 и инструменты). Текущая база `main` — **upstream 3.9**
-  (см. [VERSION](VERSION)); лабораторная обвязка `lab/` в `main` пока **не** входит — она
-  готовится PR #1–#3. Исходная документация сохранена без изменений:
+  (см. [VERSION](VERSION)); лабораторная обвязка `lab/` — часть `main` (слита PR #1–#3).
+  Исходная документация сохранена без изменений:
   [README.upstream.md](README.upstream.md) (English), [README.ru.md](README.ru.md) (Русский).
 - Этот форк добавляет экспериментальную лабораторную инфраструктуру и автоматизированные
-  испытания (каталог `lab/`, ветки PR #1–#3); история Git и авторство upstream сохранены.
-  Результаты прогонов в таблице готовности получены на лабораторных ветках до обновления
-  базы до 3.9 и описывают лабораторную ветку, а не `main`.
+  испытания (каталог `lab/`); история Git и авторство upstream сохранены. Матрица гейтов
+  на интегрированном дереве — run [39975258142](https://github.com/saymer-alt/router-emulator/actions/runs/39975258142);
+  `external_swap` и физическое железо остаются NOT_TESTED, `KAS_UNINSTALL` и
+  `KAS_TRANSACTION_GATE` — BLOCKED до реализации в самом KAS.
 - Лицензия — **GPL-2.0-or-later**, как у QEMU: см. [LICENSE](LICENSE). Образы прошивок не входят
   в репозиторий; OpenWrt и вендорские прошивки сохраняют собственные лицензии.
 - Синхронизация с upstream — через отдельную ветку и PR по процедуре
