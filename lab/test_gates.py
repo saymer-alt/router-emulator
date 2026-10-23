@@ -42,3 +42,11 @@ class GateTests(unittest.TestCase):
             root = ET.parse(Path(directory) / 'junit.xml').getroot()
             self.assertEqual(len(root.findall('testcase/failure')), 1)
             self.assertEqual(len(root.findall('testcase/skipped')), 8)
+
+    def test_foreign_failure_phase_labels_are_public(self):
+        evidence = Evidence()
+        for reason in ('foreign_setup_failed', 'foreign_proxy_changed', 'foreign_cron_changed',
+                       'native_command_timed_out', 'native_command_failed', 'native_socks_not_ready',
+                       'native_services_duplicate', 'native_rules_not_ready', 'serial_timeout'):
+            evidence.check('KAS_FOREIGN_RESOURCES', 'FAIL', reason)
+        self.assertEqual(evidence.checks['KAS_FOREIGN_RESOURCES']['reason'], 'serial_timeout')

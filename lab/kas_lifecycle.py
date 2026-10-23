@@ -54,6 +54,34 @@ def plain(text):
     return re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', text)
 
 
+class ContractFailure(RuntimeError):
+    def __init__(self, reason):
+        from lab.gates import REASONS
+        if reason not in REASONS:
+            raise ValueError('unapproved contract failure')
+        self.reason = reason
+        super().__init__(reason)
+
+
+def changed_reason(before, after):
+    files = {'/opt/etc/mihomo/config.yaml': 'mihomo_config_changed',
+        '/opt/var/lib/magitrickle/config.yaml': 'magi_config_changed',
+        '/opt/bin/mihomo_watchdog.sh': 'watchdog_changed',
+        '/opt/etc/cron.5mins/mihomo_watchdog': 'watchdog_changed',
+        '/opt/etc/ndm/netfilter.d/020-bypass_wa.sh': 'hook_changed',
+        '/opt/etc/crontab': 'crontab_changed',
+        '/opt/etc/keenetic-auto-setup/ownership.v1': 'ledger_changed'}
+    for path, reason in files.items():
+        if before['files'].get(path) != after['files'].get(path):
+            return reason
+    for key, reason in (('proxy', 'proxy_changed'), ('policy', 'policy_changed'),
+                        ('ledger', 'ledger_changed'), ('netfilter', 'netfilter_changed'),
+                        ('prerouting', 'netfilter_changed')):
+        if before[key] != after[key]:
+            return reason
+    return 'idempotence_failed'
+
+
 def install(guest, mirror, revision, evidence, foreign=None):
     evidence.set('KAS_INSTALL', 'NOT_TESTED', 'unattempted')
     code, output, errors = guest.execute('KEENETIC_AUTO_SETUP_REF=' + revision +
@@ -67,6 +95,9 @@ def install(guest, mirror, revision, evidence, foreign=None):
         return False
     try:
         contract(guest, mirror, foreign)
+    except ContractFailure as error:
+        evidence.set('KAS_INSTALL', 'FAIL', error.reason)
+        return False
     except Exception:
         evidence.set('KAS_INSTALL', 'FAIL', 'native_installer_failed')
         return False
@@ -119,63 +150,78 @@ def wait_services(guest, timeout=360):
         code, output, errors = guest.execute('pidof mihomo; pidof magitrickled')
         rows = output.splitlines()
         if any(len(line.split()) > 1 for line in rows):
-            raise RuntimeError('duplicate native service processes')
+            raise ContractFailure('native_services_duplicate')
         if code == 0 and len(rows) == 2 and all(len(line.split()) == 1 and line.strip().isdigit() for line in rows):
             return
         time.sleep(3)
-    raise RuntimeError('actual Mihomo and MagiTrickle daemons not ready')
+    raise ContractFailure('native_services_not_ready')
 
 
 def contract(guest, mirror, foreign=None):
     wait_services(guest)
-    ledger = guest.command('cat /opt/etc/keenetic-auto-setup/ownership.v1')
+    def read(command, reason='native_command_failed'):
+        try:
+            return guest.command(command)
+        except Exception as error:
+            raise ContractFailure('native_command_timed_out' if isinstance(error, TimeoutError) else reason) from None
+    ledger = read('cat /opt/etc/keenetic-auto-setup/ownership.v1', 'native_ownership_invalid')
     if guest.command('ls -ld /opt/etc/keenetic-auto-setup/ownership.v1').split()[0] != '-rw-------':
-        raise RuntimeError('ownership journal permissions are not private')
+        raise ContractFailure('native_ownership_invalid')
     if not ledger.startswith('KAS_OWNERSHIP_V1\n'):
-        raise RuntimeError('native ownership journal invalid')
+        raise ContractFailure('native_ownership_invalid')
     rows = ledger.splitlines()[1:]
     if len(rows) != len(set(rows)):
-        raise RuntimeError('duplicate native ownership records')
+        raise ContractFailure('native_ownership_invalid')
     proxies = [row[12:] for row in rows if row.startswith('owned|proxy|')]
     if len(proxies) != 1 or not re.fullmatch(r'Proxy\d+', proxies[0]):
-        raise RuntimeError('project Proxy ownership ambiguous')
+        raise ContractFailure('native_proxy_invalid')
     for package in ('mihomo', 'magitrickle'):
         if 'owned|package|' + package not in rows:
-            raise RuntimeError('new KAS package ownership missing')
+            raise ContractFailure('native_ownership_invalid')
     config = plain(guest.command('/bin/ndmc -c "show running-config"'))
-    proxy = block(config, 'interface ' + proxies[0])
+    try:
+        proxy = block(config, 'interface ' + proxies[0])
+    except RuntimeError:
+        raise ContractFailure('native_proxy_invalid') from None
     if not all(value in proxy for value in ('proxy protocol socks5', 'proxy socks5-udp', 'proxy upstream 127.0.0.1 7890')):
-        raise RuntimeError('actual Proxy upstream differs from KAS contract')
-    policy = block(config, 'ip policy bypass_wa')
+        raise ContractFailure('native_proxy_invalid')
+    try:
+        policy = block(config, 'ip policy bypass_wa')
+    except RuntimeError:
+        raise ContractFailure('native_policy_invalid') from None
     if 'permit global ' + proxies[0] not in policy:
-        raise RuntimeError('actual bypass policy lacks project exit')
+        raise ContractFailure('native_policy_invalid')
     if not re.search(r'(?m)^\s+intercept enable\s*$', config):
-        raise RuntimeError('native DNS interception absent')
-    rules = guest.command('iptables -t mangle -S _CUST_BYPASS_WA_')
+        raise ContractFailure('native_dns_invalid')
+    rules = read('iptables -t mangle -S _CUST_BYPASS_WA_', 'native_rules_not_ready')
     entries = [line for line in rules.splitlines() if line.startswith('-A ')]
     if len(entries) != 3 or not all(value in entries[index] for index, value in
         enumerate(('-j MARK', '-j CONNMARK --save-mark', '-j RETURN'))):
-        raise RuntimeError('actual MARK/CONNMARK rules absent')
-    links = [line for line in guest.command('iptables -t mangle -S PREROUTING').splitlines()
+        raise ContractFailure('native_rules_not_ready')
+    links = [line for line in read('iptables -t mangle -S PREROUTING', 'native_rules_not_ready').splitlines()
              if line.endswith(' -j _CUST_BYPASS_WA_')]
     if len(links) != 1 or not re.search(r'--mark 0x0(?:/0xffffffff)? -j ', links[0]):
-        raise RuntimeError('native PREROUTING link absent or duplicated')
+        raise ContractFailure('native_rules_not_ready')
     hashes = {}
     for line in guest.command('sha256sum ' + ' '.join(STABLE_FILES)).splitlines():
         digest, path = line.split(None, 1)
         if not re.fullmatch('[a-f0-9]{64}', digest) or path not in STABLE_FILES:
-            raise RuntimeError('installed file digest unavailable')
+            raise ContractFailure('native_file_digest_invalid')
         hashes[path] = digest
     expected = {'/opt/bin/mihomo_watchdog.sh': 'mihomo-watchdog.sh',
                 '/opt/etc/ndm/netfilter.d/020-bypass_wa.sh': '020-bypass-wa.sh'}
     for path, source in expected.items():
         if hashes.get(path) != hashlib.sha256(mirror.sources[source]).hexdigest():
-            raise RuntimeError('installed KAS script differs from committed source')
+            raise ContractFailure('native_file_digest_invalid')
     if foreign is not None:
-        if block(config, 'interface Proxy0') != foreign['proxy'] or 'owned|proxy|Proxy0' in rows:
-            raise RuntimeError('foreign Proxy0 changed or was claimed')
+        try:
+            preserved = block(config, 'interface Proxy0') == foreign['proxy']
+        except RuntimeError:
+            preserved = False
+        if not preserved or 'owned|proxy|Proxy0' in rows:
+            raise ContractFailure('foreign_proxy_changed')
         if foreign['cron'] not in guest.command('cat /opt/etc/crontab'):
-            raise RuntimeError('foreign cron entry removed')
+            raise ContractFailure('foreign_cron_changed')
     # The real init script returns after spawning; PID existence precedes
     # listener readiness. Retry the actual transport, without service writes.
     until = time.monotonic() + 90
@@ -184,7 +230,7 @@ def contract(guest, mirror, foreign=None):
         if code == 0 and response == 'KEENETIC_LAB_HTTP_OK':
             break
         if time.monotonic() >= until:
-            raise RuntimeError('real Mihomo SOCKS fixture request failed')
+            raise ContractFailure('native_socks_not_ready')
         time.sleep(2)
     return {'files': hashes, 'proxy': proxy, 'policy': policy, 'ledger': ledger,
             'netfilter': rules, 'prerouting': links[0]}
@@ -213,7 +259,7 @@ def idempotence(guest, mirror, revision, evidence, foreign):
         ' sh /opt/lab/install.sh disk', timeout=600)
     after = contract(guest, mirror, foreign)
     if code != 0 or '[OK] Done' not in plain(output) or before != after:
-        evidence.check('KAS_IDEMPOTENCE', 'FAIL', 'idempotence_failed')
+        evidence.check('KAS_IDEMPOTENCE', 'FAIL', changed_reason(before, after) if before != after else 'native_installer_failed')
         return False
     evidence.check('KAS_IDEMPOTENCE', 'PASS', 'native_command_verified')
     if foreign:
@@ -444,20 +490,53 @@ def foreign_profile(args, private, credentials, coldboot, mirror, port, tls_port
             {'action': 'wait_serial', 'pattern': 'Core::Server: system ready', 'timeout_sec': 240}]}))
     local = Evidence()
     completed = {'ok': False}
+    started = {'probes': False}
+    # The published check carries one fixed public label naming the actual
+    # failing phase; guest text, UART output and configuration stay private.
+    failure = {'reason': 'execution_failed'}
 
     def probes(**context):
         guest = Guest(credentials, root, deadline=context['deadline'])
+        started['probes'] = True
         try:
-            guest.connect(240)
-            prepare(guest, mirror, args.kas_ref)
-            foreign = foreign_resources(guest)
-            if not install(guest, mirror, args.kas_ref, local, foreign):
+            try:
+                guest.connect(240)
+            except TimeoutError:
+                failure['reason'] = 'native_command_timed_out'
                 return
+            except RuntimeError:
+                failure['reason'] = 'authentication_rejected'
+                return
+            failure['reason'] = 'verified_tls_source_failed'
+            prepare(guest, mirror, args.kas_ref)
+            failure['reason'] = 'foreign_setup_failed'
+            foreign = foreign_resources(guest)
+            failure['reason'] = 'native_installer_failed'
+            if not install(guest, mirror, args.kas_ref, local, foreign):
+                recorded = local.gates['KAS_INSTALL']
+                if recorded['status'] == 'FAIL':
+                    failure['reason'] = recorded['reason']
+                return
+            failure['reason'] = 'idempotence_failed'
             if not idempotence(guest, mirror, args.kas_ref, local, foreign):
+                recorded = local.checks.get('KAS_IDEMPOTENCE')
+                if recorded and recorded['status'] == 'FAIL':
+                    failure['reason'] = recorded['reason']
                 return
             if not reboot(guest, mirror, local, context, foreign):
+                recorded = local.gates['KAS_REBOOT']
+                failure['reason'] = recorded['reason'] if recorded['status'] == 'FAIL' else 'native_reboot_failed'
                 return
             completed['ok'] = uninstall(guest, mirror, local, foreign)
+            if not completed['ok']:
+                recorded = local.gates['KAS_UNINSTALL']
+                failure['reason'] = recorded['reason'] if recorded['status'] == 'FAIL' else 'execution_failed'
+        except ContractFailure as error:
+            failure['reason'] = error.reason
+        except TimeoutError:
+            failure['reason'] = 'native_command_timed_out'
+        except RuntimeError:
+            failure['reason'] = 'native_command_failed'
         finally:
             guest.close()
 
@@ -468,6 +547,12 @@ def foreign_profile(args, private, credentials, coldboot, mirror, port, tls_port
         lan_forwards='8080:80;8022:222', mirror_port=port,
         mirror_tls_port=tls_port, after_scenario=probes))
     passed = result == 0 and completed['ok']
-    evidence.check('KAS_FOREIGN_RESOURCES', 'PASS' if passed else 'FAIL',
-                   'native_command_verified' if passed else 'execution_failed')
+    if passed:
+        evidence.check('KAS_FOREIGN_RESOURCES', 'PASS', 'native_command_verified')
+    else:
+        if result != 0:
+            # The UART scenario failed, or the controller hook raised; only a
+            # scenario failure may be reported as a serial timeout.
+            failure['reason'] = 'serial_timeout' if not started['probes'] else 'runner_failure'
+        evidence.check('KAS_FOREIGN_RESOURCES', 'FAIL', failure['reason'])
     return passed

@@ -2,7 +2,7 @@ import hashlib
 import json
 from pathlib import Path
 import unittest
-from lab.kas_lifecycle import block, plain
+from lab.kas_lifecycle import ContractFailure, block, changed_reason, plain
 
 
 class LifecycleDataTests(unittest.TestCase):
@@ -25,3 +25,16 @@ class LifecycleDataTests(unittest.TestCase):
 
     def test_ansi_removed_without_inventing_doctor_success(self):
         self.assertEqual(plain('\x1b[31mFAIL: 2\x1b[0m'), 'FAIL: 2')
+
+    def test_contract_failures_carry_only_public_labels(self):
+        with self.assertRaises(ValueError):
+            ContractFailure('private UART detail')
+        self.assertEqual(ContractFailure('foreign_proxy_changed').reason, 'foreign_proxy_changed')
+
+    def test_changed_reason_localizes_the_changed_resource(self):
+        state = {'files': {'/opt/etc/crontab': 'a', '/opt/etc/mihomo/config.yaml': 'a'},
+                 'proxy': 'p', 'policy': 'l', 'ledger': 'd', 'netfilter': 'n', 'prerouting': 'r'}
+        self.assertEqual(changed_reason(state, dict(state, files=dict(state['files'], **{'/opt/etc/crontab': 'b'}))), 'crontab_changed')
+        self.assertEqual(changed_reason(state, dict(state, proxy='x')), 'proxy_changed')
+        self.assertEqual(changed_reason(state, dict(state, prerouting='m')), 'netfilter_changed')
+        self.assertEqual(changed_reason(state, state), 'idempotence_failed')
