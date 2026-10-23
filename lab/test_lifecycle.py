@@ -2,7 +2,7 @@ import hashlib
 import json
 from pathlib import Path
 import unittest
-from lab.kas_lifecycle import ContractFailure, block, changed_reason, plain
+from lab.kas_lifecycle import ContractFailure, block, changed_reason, netfilter_settled, plain
 
 
 class LifecycleDataTests(unittest.TestCase):
@@ -38,3 +38,15 @@ class LifecycleDataTests(unittest.TestCase):
         self.assertEqual(changed_reason(state, dict(state, proxy='x')), 'proxy_changed')
         self.assertEqual(changed_reason(state, dict(state, prerouting='m')), 'netfilter_changed')
         self.assertEqual(changed_reason(state, state), 'idempotence_failed')
+
+    def test_netfilter_settle_assertion_keeps_full_rule_contract(self):
+        rules = ('-P _CUST_BYPASS_WA_ ACCEPT\n'
+                 '-A _CUST_BYPASS_WA_ -j MARK --set-xmark 0x2000/0xffffffff\n'
+                 '-A _CUST_BYPASS_WA_ -j CONNMARK --save-mark --mask 0xffffffff\n'
+                 '-A _CUST_BYPASS_WA_ -j RETURN\n')
+        link = ['-A PREROUTING -m mark --mark 0x0/0xffffffff -j _CUST_BYPASS_WA_']
+        self.assertTrue(netfilter_settled(rules, link))
+        self.assertFalse(netfilter_settled(rules.replace('-A _CUST_BYPASS_WA_ -j RETURN\n', ''), link))
+        self.assertFalse(netfilter_settled(rules, link * 2))
+        self.assertFalse(netfilter_settled(rules, ['-A PREROUTING -m mark --mark 0x1/0xffffffff -j _CUST_BYPASS_WA_']))
+        self.assertFalse(netfilter_settled('', link))

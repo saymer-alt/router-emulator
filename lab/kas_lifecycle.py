@@ -157,6 +157,13 @@ def wait_services(guest, timeout=360):
     raise ContractFailure('native_services_not_ready')
 
 
+def netfilter_settled(rules, links):
+    entries = [line for line in rules.splitlines() if line.startswith('-A ')]
+    return (len(entries) == 3 and all(value in entries[index] for index, value in
+        enumerate(('-j MARK', '-j CONNMARK --save-mark', '-j RETURN')))
+        and len(links) == 1 and bool(re.search(r'--mark 0x0(?:/0xffffffff)? -j ', links[0])))
+
+
 def contract(guest, mirror, foreign=None):
     wait_services(guest)
     def read(command, reason='native_command_failed'):
@@ -193,15 +200,21 @@ def contract(guest, mirror, foreign=None):
         raise ContractFailure('native_policy_invalid')
     if not re.search(r'(?m)^\s+intercept enable\s*$', config):
         raise ContractFailure('native_dns_invalid')
-    rules = read('iptables -t mangle -S _CUST_BYPASS_WA_', 'native_rules_not_ready')
-    entries = [line for line in rules.splitlines() if line.startswith('-A ')]
-    if len(entries) != 3 or not all(value in entries[index] for index, value in
-        enumerate(('-j MARK', '-j CONNMARK --save-mark', '-j RETURN'))):
-        raise ContractFailure('native_rules_not_ready')
-    links = [line for line in read('iptables -t mangle -S PREROUTING', 'native_rules_not_ready').splitlines()
-             if line.endswith(' -j _CUST_BYPASS_WA_')]
-    if len(links) != 1 or not re.search(r'--mark 0x0(?:/0xffffffff)? -j ', links[0]):
-        raise ContractFailure('native_rules_not_ready')
+    # Native Netfilter rewrite callbacks apply asynchronously after the
+    # installer's Proxy down/up and hook reinstallation, including across a
+    # reboot. Sample the identical assertion until the chain settles, with the
+    # same bounded snapshot budget the native installer self-check uses; the
+    # expected content never changes and a chain that never settles fails.
+    until = time.monotonic() + 20
+    while True:
+        rules = read('iptables -t mangle -S _CUST_BYPASS_WA_', 'native_rules_not_ready')
+        links = [line for line in read('iptables -t mangle -S PREROUTING', 'native_rules_not_ready').splitlines()
+                 if line.endswith(' -j _CUST_BYPASS_WA_')]
+        if netfilter_settled(rules, links):
+            break
+        if time.monotonic() >= until:
+            raise ContractFailure('native_rules_not_ready')
+        time.sleep(2)
     hashes = {}
     for line in guest.command('sha256sum ' + ' '.join(STABLE_FILES)).splitlines():
         digest, path = line.split(None, 1)

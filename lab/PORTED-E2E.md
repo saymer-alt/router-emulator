@@ -167,8 +167,12 @@ HTTP service after reboot, because QEMU has no accepted external NTP source here
 The lifecycle runs the committed `install.sh disk`, verifies real package versions,
 one Mihomo and one `magitrickled`, private ownership records, actual Proxy upstream,
 `bypass_wa`, DNS interception, MARK/CONNMARK, installed source hashes and a real
-SOCKS request through Mihomo to local HTTP. It runs the real watchdog twice with
-WAN isolated, then the real Doctor with the same pinned source reference.
+SOCKS request through Mihomo to local HTTP. The MARK/CONNMARK assertion samples the
+chain until it settles, within the same bounded budget the native installer's own
+self-check uses, because Netfilter rewrite callbacks apply asynchronously after the
+installer's Proxy down/up; the expected rule content never changes. It runs the
+real watchdog twice with WAN isolated, then the real Doctor with the same pinned
+source reference.
 
 Repeat installation compares persistent files, journal, Proxy and policy. A real
 TERM during another repeat install must release its real lifecycle lock, clean
