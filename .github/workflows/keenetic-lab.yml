@@ -22,7 +22,7 @@ jobs:
       - name: Python syntax and unit tests
         run: |
           python3 -m py_compile lab/run.py lab/test_runner.py
-          python3 -m unittest discover -s lab -p 'test_runner.py' -v
+          python3 -m unittest discover -s lab -p 'test*.py' -v
 
   openwrt-boot-reset:
     name: QEMU MT7981 - OpenWrt cold boot and reset
