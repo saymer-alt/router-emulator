@@ -423,7 +423,7 @@ def update_and_rollback(guest, mirror, revision, evidence, foreign):
     return True
 
 
-def uninstall(guest, mirror, evidence, foreign):
+def uninstall(guest, mirror, evidence, foreign, revision):
     before = contract(guest, mirror, foreign)
     guest.command('sh /opt/lab/uninstall.sh --check')
     guest.execute('sh /opt/lab/uninstall.sh --plan')
@@ -456,14 +456,75 @@ def uninstall(guest, mirror, evidence, foreign):
     if not transaction and not known_no_remove:
         evidence.set('KAS_UNINSTALL', 'BLOCKED', 'snapshot_gate_blocked')
         return False
-    code, output, errors = guest.execute('sh /opt/lab/uninstall.sh --remove')
-    if known_no_remove and code == 3 and '[BLOCKED]' in output + errors and contract(guest, mirror, foreign) == before:
-        evidence.set('KAS_UNINSTALL', 'BLOCKED', 'native_remove_not_implemented')
-        evidence.check('KAS_UNINSTALL_GUARD', 'PASS', 'native_command_verified')
-        print('KAS UNINSTALL: native code-3 guard verified; no removal implemented by this KAS revision', flush=True)
-        return True
-    evidence.set('KAS_UNINSTALL', 'FAIL', 'execution_failed')
-    return False
+    code, output, errors = guest.execute('sh /opt/lab/uninstall.sh --remove', timeout=900)
+    if known_no_remove:
+        if code == 3 and '[BLOCKED]' in output + errors and contract(guest, mirror, foreign) == before:
+            evidence.set('KAS_UNINSTALL', 'BLOCKED', 'native_remove_not_implemented')
+            evidence.check('KAS_UNINSTALL_GUARD', 'PASS', 'native_command_verified')
+            print('KAS UNINSTALL: native code-3 guard verified; no removal implemented by this KAS revision', flush=True)
+            return True
+        evidence.set('KAS_UNINSTALL', 'FAIL', 'execution_failed')
+        return False
+
+    # Real transactional removal: the journal-bearing engine must complete,
+    # leave ONLY ledger-owned resources removed, accept an idempotent re-run,
+    # and the guest must accept a clean reinstall afterwards.
+    if code != 0 or '[PASS] KAS removal transaction complete' not in plain(output):
+        evidence.set('KAS_UNINSTALL', 'FAIL', 'native_uninstall_failed')
+        return False
+    if not removal_teardown_clean(guest, foreign):
+        evidence.set('KAS_UNINSTALL', 'FAIL', 'native_uninstall_failed')
+        return False
+    code, output, errors = guest.execute('sh /opt/lab/uninstall.sh --remove', timeout=300)
+    if code != 0 or 'already fully removed' not in plain(output):
+        evidence.set('KAS_UNINSTALL', 'FAIL', 'native_uninstall_failed')
+        return False
+    evidence.check('KAS_UNINSTALL_GUARD', 'PASS', 'native_command_verified')
+    print('KAS UNINSTALL: owned resources removed, foreign preserved, idempotent re-run PASS', flush=True)
+    if not install(guest, mirror, revision, evidence, foreign):
+        evidence.set('KAS_UNINSTALL', 'FAIL', 'native_uninstall_failed')
+        return False
+    if not doctor(guest, evidence, revision):
+        evidence.set('KAS_UNINSTALL', 'FAIL', 'native_uninstall_failed')
+        return False
+    evidence.set('KAS_UNINSTALL', 'PASS', 'native_uninstall_passed')
+    print('KAS UNINSTALL: clean reinstall and Doctor passed after removal', flush=True)
+    return True
+
+
+def removal_teardown_clean(guest, foreign):
+    """Every KAS-owned artifact is gone; user and foreign resources survive."""
+    def absent(command):
+        code, output, errors = guest.execute(command)
+        return code != 0 or not output.strip()
+    def present(command):
+        code, output, errors = guest.execute(command)
+        return code == 0 and bool(output.strip())
+    checks = [
+        ('ledger removed', absent('cat /opt/etc/keenetic-auto-setup/ownership.v1')),
+        ('watchdog wrapper removed', absent('cat /opt/etc/cron.5mins/mihomo_watchdog')),
+        ('watchdog binary removed', absent('cat /opt/bin/mihomo_watchdog.sh')),
+        ('netfilter hook removed', absent('cat /opt/etc/ndm/netfilter.d/020-bypass_wa.sh')),
+        ('owned feed removed', absent('cat /opt/etc/opkg/magitrickle.conf')),
+        ('owned cron schedule removed', absent("grep mihomo_watchdog /opt/etc/crontab")),
+        ('mangle chain removed', absent('iptables -t mangle -S _CUST_BYPASS_WA_')),
+        ('policy removed', absent('/bin/ndmc -c "show running-config" | grep -c "^ip policy bypass_wa$"')),
+        ('owned proxy removed', absent('/bin/ndmc -c "show running-config" | grep -c "^interface Proxy0$"')),
+        ('packages removed', absent('opkg list-installed | grep -E "^(mihomo|magitrickle) "')),
+        ('dns intercept preserved', present('/bin/ndmc -c "show running-config" | grep "intercept enable"')),
+        ('journal complete', present('tail -n 1 /opt/kas-uninstall-backups/*/transaction/journal.v1 | grep -x complete')),
+        ('rollback cache present', present('cat /opt/kas-uninstall-backups/*/packages/MANIFEST')),
+    ]
+    if foreign is not None:
+        checks.append(('foreign proxy preserved',
+                       present('/bin/ndmc -c "show running-config" | grep -A4 "^interface Proxy0$" | grep 1081')))
+        checks.append(('foreign cron preserved',
+                       present('grep foreign-job /opt/etc/crontab')))
+    for label, ok in checks:
+        if not ok:
+            print('KAS UNINSTALL teardown: ' + label + ' FAILED', flush=True)
+            return False
+    return True
 
 
 def lifecycle(guest, mirror, revision, evidence, context, private, phase):
@@ -497,7 +558,7 @@ def lifecycle(guest, mirror, revision, evidence, context, private, phase):
         return False
     phase['name'] = 'KAS_UNINSTALL'
     evidence.set('KAS_UNINSTALL', 'NOT_TESTED', 'unattempted')
-    return uninstall(guest, mirror, evidence, None)
+    return uninstall(guest, mirror, evidence, None, revision)
 
 
 def foreign_profile(args, private, credentials, coldboot, mirror, port, tls_port, evidence):
@@ -552,7 +613,7 @@ def foreign_profile(args, private, credentials, coldboot, mirror, port, tls_port
                 recorded = local.gates['KAS_REBOOT']
                 failure['reason'] = recorded['reason'] if recorded['status'] == 'FAIL' else 'native_reboot_failed'
                 return
-            completed['ok'] = uninstall(guest, mirror, local, foreign)
+            completed['ok'] = uninstall(guest, mirror, local, foreign, args.kas_ref)
             if not completed['ok']:
                 recorded = local.gates['KAS_UNINSTALL']
                 failure['reason'] = recorded['reason'] if recorded['status'] == 'FAIL' else 'execution_failed'
