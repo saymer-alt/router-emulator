@@ -1,0 +1,139 @@
+# Research boot only. No flash image upload or production device access.
+# Public evaluation firmware is only downloaded into ephemeral Github runner.
+#
+# HISTORICAL EXPERIMENT (dispatch-only). The KB-51 boot candidate here is
+# superseded by the KB-41 configuration in the boot-fix commit of the
+# Ported chain (PR #2), which restores pull_request automation with a
+# working NAND map. This file stays for diagnostics; run it by hand from
+# the Actions tab. It is not a merge gate.
+name: Ported WR3000P - isolated first boot experiment
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ported-coldboot:
+    name: Ported 5.1.8 candidate - BL2/FIP/kernel gate (not KAS)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      EMU_VERSION: "3.8"
+      OPENWRT_VERSION: "25.12.5"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends mtd-utils unzip socat curl wget python3
+
+      - name: Emulator binary and public presets (pinned SHA256)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/ported-emulator"
+          cd "$RUNNER_TEMP/ported-emulator"
+          base="https://github.com/stavultras/router-emulator/releases/download/v$EMU_VERSION"
+          curl -fL --retry 3 -o emulator.tar.gz "$base/Router-Emulator-$EMU_VERSION-linux-x86_64.tar.gz"
+          curl -fL --retry 3 -o presets.zip "$base/Router-Emulator-$EMU_VERSION-presets.zip"
+          echo '77fa6f8a6a00af1164c9e144dc2f8bda7154877271498666bb9f17355d2e74d6  emulator.tar.gz' | sha256sum -c -
+          echo 'ef98b33c7636b5e792dcb16bcd1ad54f247639fccc19e9d9662fd422954d0732  presets.zip' | sha256sum -c -
+          tar xzf emulator.tar.gz
+          unzip -q presets.zip
+          echo "EMU_ROOT=$RUNNER_TEMP/ported-emulator/Router-Emulator" >> "$GITHUB_ENV"
+
+      - name: Public evaluation firmware and KeenBOOT KB-51 (pinned SHA256)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/ported-source"
+          cd "$RUNNER_TEMP/ported-source"
+          curl -fL --retry 3 --max-time 180 -o ported.bin \
+            'https://osvault.project-athens.com/osvault/Cudy%20WR3000P/Cudy_WR3000P_5.1.8.bin'
+          curl -fL --retry 3 --max-time 90 -o keenboot.bin \
+            'https://osvault.project-athens.com/files/keenboot/aarch64/KB-51/KeenBOOT_WR3000P_KB-51.bin'
+          echo '710e4a37b1aa9f3a65a5122edd0650f5c5ad3e6eca5df53b11ac28aab2664eb7  ported.bin' | sha256sum -c -
+          echo '1e6592cf8eff1cdd523e4299d6d762fa297deb5db4d93cc9bd1520b49e29b430  keenboot.bin' | sha256sum -c -
+
+      - name: OpenWrt preloader and safe disposable NAND candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$EMU_ROOT"
+          tools/prepare-nand.sh cudy_wr3000p-v1 "$OPENWRT_VERSION"
+          cd "$GITHUB_WORKSPACE"
+          python3 lab/prepare_ported_wr3000p.py \
+            --stock-nand "$EMU_ROOT/nand-wr3000p" \
+            --ported "$RUNNER_TEMP/ported-source/ported.bin" \
+            --keenboot "$RUNNER_TEMP/ported-source/keenboot.bin" \
+            --out "$RUNNER_TEMP/ported-candidate"
+
+      - name: Actual QEMU boot investigation (fail if any stage missing)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 lab/run.py \
+            --emulator-root "$EMU_ROOT" \
+            --scenario lab/scenarios/ported-wr3000p-firstboot.json \
+            --preset cudy-wr3000p-v1 \
+            --nand-dir "$RUNNER_TEMP/ported-candidate" \
+            --output-dir "$RUNNER_TEMP/ported-proof" \
+            --max-seconds 900
+
+      - name: Summarize sanitized evidence (without any guest console or binaries)
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f "$RUNNER_TEMP/ported-proof/report.json" ]; then
+            python3 - "$RUNNER_TEMP/ported-proof/report.json" <<'PY'
+          import json,sys
+          d=json.load(open(sys.argv[1]))
+          print('EVIDENCE:',d['evidence'],'OUTCOME:',d['outcome'])
+          for i,s in enumerate(d['steps'],1):
+              print(i,s['action'],s['outcome'],'seconds',s.get('elapsed_seconds'))
+          PY
+          else
+            echo 'BLOCKED: candidate creation or QEMU launch did not produce report'
+          fi
+          python3 - "$RUNNER_TEMP/ported-proof/console" <<'PY'
+          import re,sys
+          from pathlib import Path
+          console=Path(sys.argv[1])
+          items=sorted(console.glob('console_*.log')) if console.is_dir() else []
+          if items:
+              data=items[-1].read_bytes()[-2500000:].decode('utf-8','replace')
+              marks=[
+                  ('KeenBOOT_brand',r'KeenBOOT'),
+                  ('U_Boot',r'U-Boot'),
+                  ('BL31',r'BL31'),
+                  ('Linux_version',r'Linux version'),
+                  ('Starting_kernel',r'Starting kernel'),
+                  ('Autoboot_prompt',r'Hit any key to stop autoboot'),
+                  ('U_Boot_command_prompt',r'(?m)^\s*(?:=>|MT7981[^\n]{0,35}>|KeenBOOT[^\n]{0,35}>)'),
+                  ('Reading_NAND',r'(?i)(nand read|reading.*nand|spi.nand)'),
+                  ('UBI_attach',r'(?i)(ubi: attaching|ubi0:|UBI device)'),
+                  ('UBI_error',r'(?i)(no ubi|ubi.*error|ubi.*failed|invalid.*ubi)'),
+                  ('Bad_Magic',r'(?i)(bad magic|wrong image format|bad FIT|invalid FIT)'),
+                  ('Missing_Image',r'(?i)(no such.*image|no valid image|image.*not found|boot.*failed)'),
+                  ('NMBM',r'NMBM'),
+                  ('NAND_ECC',r'(?i)(ecc error|nand.*bad block|ecc uncorrectable)'),
+                  ('TFTP_request',r'(?i)(tftp.*request|tftpboot)'),
+                  ('Bootdelay',r'(?i)(bootdelay|bootcmd|autoboot)'),
+              ]
+              print('SAFE UART MARKER REPORT (pattern presence only; zero raw guest text):')
+              for label,pattern in marks:
+                  print('  '+label+': '+('YES' if re.search(pattern,data) else 'no'))
+          else:
+              print('SAFE UART MARKER REPORT: no local UART log available')
+          PY
+
+      - name: Remove ALL Ported assets on ephemeral runner (no artifact upload)
+        if: always()
+        shell: bash
+        run: |
+          rm -rf "$RUNNER_TEMP/ported-source" "$RUNNER_TEMP/ported-candidate" "$RUNNER_TEMP/ported-proof" "$RUNNER_TEMP/ported-emulator"
+          echo 'Guest firmware/bootloader/flash/UART never uploaded to GitHub artifacts.'

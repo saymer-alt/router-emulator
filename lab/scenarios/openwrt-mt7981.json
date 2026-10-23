@@ -1,0 +1,69 @@
+{
+  "name": "OpenWrt MT7981 baseline boot/reboot",
+  "evidence": "OPENWRT_QEMU_SMOKE",
+  "steps": [
+    {
+      "action": "wait_serial",
+      "pattern": "BL2:",
+      "timeout_sec": 90
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "U-Boot 20",
+      "timeout_sec": 150
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Starting kernel",
+      "timeout_sec": 240
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Linux version",
+      "timeout_sec": 100
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Please press Enter",
+      "timeout_sec": 480
+    },
+    {
+      "action": "probe_http",
+      "url": "http://127.0.0.1:8080/cgi-bin/luci/",
+      "statuses": [
+        200,
+        403
+      ],
+      "body_regex": "luci-static",
+      "timeout_sec": 300
+    },
+    {
+      "action": "reset"
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "BL2:",
+      "timeout_sec": 180
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "U-Boot 20",
+      "timeout_sec": 180
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Starting kernel",
+      "timeout_sec": 240
+    },
+    {
+      "action": "probe_http",
+      "url": "http://127.0.0.1:8080/cgi-bin/luci/",
+      "statuses": [
+        200,
+        403
+      ],
+      "body_regex": "luci-static",
+      "timeout_sec": 300
+    }
+  ]
+}
