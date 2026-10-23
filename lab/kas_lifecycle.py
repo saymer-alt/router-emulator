@@ -179,6 +179,9 @@ def wait_netfilter_settled(guest, budget=60):
     # QEMU TCG observed exceeding 20s while every probe kept failing; real
     # hardware settles in seconds, and exceeding the bound still fails.
     until = time.monotonic() + budget
+    probe_failures = 0
+    content_samples = 0
+    last_shape = None
     while True:
         try:
             rules = guest.command('iptables -t mangle -S _CUST_BYPASS_WA_')
@@ -186,9 +189,21 @@ def wait_netfilter_settled(guest, budget=60):
                      if line.endswith(' -j _CUST_BYPASS_WA_')]
         except Exception:
             rules = None
-        if rules is not None and netfilter_settled(rules, links):
-            return rules, links
+            probe_failures += 1
+        if rules is not None:
+            content_samples += 1
+            entries = [line for line in rules.splitlines() if line.startswith('-A ')]
+            last_shape = (len(entries), len(links), len(entries) == 3 and all(
+                value in entries[index] for index, value in
+                enumerate(('-j MARK', '-j CONNMARK --save-mark', '-j RETURN'))))
+            if netfilter_settled(rules, links):
+                return rules, links
         if time.monotonic() >= until:
+            # Sanitized one-line diagnosis: counters and the chain's public
+            # shape only; no guest text, no rule bodies, no UART data.
+            print('KAS SETTLE DIAGNOSTIC: probe_failures=%d content_samples=%d '
+                  'last_shape(entries,links,order_ok)=%s'
+                  % (probe_failures, content_samples, last_shape), flush=True)
             raise ContractFailure('native_rules_not_ready')
         time.sleep(2)
 
