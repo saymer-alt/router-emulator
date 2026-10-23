@@ -63,7 +63,7 @@ namespace RouterEmulator
         // Filogic ones, e.g. gmac0/nand, for every preset)
         static readonly string[] Mt7621Keys = { "ports", "ddr", "usb-port", "reset-gpio", "wps-gpio",
             "reset-active-high", "wps-active-high", "pcie0", "pcie1", "pcie2", "flash", "nand-id",
-            "dcache", "poweroff" };   // + led1..ledN
+            "nor", "nor-id", "nor-uid", "dcache", "poweroff" };   // + led1..ledN
 
         // LAN1 "This PC only": router LAN address and port forwards
         // "pcport:routerport,..." from 127.0.0.1 to the router
@@ -213,15 +213,22 @@ namespace RouterEmulator
         // MT7621 boards: Wi-Fi cards in the three PCIe slots, data cache model
         ComboBox[] pcieSlot = new ComboBox[3];
         CheckBox dcache;
-        // the MT7621 tab for that SoC only, the chip identity one (eFuse,
-        // SPI-NAND UID) for the Filogic SoCs only; both after "Buttons"
+        // the MT7621 tab for that SoC only (after "Ethernet"); the chip
+        // identity one after "Buttons": eFuse and SPI-NAND UID on the
+        // Filogic SoCs, the SPI-NOR UID on the MT7621
         TabControl tabs;
-        TabPage mipsPage, idPage, buttonsPage;
+        TabPage mipsPage, idPage, ethPage, buttonsPage;
+        readonly List<Control> filogicId = new List<Control>(), mt7621Id = new List<Control>();
+        // what the board does not have is hidden, with the labels and hints
+        // of the control (extras) and the rows below moved up (origTop)
+        readonly Dictionary<Control, List<Control>> extras = new Dictionary<Control, List<Control>>();
+        readonly HashSet<Control> hidden = new HashSet<Control>();
+        readonly Dictionary<Control, int> origTop = new Dictionary<Control, int>();
         ComboBox[] swPort = new ComboBox[5];
         NumericUpDown gmac0Rst, gmac1Rst, port5Rst, port5Addr, resetGpio, wpsGpio;
         TextBox flashId;                // JEDEC ID of the boot flash chip (nand-id / nor-id)
         CheckBox resetHigh, wpsHigh;
-        TextBox lanIp, lanFwd, efuseFile, efuseUid, nandUid;
+        TextBox lanIp, lanFwd, efuseFile, efuseUid, nandUid, norUid;
         ComboBox poweroff;
         CheckBox autoDesc;
         ListBox ledList;
@@ -232,7 +239,7 @@ namespace RouterEmulator
             "name", "description", "gmac0", "ports", "gmac0-port", "gmac0-reset-gpio", "gmac1",
             "gmac1-port", "gmac1-reset-gpio", "nand", "ddr", "ram", "usb-port", "reset-gpio",
             "wps-gpio", "reset-active-high", "wps-active-high", "lan-ip", "lan-forwards", "nand-dir",
-            "flash", "nor", "nor-id", "poweroff", "efuse", "efuse-uid", "nand-uid", "soc", "port5",
+            "flash", "nor", "nor-id", "nor-uid", "poweroff", "efuse", "efuse-uid", "nand-uid", "soc", "port5",
             "port5-phy-addr", "port5-reset-gpio", "pcie-wifi", "nor-nand", "nand-id", "pcie0", "pcie1",
             "pcie2", "dcache" };
 
@@ -263,6 +270,10 @@ namespace RouterEmulator
             Controls.Add(tabs);
             var mem = Page(tabs, L.T("ed.tab_general", "General"));
             var eth = Page(tabs, "Ethernet");
+            ethPage = eth;
+            // created here, so it is in place before the window has a handle
+            // (TabPages.Insert does nothing until then)
+            mipsPage = Page(tabs, L.T("ed.tab_mt7621", "PCIe / CPU"));
             int gy = 22;
             gmac0 = Combo(eth, "GMAC0 (mac@0):", ref gy,
                 new Choice("mt7531", L.T("ed.mt7531", "MT7531 switch (5 x 1G ports)")),
@@ -274,12 +285,14 @@ namespace RouterEmulator
                 new Choice("gpy211", L.T("ed.gpy211", "GPY211 2.5G PHY (MaxLinear)")),
                 new Choice("en8811h", L.T("ed.en8811h", "EN8811H 2.5G PHY (Airoha)")),
                 new Choice("none", L.T("ed.not_connected", "Not connected")));
-            eth.Controls.Add(new Label { Left = 10, Top = gy + 3, Width = 130, Text = L.T("ed.switch_ports", "Switch ports 0..4:") });
+            var swLabel = new Label { Left = 10, Top = gy + 3, Width = 130, Text = L.T("ed.switch_ports", "Switch ports 0..4:") };
+            eth.Controls.Add(swLabel);
             for (int i = 0; i < 5; i++) {
                 swPort[i] = new ComboBox { Left = 140 + i * 94, Top = gy, Width = 88, DropDownStyle = ComboBoxStyle.DropDown };
                 swPort[i].Items.AddRange(PortIds);
                 eth.Controls.Add(swPort[i]);
             }
+            Extra(swPort[0], swLabel);
             gy += 30;
             // a 2.5G PHY on switch port 5 (SGMII), e.g. MT7986 boards
             port5 = Combo(eth, L.T("ed.port5", "Switch port 5:"), ref gy,
@@ -288,9 +301,11 @@ namespace RouterEmulator
                 new Choice("yt8821", L.T("ed.yt8821", "YT8821 2.5G PHY (Motorcomm)")),
                 new Choice("gpy211", L.T("ed.gpy211", "GPY211 2.5G PHY (MaxLinear)")));
             port5.Width = 230;
-            eth.Controls.Add(new Label { Left = 380, Top = gy - 27, Width = 90, Text = L.T("ed.mdio_addr", "MDIO address:") });
+            var mdio = new Label { Left = 380, Top = gy - 27, Width = 90, Text = L.T("ed.mdio_addr", "MDIO address:") };
+            eth.Controls.Add(mdio);
             port5Addr = new NumericUpDown { Left = 470, Top = gy - 30, Width = 60, Minimum = 0, Maximum = 31, Value = 5 };
             eth.Controls.Add(port5Addr);
+            Extra(port5Addr, mdio);
             port5Port = PortCombo(eth, L.F("ed.phy_port", "{0} PHY port:", "Port 5"), ref gy, out port5Rst);
             gmac0Port = PortCombo(eth, L.F("ed.phy_port", "{0} PHY port:", "GMAC0"), ref gy, out gmac0Rst);
             gy += 6;
@@ -330,8 +345,9 @@ namespace RouterEmulator
                 new Choice("nand:256", "SPI-NAND 256 " + mb + " (Winbond W25N02KV)"),
                 new Choice("nand:512", "SPI-NAND 512 " + mb + " (Winbond W25N04KV)"),
                 new Choice("nor:16:ef4018", "SPI-NOR 16 " + mb + " (Winbond W25Q128JV)"),
-                new Choice("nor:16:204018", "SPI-NOR 16 " + mb + " (XMC XM25QH128C)"),
+                new Choice("nor:16:204018", "SPI-NOR 16 " + mb + " (XMC XM25QH128C/D)"),
                 new Choice("nor:16:c84018", "SPI-NOR 16 " + mb + " (GigaDevice GD25Q128)"),
+                new Choice("nor:32:ef4019", "SPI-NOR 32 " + mb + " (Winbond W25Q256JV)"),
                 new Choice("nor:64:ef4020", "SPI-NOR 64 " + mb + " (Winbond W25Q512JV)"),
                 new Choice("emmc:0", L.T("ed.emmc", "eMMC (image *.img in the flash folder)")),
                 // value "pnand:<MB>:<READ ID>": MT7621 NFI parallel NAND
@@ -339,9 +355,11 @@ namespace RouterEmulator
                 new Choice("pnand:128:ecf1009540", L.F("ed.pnand", "Parallel NAND {0} (MT7621, {1})", "128 " + mb, "Samsung K9F1G08U0D")));
             // the chip's ID, filled in from the choice and editable (vendor
             // firmware may check it, e.g. Cudy's against bdinfo)
-            mem.Controls.Add(new Label { Left = 450, Top = gy - 27, Width = 25, Text = "ID:" });
+            var idLabel = new Label { Left = 450, Top = gy - 27, Width = 25, Text = "ID:" };
+            mem.Controls.Add(idLabel);
             flashId = new TextBox { Left = 475, Top = gy - 30, Width = 90 };
             mem.Controls.Add(flashId);
+            Extra(flashId, idLabel);
             // a SPI-NAND next to a SPI-NOR boot flash or the other way round
             // (nor-nand=on, e.g. Teltonika RUTC50, OpenWrt One)
             flash2 = Combo(mem, L.T("ed.flash2", "Second flash:"), ref gy,
@@ -350,11 +368,14 @@ namespace RouterEmulator
                 new Choice("nand:256", "SPI-NAND 256 " + mb + " (Winbond W25N02KV)"),
                 new Choice("nand:512", "SPI-NAND 512 " + mb + " (Winbond W25N04KV)"),
                 new Choice("nor:16:ef4018", "SPI-NOR 16 " + mb + " (Winbond W25Q128JV)"),
-                new Choice("nor:16:204018", "SPI-NOR 16 " + mb + " (XMC XM25QH128C)"),
+                new Choice("nor:16:204018", "SPI-NOR 16 " + mb + " (XMC XM25QH128C/D)"),
                 new Choice("nor:16:c84018", "SPI-NOR 16 " + mb + " (GigaDevice GD25Q128)"),
+                new Choice("nor:32:ef4019", "SPI-NOR 32 " + mb + " (Winbond W25Q256JV)"),
                 new Choice("nor:64:ef4020", "SPI-NOR 64 " + mb + " (Winbond W25Q512JV)"));
-            mem.Controls.Add(new Label { Left = 140, Top = gy - 6, Width = 460, Height = 16, ForeColor = Color.DimGray,
-                Text = L.T("ed.flash2_hint", "NOR files in the flash folder, NAND files in its subfolder \"nand\"") });
+            var flash2Hint = new Label { Left = 140, Top = gy - 6, Width = 460, Height = 16, ForeColor = Color.DimGray,
+                Text = L.T("ed.flash2_hint", "NOR files in the flash folder, NAND files in its subfolder \"nand\"") };
+            mem.Controls.Add(flash2Hint);
+            Extra(flash2, flash2Hint);
             gy += 14;
             usbPort = Combo(mem, L.T("ed.usb_port", "USB port:"), ref gy,
                 new Choice("2", "USB 2.0"), new Choice("3", "USB 3.0"), new Choice("none", L.T("ed.none", "None")));
@@ -362,8 +383,10 @@ namespace RouterEmulator
             pcieWifi = Combo(mem, L.T("ed.pcie_wifi", "PCIe Wi-Fi card:"), ref gy,
                 new Choice("none", L.T("ed.none", "None")),
                 new Choice("mt7992", "MediaTek MT7992 (Wi-Fi 7)"));
-            mem.Controls.Add(new Label { Left = 140, Top = gy - 6, Width = 460, Height = 16, ForeColor = Color.DimGray,
-                Text = L.T("ed.pcie_wifi_hint", "OpenWrt needs: apk add kmod-mt7996e kmod-mt7992-firmware") });
+            var pcieHint = new Label { Left = 140, Top = gy - 6, Width = 460, Height = 16, ForeColor = Color.DimGray,
+                Text = L.T("ed.pcie_wifi_hint", "OpenWrt needs: apk add kmod-mt7996e kmod-mt7992-firmware") };
+            mem.Controls.Add(pcieHint);
+            Extra(pcieWifi, pcieHint);
             gy += 14;
             mem.Controls.Add(new Label { Left = 10, Top = gy + 3, Width = 130, Text = L.T("ed.nand_dir", "Flash folder:") });
             nandDir = new TextBox { Left = 140, Top = gy, Width = 370 };
@@ -400,8 +423,9 @@ namespace RouterEmulator
                 new Choice("halt", L.T("ed.poweroff_halt", "Stay halted (like a real MT7621)")));
             poweroff.Left = 140;
             // MT7621 boards: PCIe Wi-Fi cards and the data cache model
-            var mips = Page(tabs, "MT7621");
-            mipsPage = mips;
+            var mips = mipsPage;
+            mips.Controls.Add(new Label { Left = 10, Top = 3, Width = 590, Height = 16, ForeColor = Color.DimGray,
+                Text = L.T("ed.mt7621_hint", "MT7621 boards: Wi-Fi cards in the three PCIe slots and the CPU data cache model") });
             int my = 22;
             for (int i = 0; i < 3; i++)
                 pcieSlot[i] = Combo(mips, L.F("ed.pcie_slot", "PCIe slot {0}:", i), ref my,
@@ -424,7 +448,8 @@ namespace RouterEmulator
             idPage = idg;
             idg.Controls.Add(new Label { Left = 10, Top = 3, Width = 590, Height = 16, ForeColor = Color.DimGray,
                 Text = L.T("ed.identity", "Chip identity (empty = default)") });
-            idg.Controls.Add(new Label { Left = 10, Top = 25, Width = 130, Text = L.T("ed.efuse", "eFuse dump:") });
+            var efLabel = new Label { Left = 10, Top = 25, Width = 130, Text = L.T("ed.efuse", "eFuse dump:") };
+            idg.Controls.Add(efLabel);
             efuseFile = new TextBox { Left = 140, Top = 22, Width = 380 };
             idg.Controls.Add(efuseFile);
             var efBrowse = new Button { Left = 526, Top = 21, Width = 84, Height = 25, Text = L.T("main.browse", "Browse...") };
@@ -434,12 +459,25 @@ namespace RouterEmulator
                 }
             };
             idg.Controls.Add(efBrowse);
-            efuseUid = UidRow(idg, L.T("ed.efuse_uid", "eFuse UID:"), 55);
-            nandUid = UidRow(idg, L.T("ed.nand_uid", "NAND UID:"), 85);
-            idg.Controls.Add(new Label { Left = 140, Top = 113, Width = 470, Height = 48, ForeColor = Color.DimGray,
+            filogicId.AddRange(new Control[] { efLabel, efuseFile, efBrowse });
+            efuseUid = UidRow(idg, L.T("ed.efuse_uid", "eFuse UID:"), 55, 16, filogicId);
+            nandUid = UidRow(idg, L.T("ed.nand_uid", "NAND UID:"), 85, 16, filogicId);
+            var idHint = new Label { Left = 140, Top = 113, Width = 470, Height = 48, ForeColor = Color.DimGray,
                 Text = L.T("ed.identity_hint", "eFuse dump of a real board (/sys/bus/nvmem/devices/nvmem0/nvmem); "
                     + "UIDs: 32 hex digits, make several emulated boards different. "
-                    + "Vendor firmware may check the NAND UID.") });
+                    + "Vendor firmware may check the NAND UID.") };
+            idg.Controls.Add(idHint);
+            filogicId.Add(idHint);
+            // MT7621: the SPI-NOR's unique ID (command 4Bh), e.g. Cudy's
+            // firmware checks it against bdinfo; in the place of the
+            // Filogic rows, only one of the two sets is shown
+            norUid = UidRow(idg, L.T("ed.nor_uid", "NOR UID:"), 22, 8, mt7621Id);
+            var norHint = new Label { Left = 140, Top = 50, Width = 470, Height = 48, ForeColor = Color.DimGray,
+                Text = L.T("ed.nor_uid_hint", "MT7621 with a SPI-NOR: 16 hex digits, as the stock firmware's "
+                    + "/proc/sys/dev/flash_uuid shows them after the \"-\". Cudy's stock firmware lets you "
+                    + "log in only with the UID of your own router.") };
+            idg.Controls.Add(norHint);
+            mt7621Id.Add(norHint);
             // front panel LEDs (shown above the router console)
             var lp = Page(tabs, L.T("ed.tab_leds", "LEDs"));
             lp.Controls.Add(new Label { Left = 10, Top = 3, Width = 590, Height = 16, ForeColor = Color.DimGray,
@@ -532,6 +570,8 @@ namespace RouterEmulator
             Fill(p ?? Default());
             autoDesc.Checked = p == null;
             UpdateEnabled();
+            // the tabs, now that they can be inserted (the handle: to be sure)
+            Load += delegate { tabs.Handle.ToString(); UpdateEnabled(); };
         }
 
         static Preset Default()
@@ -556,12 +596,14 @@ namespace RouterEmulator
             y += step;
         }
 
-        static ComboBox Combo(Control parent, string label, ref int y, params Choice[] items)
+        ComboBox Combo(Control parent, string label, ref int y, params Choice[] items)
         {
-            parent.Controls.Add(new Label { Left = 10, Top = y + 3, Width = 130, Text = label });
+            var l = new Label { Left = 10, Top = y + 3, Width = 130, Text = label };
+            parent.Controls.Add(l);
             var c = new ComboBox { Left = 140, Top = y, Width = 300, DropDownStyle = ComboBoxStyle.DropDownList };
             c.Items.AddRange(items);
             parent.Controls.Add(c);
+            Extra(c, l);
             y += 30;
             return c;
         }
@@ -573,14 +615,17 @@ namespace RouterEmulator
             return tp;
         }
 
-        TextBox UidRow(Control parent, string label, int top)
+        // a UID of "bytes" bytes; its controls also go into "group"
+        TextBox UidRow(Control parent, string label, int top, int bytes, List<Control> group)
         {
-            parent.Controls.Add(new Label { Left = 10, Top = top + 3, Width = 130, Text = label });
-            var t = new TextBox { Left = 140, Top = top, Width = 280, MaxLength = 32 };
+            var l = new Label { Left = 10, Top = top + 3, Width = 130, Text = label };
+            parent.Controls.Add(l);
+            var t = new TextBox { Left = 140, Top = top, Width = 280, MaxLength = bytes * 2 };
             parent.Controls.Add(t);
             var r = new Button { Left = 426, Top = top - 1, Width = 100, Height = 25, Text = L.T("ed.random", "Random") };
+            group.AddRange(new Control[] { l, t, r });
             r.Click += delegate {
-                var b = new byte[16];
+                var b = new byte[bytes];
                 new Random().NextBytes(b);
                 t.Text = BitConverter.ToString(b).Replace("-", "").ToLowerInvariant();
             };
@@ -588,23 +633,27 @@ namespace RouterEmulator
             return t;
         }
 
-        static bool ValidUid(string s)
+        static bool ValidUid(string s, int digits = 32)
         {
             if (s.Length == 0) return true;
-            if (s.Length != 32) return false;
+            if (s.Length != digits) return false;
             foreach (char c in s) if (Uri.IsHexDigit(c) == false) return false;
             return true;
         }
 
-        static ComboBox PortCombo(Control parent, string label, ref int y, out NumericUpDown rst)
+        ComboBox PortCombo(Control parent, string label, ref int y, out NumericUpDown rst)
         {
-            parent.Controls.Add(new Label { Left = 10, Top = y + 3, Width = 130, Text = label });
+            var l = new Label { Left = 10, Top = y + 3, Width = 130, Text = label };
+            parent.Controls.Add(l);
             var c = new ComboBox { Left = 140, Top = y, Width = 88, DropDownStyle = ComboBoxStyle.DropDown };
             c.Items.AddRange(PortIds);
             parent.Controls.Add(c);
-            parent.Controls.Add(new Label { Left = 240, Top = y + 3, Width = 230, Text = L.T("ed.phy_reset", "PHY reset GPIO (-1 = not wired):") });
+            Extra(c, l);
+            var rl = new Label { Left = 240, Top = y + 3, Width = 230, Text = L.T("ed.phy_reset", "PHY reset GPIO (-1 = not wired):") };
+            parent.Controls.Add(rl);
             rst = new NumericUpDown { Left = 470, Top = y, Width = 60, Minimum = -1, Maximum = 100, Value = -1 };
             parent.Controls.Add(rst);
+            Extra(rst, rl);
             y += 30;
             return c;
         }
@@ -693,48 +742,93 @@ namespace RouterEmulator
             efuseFile.Text = p.Get("efuse");
             efuseUid.Text = p.Get("efuse-uid");
             nandUid.Text = p.Get("nand-uid");
+            norUid.Text = p.Get("nor-uid");
             ledList.Items.Clear();
             foreach (var d in LedDef.FromPreset(p)) ledList.Items.Add(d);
         }
 
         void UpdateEnabled()
         {
-            bool sw = IsSwitch(Val(gmac0));
-            foreach (var c in swPort) c.Enabled = sw;
-            port5.Enabled = Val(gmac0) == "mt7531";     // a PHY on port 5: MT7531 only
-            bool p5 = Val(gmac0) == "mt7531" && Val(port5) != "none";
-            port5Port.Enabled = port5Addr.Enabled = port5Rst.Enabled = p5;
-            gmac0Port.Enabled = ExtPhy(Val(gmac0));
-            gmac0Rst.Enabled = ExtPhy(Val(gmac0));
-            gmac1Port.Enabled = Val(gmac1) != "none" && Val(gmac1) != "mt7531-p5";
-            gmac1Rst.Enabled = ExtPhy(Val(gmac1));
-            pcieWifi.Enabled = HasPcie(Val(soc));         // MT7987 / MT7988 machines have the slot
-            flash2.Enabled = !Val(nandSize).StartsWith("emmc");
-            flashId.Enabled = !Val(nandSize).StartsWith("emmc");
-            // MT7621: the MT7530 on GMAC0 only, one boot flash, PCIe slots
+            // MT7621: the MT7530 on GMAC0 only (shown, fixed), one boot
+            // flash, PCIe slots
             bool m = Val(soc) == "mt7621";
-            if (m) {
-                gmac0.Enabled = gmac1.Enabled = port5.Enabled = flash2.Enabled = false;
-                port5Port.Enabled = port5Addr.Enabled = port5Rst.Enabled = false;
-                gmac0Port.Enabled = gmac0Rst.Enabled = gmac1Port.Enabled = gmac1Rst.Enabled = false;
-            } else {
-                gmac0.Enabled = gmac1.Enabled = true;
-            }
-            foreach (var c in pcieSlot) c.Enabled = m;
-            dcache.Enabled = m;
-            ShowTab(mipsPage, m);
-            ShowTab(idPage, !m);
+            bool emmc = Val(nandSize).StartsWith("emmc");
+            gmac0.Enabled = !m;
+            Show(IsSwitch(Val(gmac0)), swPort);
+            bool p5on = !m && Val(gmac0) == "mt7531";    // a PHY on port 5: MT7531 only
+            bool p5 = p5on && Val(port5) != "none";
+            Show(p5on, port5);
+            Show(p5, port5Addr, port5Port, port5Rst);
+            Show(!m && ExtPhy(Val(gmac0)), gmac0Port, gmac0Rst);
+            Show(!m, gmac1);
+            Show(!m && Val(gmac1) != "none" && Val(gmac1) != "mt7531-p5", gmac1Port);
+            Show(!m && ExtPhy(Val(gmac1)), gmac1Rst);
+            Show(HasPcie(Val(soc)), pcieWifi);           // MT7987 / MT7988 machines have the slot
+            Show(!m && !emmc, flash2);
+            Show(!emmc, flashId);
+            ShowTab(mipsPage, ethPage, m);
+            // chip identity: what the machine has, the tab only if anything
+            bool norId = m && Val(nandSize).StartsWith("nor");
+            Show(!m, filogicId.ToArray());
+            Show(norId, mt7621Id.ToArray());
+            ShowTab(idPage, buttonsPage, !m || norId);
+            Relayout(ethPage);
+            Relayout(tabs.TabPages[0]);
 
             UpdateDesc();
         }
 
-        // a tab shown or not, in its place right after "Buttons"
-        void ShowTab(TabPage page, bool show)
+        // a tab shown or not; shown: right after the page "after".  Not
+        // before the window exists: Windows ignores TabPages.Insert until the
+        // TabControl has a handle (Fill() goes through states in between, a
+        // page removed there would never come back); Load sets them
+        void ShowTab(TabPage page, TabPage after, bool show)
         {
-            if (show && !tabs.TabPages.Contains(page))
-                tabs.TabPages.Insert(tabs.TabPages.IndexOf(buttonsPage) + 1, page);
-            else if (!show && tabs.TabPages.Contains(page))
+            if (!tabs.IsHandleCreated) return;
+            bool placed = tabs.TabPages.IndexOf(page) == tabs.TabPages.IndexOf(after) + 1;
+            if (tabs.TabPages.Contains(page) && (!show || !placed))
                 tabs.TabPages.Remove(page);
+            if (show && !placed)
+                tabs.TabPages.Insert(tabs.TabPages.IndexOf(after) + 1, page);
+        }
+
+        void Extra(Control c, Control extra)
+        {
+            if (!extras.ContainsKey(c)) extras[c] = new List<Control>();
+            extras[c].Add(extra);
+        }
+
+        // shown and usable, or hidden with its labels
+        void Show(bool show, params Control[] cs)
+        {
+            foreach (var c in cs) {
+                var all = new List<Control> { c };
+                if (extras.ContainsKey(c)) all.AddRange(extras[c]);
+                foreach (var x in all) {
+                    x.Visible = x.Enabled = show;
+                    if (show) hidden.Remove(x); else hidden.Add(x);
+                }
+            }
+        }
+
+        // rows of a tab (from a control at the left edge or a hint of its
+        // own down to the next one) without anything shown are left out,
+        // the rows below move up
+        void Relayout(TabPage page)
+        {
+            var cs = page.Controls.Cast<Control>().ToList();
+            foreach (var c in cs) if (!origTop.ContainsKey(c)) origTop[c] = c.Top;
+            var starts = cs.Where(c => c.Left <= 10 || (c is Label && c.ForeColor == Color.DimGray
+                                                       && !extras.Values.Any(l => l.Contains(c))))
+                           .Select(c => origTop[c] - 5).Distinct().OrderBy(t => t).ToList();
+            int y = starts.Count > 0 ? starts[0] : 0;
+            for (int i = 0; i < starts.Count; i++) {
+                int end = i + 1 < starts.Count ? starts[i + 1] : int.MaxValue;
+                var row = cs.Where(c => origTop[c] >= starts[i] && origTop[c] < end).ToList();
+                if (row.All(c => hidden.Contains(c))) continue;
+                foreach (var c in row) c.Top = y + origTop[c] - starts[i];
+                y += i + 1 < starts.Count ? end - starts[i] : 0;
+            }
         }
 
         // another SoC: choices that only exist on one side are replaced
@@ -878,10 +972,9 @@ namespace RouterEmulator
             string id = flashId.Text.Trim().ToLowerInvariant();
             if (flash[0] == "nor") {
                 p.Set("flash", "nor");
-                if (!m) {       // the MT7621 machine has one SPI-NOR model
-                    p.Set("nor", flash[1]);
-                    p.Set("nor-id", id);
-                }
+                p.Set("nor", flash[1]);
+                p.Set("nor-id", id);
+                if (m && norUid.Text.Trim().Length > 0) p.Set("nor-uid", norUid.Text.Trim().ToLowerInvariant());
             } else if (flash[0] == "emmc") {
                 p.Set("flash", "emmc");
             } else if (flash[0] == "pnand") {
@@ -990,6 +1083,8 @@ namespace RouterEmulator
                 err = L.T("ed.flash2_mt7986", "On the MT7986 the SPI-NOR and the SPI-NAND are both on SPI0.");
             if (err == null && (!ValidUid(efuseUid.Text.Trim()) || !ValidUid(nandUid.Text.Trim())))
                 err = L.T("ed.bad_uid", "A UID must be 32 hex digits (or empty).");
+            if (err == null && norUid.Enabled && !ValidUid(norUid.Text.Trim(), 16))
+                err = L.T("ed.bad_nor_uid", "The NOR UID must be 16 hex digits (or empty).");
             if (err == null && !Preset.ValidIp(p.LanIp))
                 err = L.F("ed.bad_ip", "\"{0}\" is not an IPv4 address of a host.", p.LanIp);
             if (err == null && Preset.ParseForwards(p.LanForwards) == null)

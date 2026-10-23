@@ -100,7 +100,7 @@ no BL2 for it to try, reports welcome):
 | `nand-spi` | `0` (default) · `1` · `2` | SPI controller of the SPI-NAND (BPI-R4 Lite: 2) |
 | `switch-irq-gpio` | GPIO | EINT of the MT7531 interrupt (default 38 / 66 / 41 for MT7981 / MT7986 / MT7987) |
 | `flash=emmc`, `emmc-boot` | MB (4) | eMMC on MSDC0 instead: one image (the first `*.img` of the flash folder, or `-drive if=sd`) = boot0 + boot1 (`emmc-boot` MB each) + user area, size a power of 2 |
-| `nor`, `nor-id` | MB (16), JEDEC ID (`ef4018`) | SPI-NOR size and ID, e.g. `204018` = XMC XM25QH128C, `c84018` = GD25Q128; `nor=64,nor-id=ef4020` = Winbond W25Q512JV (64 MB, 4-byte addressing; e.g. a WR3000 with a bigger chip) |
+| `nor`, `nor-id` | MB (16), JEDEC ID (`ef4018`) | SPI-NOR size and ID, e.g. `204018` = XMC XM25QH128C/D, `c84018` = GD25Q128; `nor=32,nor-id=ef4019` = Winbond W25Q256JV, `nor=64,nor-id=ef4020` = Winbond W25Q512JV (over 16 MB: 4-byte addressing; e.g. a WR3000 with a bigger chip). MT7621: 16, 32 or 64 MB, and without `nor-id` the Winbond chip of that size |
 | `nor-uid` | 16 hex digits | MT7621 only: SPI-NOR unique ID (command 4b, default none); stock Cudy firmware of NOR boards (M1300 v2) checks chip ID + unique ID (`/proc/sys/dev/flash_uuid`, e.g. `2040182040-` + 16 digits) against bdinfo, without a match no admin password can be set or checked: set `nor-id` to the chip's ID and `nor-uid=` the 16 digits after the `-` |
 | `ddr` | `ddr3` · `ddr4` | soldered DRAM type: a BL2 built for the other type stops the machine, as DRAM init fails on a real board |
 | `usb-port` | `none` · `2` · `3` | USB connector (USB 3.0: devices attach at SuperSpeed) |

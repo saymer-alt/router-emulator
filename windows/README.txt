@@ -42,8 +42,8 @@ A preset (presets\*.ini) describes the hardware:
               the flash, otherwise DRAM initialisation fails as on a real
               board and the emulator stops with an error
   Boot flash  SPI-NAND 128 MB (W25N01GV), 256 MB (W25N02KV) or
-              512 MB (W25N04KV), SPI-NOR 16 MB (W25Q128JV / XM25QH128C /
-              GD25Q128) or SPI-NOR 64 MB (W25Q512JV)
+              512 MB (W25N04KV), SPI-NOR 16 MB (W25Q128JV / XM25QH128C/D /
+              GD25Q128), 32 MB (W25Q256JV) or 64 MB (W25Q512JV)
   USB         none, USB 2.0 or USB 3.0
   PCIe Wi-Fi  MT7987 boards: a card in the PCIe slot, MediaTek MT7992
               (Wi-Fi 7). The official OpenWrt image has no driver for it:
@@ -56,10 +56,17 @@ A preset (presets\*.ini) describes the hardware:
               device tree says GPIO_ACTIVE_HIGH. A wrong polarity looks
               like a button held down: U-Boot may start TFTP recovery or
               an upgrade, OpenWrt may enter failsafe.
+  PCIe / CPU  MT7621 boards: Wi-Fi cards in the three PCIe slots and the
+              CPU data cache model (Breed needs it)
   Chip identity
-              eFuse dump of a real board and per-chip eFuse / NAND unique
-              IDs (32 hex digits, "Random" button); empty = defaults.
-              Vendor firmware may check the NAND UID.
+              Filogic boards: eFuse dump of a real board and per-chip
+              eFuse / NAND unique IDs (32 hex digits, "Random" button).
+              MT7621 boards with a SPI-NOR: the NOR's unique ID (16 hex
+              digits; stock Cudy firmware lets you log in only with your
+              own router's, the digits after "-" in
+              /proc/sys/dev/flash_uuid). Empty = defaults. Vendor firmware
+              may check the NAND UID.
+  The editor shows only what the chosen SoC and devices have.
   LEDs       front panel lamps shown above the router console: name and
               one or more colours, each driven by a GPIO ("active low" =
               lit while the GPIO is 0), an LED pin of an Ethernet PHY

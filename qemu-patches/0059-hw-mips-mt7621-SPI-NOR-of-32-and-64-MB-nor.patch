@@ -1,0 +1,97 @@
+From 908525663d2df4f42f6c5b0a1219f5a08e1a53d1 Mon Sep 17 00:00:00 2001
+From: Dmitry Mostovoy <stavultras@gmail.com>
+Date: Thu, 22 Oct 2026 14:04:13 -0400
+Subject: [PATCH] hw/mips/mt7621: SPI-NOR of 32 and 64 MB (nor)
+
+MT7621 boards come with bigger NOR chips too (e.g. ZBT WG3526-32M,
+GL.iNet GL-MT1300: 32 MB).  mt7621-router: nor=16 (default), 32 or 64;
+the chip uses 4-byte addresses over 16 MB (the SPI controller passes the
+bytes through).  Without nor-id the Winbond chip of that size answers
+RDID: W25Q128JV / W25Q256JV / W25Q512JV (ef4018 / ef4019 / ef4020).
+The read window at 0x1c000000 maps the first 32 MB.
+
+OpenWrt for the ZBT WG3526-32M detects the 32 MB, and data written past
+16 MB reads back after a reboot; the stock Cudy M1300 v2 U-Boot reads
+ef4020 (it does not know the chip and boots on).
+---
+ hw/mips/mt7621.c | 32 +++++++++++++++++++++++---------
+ 1 file changed, 23 insertions(+), 9 deletions(-)
+
+diff --git a/hw/mips/mt7621.c b/hw/mips/mt7621.c
+index 378e26e..58ad0e5 100644
+--- a/hw/mips/mt7621.c
++++ b/hw/mips/mt7621.c
+@@ -303,6 +303,7 @@ typedef struct MT7621Board {
+     char *flash_dir;
+     bool flash_nand;            /* flash=nand: boot from parallel NAND */
+     char *nand_id;              /* its READ ID bytes (hex) */
++    uint32_t nor_mb;            /* SPI-NOR size: 16, 32 or 64 MB */
+     char *nor_id;               /* SPI-NOR RDID bytes (hex) */
+     char *nor_uid;              /* SPI-NOR unique ID (hex) */
+     char *ports;                /* MT7530 port 0..4 netdev ids, ':' separated */
+@@ -853,11 +854,16 @@ static void mt7621_create_flash(MT7621Board *b)
+         return;
+     }
+ 
+-    dev = qdev_new(TYPE_MTK_SPINOR);
+-    qdev_prop_set_uint32(dev, "size-mb", 16);
+-    if (b->nor_id) {
+-        qdev_prop_set_string(dev, "id", b->nor_id);
++    if (b->nor_mb != 16 && b->nor_mb != 32 && b->nor_mb != 64) {
++        error_report("nor must be 16, 32 or 64 (MB)");
++        exit(1);
+     }
++    dev = qdev_new(TYPE_MTK_SPINOR);
++    qdev_prop_set_uint32(dev, "size-mb", b->nor_mb);
++    /* default: the Winbond chip of that size (W25Q128JV/256JV/512JV) */
++    qdev_prop_set_string(dev, "id", b->nor_id ? b->nor_id
++                         : b->nor_mb == 64 ? "ef4020"
++                         : b->nor_mb == 32 ? "ef4019" : "ef4018");
+     if (b->nor_uid) {
+         /*
+          * as Cudy's flash_uuid shows it: the stock kernel prints the bytes
+@@ -889,9 +895,9 @@ static void mt7621_create_flash(MT7621Board *b)
+     b->nor = MTK_SPINOR(dev);
+ 
+     /*
+-     * memory-mapped read windows: the whole flash at 0x1c000000 (where the
+-     * stock MediaTek U-Boot 1.1.3 of NOR boards, e.g. Cudy, reads the
+-     * kernel image from) and its start at the reset vector
++     * memory-mapped read windows: the flash at 0x1c000000 (its first
++     * 32 MB; the stock MediaTek U-Boot 1.1.3 of NOR boards, e.g. Cudy,
++     * reads the kernel image from there) and its start at the reset vector
+      */
+     data = spinor_storage(b->nor, &size);
+     memory_region_init_ram_ptr(&b->flash_direct, NULL, "mt7621.flash-direct",
+@@ -1434,6 +1440,7 @@ static void mt7621_instance_init(Object *obj)
+     MT7621_MACHINE(obj)->b.reset_gpio = 18;
+     MT7621_MACHINE(obj)->b.wps_gpio = 95;     /* none: an unused pin */
+     MT7621_MACHINE(obj)->b.ddr = 3;
++    MT7621_MACHINE(obj)->b.nor_mb = 16;
+     MT7621_MACHINE(obj)->b.usb = 3;
+     MT7621_MACHINE(obj)->b.dcache_model = true;
+ }
+@@ -1474,11 +1481,18 @@ static void mt7621_machine_class_init(ObjectClass *oc, const void *data)
+     object_class_property_set_description(oc, "nand-id",
+         "READ ID bytes of the parallel NAND, hex (default ecf1009540, "
+         "Samsung K9F1G08U0D)");
++    object_class_property_add(oc, "nor", "uint32", mt7621_get_u32,
++                              mt7621_set_u32, NULL,
++                              (void *)offsetof(MT7621Board, nor_mb));
++    object_class_property_set_description(oc, "nor",
++        "SPI-NOR size in MB: 16 (default), 32 or 64; over 16 MB the chip "
++        "uses 4-byte addresses");
+     object_class_property_add_str(oc, "nor-id", mt7621_get_nor_id,
+                                   mt7621_set_nor_id);
+     object_class_property_set_description(oc, "nor-id",
+-        "RDID bytes of the SPI-NOR, hex, 3 to 6 (default ef4018, Winbond "
+-        "W25Q128JV; 204018: XMC XM25QH128C/D)");
++        "RDID bytes of the SPI-NOR, hex, 3 to 6 (default by the size: "
++        "ef4018 / ef4019 / ef4020, Winbond W25Q128JV / W25Q256JV / "
++        "W25Q512JV; 204018: XMC XM25QH128C/D)");
+     object_class_property_add_str(oc, "nor-uid", mt7621_get_nor_uid,
+                                   mt7621_set_nor_uid);
+     object_class_property_set_description(oc, "nor-uid",
+-- 
+2.47.3
+
