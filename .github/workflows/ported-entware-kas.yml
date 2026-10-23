@@ -1,0 +1,137 @@
+name: Ported authenticated Entware KAS laboratory
+
+on:
+  workflow_call:
+    inputs:
+      emulator_ref:
+        type: string
+        required: true
+      kas_ref:
+        type: string
+        required: true
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'lab/**'
+      - 'qemu-patches/0060-hw-arm-filogic-preserve-Keenetic-4.9-FE-receive-IRQ.patch'
+      - '.github/workflows/ported-entware-kas.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ported-lab-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ported-lab:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: saymer-alt/router-emulator
+          ref: ${{ inputs.emulator_ref || github.sha }}
+          persist-credentials: false
+      - name: Validate immutable laboratory inputs
+        env:
+          EMULATOR_REF: ${{ inputs.emulator_ref || github.sha }}
+          KAS_REF: ${{ inputs.kas_ref || '6dd6438e2b64bad0fe9205ab6575795f808dabd8' }}
+        run: |
+          [[ "$EMULATOR_REF" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$KAS_REF" =~ ^[a-f0-9]{40}$ ]]
+      - name: Pinned KAS source as guest input
+        uses: actions/checkout@v4
+        with:
+          repository: saymer-alt/keenetic-auto-setup
+          ref: ${{ inputs.kas_ref || '6dd6438e2b64bad0fe9205ab6575795f808dabd8' }}
+          path: kas-source
+          persist-credentials: false
+      - name: Host tools and regression contracts
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends mtd-utils unzip socat curl wget python3 python3-paramiko e2fsprogs openssl build-essential ninja-build meson pkg-config libglib2.0-dev libpixman-1-dev zlib1g-dev libslirp-dev libfdt-dev python3-venv
+          python3 -m unittest discover -s lab -p 'test*.py' -v
+      - name: Cache the changed AArch64 target by exact patch series
+        id: qemu-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ runner.temp }}/ported-qemu/qemu-system-aarch64
+            ${{ runner.temp }}/ported-qemu/qemu.sha256
+          key: ported-qemu-ubuntu24-v10.1.0-${{ hashFiles('qemu-patches/*.patch', 'lab/build_qemu.sh') }}
+      - name: Build only the required QEMU target after FE IRQ source fix
+        if: steps.qemu-cache.outputs.cache-hit != 'true'
+        run: bash lab/build_qemu.sh "$RUNNER_TEMP/ported-qemu"
+      - name: Retain the built target even when a later guest assertion fails
+        if: steps.qemu-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ runner.temp }}/ported-qemu/qemu-system-aarch64
+            ${{ runner.temp }}/ported-qemu/qemu.sha256
+          key: ported-qemu-ubuntu24-v10.1.0-${{ hashFiles('qemu-patches/*.patch', 'lab/build_qemu.sh') }}
+      - name: Pinned emulator wrapper and evaluation firmware
+        run: |
+          (cd "$RUNNER_TEMP/ported-qemu" && sha256sum -c qemu.sha256)
+          bash lab/fetch_lab_assets.sh "$RUNNER_TEMP/ported-assets"
+          cp "$RUNNER_TEMP/ported-qemu/qemu-system-aarch64" "$RUNNER_TEMP/ported-assets/downloads/Router-Emulator/qemu/qemu-system-aarch64"
+      - name: OpenWrt regression with the same patched QEMU
+        run: |
+          python3 -m lab.run \
+            --emulator-root "$RUNNER_TEMP/ported-assets/downloads/Router-Emulator" \
+            --scenario lab/scenarios/openwrt-mt7981.json \
+            --preset cudy-wr3000p-v1 \
+            --nand-dir "$RUNNER_TEMP/ported-assets/downloads/Router-Emulator/nand-wr3000p" \
+            --output-dir "$RUNNER_TEMP/ported-openwrt-private" \
+            --max-seconds 900
+      - name: Disposable NAND
+        run: |
+          python3 -m lab.prepare_ported_wr3000p \
+            --stock-nand "$RUNNER_TEMP/ported-assets/downloads/Router-Emulator/nand-wr3000p" \
+            --ported "$RUNNER_TEMP/ported-assets/downloads/ported.bin" \
+            --keenboot "$RUNNER_TEMP/ported-assets/downloads/keenboot.bin" \
+            --out "$RUNNER_TEMP/ported-nand"
+      - name: Execute independent gates
+        run: |
+          python3 -m lab.ported_e2e \
+            --emulator-root "$RUNNER_TEMP/ported-assets/downloads/Router-Emulator" \
+            --nand-dir "$RUNNER_TEMP/ported-nand" \
+            --private-dir "$RUNNER_TEMP/ported-private" \
+            --report-dir "$RUNNER_TEMP/ported-public" \
+            --kas-dir "$GITHUB_WORKSPACE/kas-source" \
+            --kas-ref "${{ inputs.kas_ref || '6dd6438e2b64bad0fe9205ab6575795f808dabd8' }}"
+      - name: Public fixed-label summary
+        if: always()
+        run: |
+          python3 - "$RUNNER_TEMP/ported-public" <<'PY'
+          import pathlib,sys
+          from lab.gates import Evidence
+          root=pathlib.Path(sys.argv[1])
+          if not (root/'gates.json').exists():
+              evidence=Evidence()
+              evidence.set('BOOT_READY','BLOCKED','runner_failure')
+              for gate in tuple(evidence.gates)[1:]:
+                  evidence.set(gate,'BLOCKED','prerequisite_blocked')
+              evidence.write(root)
+          PY
+          if [ -f "$RUNNER_TEMP/ported-public/summary.md" ]; then
+            cat "$RUNNER_TEMP/ported-public/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'BLOCKED: host preparation did not produce gate evidence.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Publish sanitized evidence only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ported-gates
+          path: |
+            ${{ runner.temp }}/ported-public/gates.json
+            ${{ runner.temp }}/ported-public/junit.xml
+            ${{ runner.temp }}/ported-public/summary.md
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Destroy private firmware, USB, credentials and UART
+        if: always()
+        run: |
+          rm -rf "$RUNNER_TEMP/ported-assets" "$RUNNER_TEMP/ported-nand" "$RUNNER_TEMP/ported-private" "$RUNNER_TEMP/ported-openwrt-private"
