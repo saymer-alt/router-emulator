@@ -216,3 +216,12 @@ WAN = `offline`, LAN = только loopback (`127.0.0.1`).
 - Синхронизация с upstream — через отдельную ветку и PR по процедуре
   [docs/UPSTREAM-SYNC.md](docs/UPSTREAM-SYNC.md), без автоматического слияния, с сохранением
   GPL-2.0, авторства и исходного кода.
+
+## Ошибки, предложения и обратная связь
+
+- **Ошибка** — [форма Bug report](https://github.com/saymer-alt/router-emulator/issues/new?template=bug_report.yml)
+- **Предложение** — [форма Feature request](https://github.com/saymer-alt/router-emulator/issues/new?template=feature_request.yml)
+- **Свободный вопрос** — [обычный Issue без шаблона](https://github.com/saymer-alt/router-emulator/issues/new)
+- **Уязвимость** — только приватно через [Report a vulnerability](https://github.com/saymer-alt/router-emulator/security/advisories/new); не публикуйте технические детали в Issues.
+
+Перед публикацией обезличивайте материалы: без паролей, токенов, закрытых ключей, подписок, VPN-ключей и приватных IP-конфигураций.
