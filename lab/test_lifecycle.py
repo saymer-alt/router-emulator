@@ -2,7 +2,8 @@ import hashlib
 import json
 from pathlib import Path
 import unittest
-from lab.kas_lifecycle import ContractFailure, block, changed_reason, netfilter_settled, plain
+from lab.kas_lifecycle import (ContractFailure, block, changed_reason,
+                              netfilter_settled, plain, wait_netfilter_settled)
 
 
 class LifecycleDataTests(unittest.TestCase):
@@ -50,3 +51,66 @@ class LifecycleDataTests(unittest.TestCase):
         self.assertFalse(netfilter_settled(rules, link * 2))
         self.assertFalse(netfilter_settled(rules, ['-A PREROUTING -m mark --mark 0x1/0xffffffff -j _CUST_BYPASS_WA_']))
         self.assertFalse(netfilter_settled('', link))
+
+    def test_settle_loop_retries_failed_probes_within_budget(self):
+        import lab.kas_lifecycle as lifecycle
+
+        class FlakyGuest:
+            """Two failed probes (xtables lock / channel error), then settled."""
+
+            def __init__(self):
+                self.failures = 2
+
+            def command(self, text, timeout=30, input_data=None):
+                if self.failures > 0:
+                    self.failures -= 1
+                    raise RuntimeError('guest probe returned nonzero')
+                if text.endswith('_CUST_BYPASS_WA_'):
+                    return ('-P _CUST_BYPASS_WA_ ACCEPT\n'
+                            '-A _CUST_BYPASS_WA_ -j MARK --set-xmark 0x2000/0xffffffff\n'
+                            '-A _CUST_BYPASS_WA_ -j CONNMARK --save-mark --mask 0xffffffff\n'
+                            '-A _CUST_BYPASS_WA_ -j RETURN\n')
+                return ('-P PREROUTING ACCEPT\n'
+                        '-A PREROUTING -m mark --mark 0x0/0xffffffff -j _CUST_BYPASS_WA_\n')
+
+        original_sleep = lifecycle.time.sleep
+        lifecycle.time.sleep = lambda seconds: None
+        try:
+            rules, links = wait_netfilter_settled(FlakyGuest())
+        finally:
+            lifecycle.time.sleep = original_sleep
+        self.assertTrue(netfilter_settled(rules, links))
+
+    def test_settle_loop_fails_closed_when_probes_never_succeed(self):
+        import lab.kas_lifecycle as lifecycle
+
+        class DeadGuest:
+            def command(self, text, timeout=30, input_data=None):
+                raise RuntimeError('guest probe returned nonzero')
+
+        original_sleep = lifecycle.time.sleep
+        lifecycle.time.sleep = lambda seconds: None
+        try:
+            with self.assertRaises(ContractFailure) as raised:
+                wait_netfilter_settled(DeadGuest(), budget=0)
+        finally:
+            lifecycle.time.sleep = original_sleep
+        self.assertEqual(raised.exception.reason, 'native_rules_not_ready')
+
+    def test_settle_loop_fails_closed_on_never_settling_content(self):
+        import lab.kas_lifecycle as lifecycle
+
+        class HalfReadyGuest:
+            def command(self, text, timeout=30, input_data=None):
+                if text.endswith('_CUST_BYPASS_WA_'):
+                    return '-P _CUST_BYPASS_WA_ ACCEPT\n'  # chain exists, rules missing
+                return '-P PREROUTING ACCEPT\n'
+
+        original_sleep = lifecycle.time.sleep
+        lifecycle.time.sleep = lambda seconds: None
+        try:
+            with self.assertRaises(ContractFailure) as raised:
+                wait_netfilter_settled(HalfReadyGuest(), budget=0)
+        finally:
+            lifecycle.time.sleep = original_sleep
+        self.assertEqual(raised.exception.reason, 'native_rules_not_ready')
