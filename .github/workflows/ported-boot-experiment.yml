@@ -1,13 +1,14 @@
 # Research boot only. No flash image upload or production device access.
 # Public evaluation firmware is only downloaded into ephemeral Github runner.
+#
+# HISTORICAL EXPERIMENT (dispatch-only). The KB-51 boot candidate here is
+# superseded by the KB-41 configuration in the boot-fix commit of the
+# Ported chain (PR #2), which restores pull_request automation with a
+# working NAND map. This file stays for diagnostics; run it by hand from
+# the Actions tab. It is not a merge gate.
 name: Ported WR3000P - isolated first boot experiment
 
 on:
-  pull_request:
-    paths:
-      - "lab/prepare_ported_wr3000p.py"
-      - "lab/scenarios/ported-wr3000p-firstboot.json"
-      - ".github/workflows/ported-boot-experiment.yml"
   workflow_dispatch:
 
 permissions:
