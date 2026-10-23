@@ -186,6 +186,13 @@ the uninstall guard. Fixture-only transaction rehearsal is excluded. A separate
 copy of the pre-install snapshot contains a disabled foreign Proxy0 and unrelated
 cron entry: installation, repeat, reboot and rejected removal must preserve them.
 Its result appears as `KAS_FOREIGN_RESOURCES`, separate from the clean profile.
+A failed profile publishes one fixed public label naming the actual phase:
+transport unavailability (`native_command_timed_out`, `serial_timeout`), source
+or setup failure (`verified_tls_source_failed`, `foreign_setup_failed`),
+a typed contract violation (`foreign_proxy_changed`, `foreign_cron_changed`,
+`native_socks_not_ready`, `native_command_failed`, and similar allowlisted
+reasons), or `runner_failure` for a controller defect. Guest text, UART output
+and configuration stay private in every label.
 
 ## GitHub execution and owner operation
 
