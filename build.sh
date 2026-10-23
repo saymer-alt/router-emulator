@@ -60,6 +60,11 @@ fi
 # the series in order; after own commits in src/qemu, apply by hand)
 patches=("$ROOT"/qemu-patches/*.patch)
 have=$(git rev-list --count v10.1.0..mt7981)
+# a reused checkout may hold an older series: verify the applied prefix by
+# subject (a commit count alone does not identify the series) before resuming
+series_n=$have
+[ "$series_n" -gt ${#patches[@]} ] && series_n=${#patches[@]}
+"$ROOT"/tools/check-patch-series.sh "$ROOT"/qemu-patches "$series_n"
 if [ "$have" -lt ${#patches[@]} ]; then
     git checkout -q mt7981
     git -c user.name=build -c user.email=build@localhost am "${patches[@]:$have}"
