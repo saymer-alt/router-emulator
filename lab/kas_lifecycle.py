@@ -164,6 +164,32 @@ def netfilter_settled(rules, links):
         and len(links) == 1 and bool(re.search(r'--mark 0x0(?:/0xffffffff)? -j ', links[0])))
 
 
+def wait_netfilter_settled(guest, budget=20):
+    # Native Netfilter rewrite callbacks apply asynchronously after the
+    # installer's Proxy down/up and hook reinstallation, including across a
+    # reboot. Sample the identical assertion until the chain settles, with the
+    # same bounded snapshot budget the native installer self-check uses; the
+    # expected content never changes and a chain that never settles fails.
+    # A failed probe is "not ready", never a verdict: while the rewrite holds
+    # the xtables lock an `iptables -S` read can exit nonzero, and a transient
+    # channel error must not abort the sample. The installer's own bounded
+    # self-check retries failed probes the same way; the assertion itself is
+    # unchanged and a chain that never settles still fails.
+    until = time.monotonic() + budget
+    while True:
+        try:
+            rules = guest.command('iptables -t mangle -S _CUST_BYPASS_WA_')
+            links = [line for line in guest.command('iptables -t mangle -S PREROUTING').splitlines()
+                     if line.endswith(' -j _CUST_BYPASS_WA_')]
+        except Exception:
+            rules = None
+        if rules is not None and netfilter_settled(rules, links):
+            return rules, links
+        if time.monotonic() >= until:
+            raise ContractFailure('native_rules_not_ready')
+        time.sleep(2)
+
+
 def contract(guest, mirror, foreign=None):
     wait_services(guest)
     def read(command, reason='native_command_failed'):
@@ -200,21 +226,7 @@ def contract(guest, mirror, foreign=None):
         raise ContractFailure('native_policy_invalid')
     if not re.search(r'(?m)^\s+intercept enable\s*$', config):
         raise ContractFailure('native_dns_invalid')
-    # Native Netfilter rewrite callbacks apply asynchronously after the
-    # installer's Proxy down/up and hook reinstallation, including across a
-    # reboot. Sample the identical assertion until the chain settles, with the
-    # same bounded snapshot budget the native installer self-check uses; the
-    # expected content never changes and a chain that never settles fails.
-    until = time.monotonic() + 20
-    while True:
-        rules = read('iptables -t mangle -S _CUST_BYPASS_WA_', 'native_rules_not_ready')
-        links = [line for line in read('iptables -t mangle -S PREROUTING', 'native_rules_not_ready').splitlines()
-                 if line.endswith(' -j _CUST_BYPASS_WA_')]
-        if netfilter_settled(rules, links):
-            break
-        if time.monotonic() >= until:
-            raise ContractFailure('native_rules_not_ready')
-        time.sleep(2)
+    rules, links = wait_netfilter_settled(guest)
     hashes = {}
     for line in guest.command('sha256sum ' + ' '.join(STABLE_FILES)).splitlines():
         digest, path = line.split(None, 1)
