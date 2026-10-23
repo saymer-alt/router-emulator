@@ -16,6 +16,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -54,6 +55,8 @@ def load_scenario(path):
                 raise ValueError("step %d: statuses must be a nonempty list of codes" % index)
         if action == "send_serial" and ("\n" in step["text"] or "\r" in step["text"]):
             raise ValueError("step %d: one console command per step" % index)
+        if action == "send_serial" and not isinstance(step.get("enter", True), bool):
+            raise ValueError("step %d: enter must be boolean" % index)
         if action in ("sleep", "wait_serial", "probe_http"):
             if float(step.get("seconds" if action == "sleep" else "timeout_sec", 0)) <= 0:
                 raise ValueError("step %d: positive timeout/seconds required" % index)
@@ -87,6 +90,22 @@ def send_monitor(path, text):
         sock.settimeout(3)
         sock.connect(str(path))
         sock.sendall(text.encode() + b"\n")
+
+
+def serial_payload(step):
+    return step["text"].encode() + (b"\r" if step.get("enter", True) else b"")
+
+
+def drain_serial(reader):
+    """Keep socket TX flowing; evidence is stored by QEMU's private logfile."""
+    while True:
+        try:
+            if not reader.recv(65536):
+                return
+        except socket.timeout:
+            continue
+        except OSError:
+            return
 
 
 def write_report(out, scenario, steps, outcome, reason, elapsed):
@@ -203,6 +222,7 @@ def run(args):
                 conn = socket.socket(socket.AF_UNIX)
                 conn.settimeout(2)
                 conn.connect(str(serial))
+                threading.Thread(target=drain_serial, args=(conn,), daemon=True).start()
                 return
             except OSError:
                 if conn:
@@ -222,6 +242,8 @@ def run(args):
         ]
         proc = subprocess.Popen(command, cwd=root, stdout=app_fd,
                                 stderr=subprocess.STDOUT, start_new_session=True)
+        if any(step["action"] == "send_serial" for step in scenario["steps"]):
+            ensure_serial()
         for index, step in enumerate(scenario["steps"], 1):
             action = step["action"]
             start = time.monotonic()
@@ -244,7 +266,7 @@ def run(args):
                 elif action == "send_serial":
                     if conn is None:
                         ensure_serial()
-                    conn.sendall(step["text"].encode() + b"\r")
+                    conn.sendall(serial_payload(step))
                 elif action == "reset":
                     # Mark the log EOF BEFORE reset, so BL2 from first boot
                     # cannot be mistaken for a second boot.

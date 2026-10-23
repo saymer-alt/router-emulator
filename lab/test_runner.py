@@ -12,6 +12,16 @@ from lab import run as runner
 
 
 class LabRunnerTests(unittest.TestCase):
+    def test_serial_menu_key_does_not_submit_default(self):
+        self.assertEqual(runner.serial_payload({"text": "0", "enter": False}), b"0")
+        self.assertEqual(runner.serial_payload({"text": "version"}), b"version\r")
+
+    def test_reject_nonboolean_enter(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = self.scenario(Path(td), {"action": "send_serial", "text": "0", "enter": "false"})
+            with self.assertRaises(ValueError):
+                runner.load_scenario(path)
+
     def scenario(self, root, step):
         p = root / "test.json"
         p.write_text(json.dumps({"name": "lab", "evidence": "OPENWRT_QEMU_SMOKE",

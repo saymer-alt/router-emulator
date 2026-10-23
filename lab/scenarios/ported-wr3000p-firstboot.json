@@ -14,18 +14,33 @@
     },
     {
       "action": "wait_serial",
-      "pattern": "KeenBOOT|U-Boot",
+      "pattern": "KeenBOOT \\(fork U-Boot\\)",
       "timeout_sec": 220
     },
     {
       "action": "wait_serial",
-      "pattern": "Starting kernel|Linux version",
+      "pattern": "Reading 'firmware' from 0x500000",
       "timeout_sec": 90
     },
     {
       "action": "wait_serial",
-      "pattern": "Keenetic|NDMS|ndm",
-      "timeout_sec": 300
+      "pattern": "Starting kernel",
+      "timeout_sec": 120
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Linux version 4\\.9-ndm-5",
+      "timeout_sec": 120
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "VFS: Mounted root \\(squashfs filesystem\\)",
+      "timeout_sec": 180
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Core::Main: \\*\\*\\* Network Device Manager 5\\.01\\.C\\.8\\.0-2\\.",
+      "timeout_sec": 240
     }
   ]
 }
