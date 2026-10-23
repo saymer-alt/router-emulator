@@ -164,7 +164,7 @@ def netfilter_settled(rules, links):
         and len(links) == 1 and bool(re.search(r'--mark 0x0(?:/0xffffffff)? -j ', links[0])))
 
 
-def wait_netfilter_settled(guest, budget=20):
+def wait_netfilter_settled(guest, budget=60):
     # Native Netfilter rewrite callbacks apply asynchronously after the
     # installer's Proxy down/up and hook reinstallation, including across a
     # reboot. Sample the identical assertion until the chain settles, with the
@@ -174,7 +174,10 @@ def wait_netfilter_settled(guest, budget=20):
     # the xtables lock an `iptables -S` read can exit nonzero, and a transient
     # channel error must not abort the sample. The installer's own bounded
     # self-check retries failed probes the same way; the assertion itself is
-    # unchanged and a chain that never settles still fails.
+    # unchanged and a chain that never settles still fails. The 60s bound
+    # (3x the installer's own budget) covers the foreign-profile churn under
+    # QEMU TCG observed exceeding 20s while every probe kept failing; real
+    # hardware settles in seconds, and exceeding the bound still fails.
     until = time.monotonic() + budget
     while True:
         try:
