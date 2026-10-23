@@ -11,7 +11,7 @@ class FERoutingTests(unittest.TestCase):
         compiler = shutil.which('cc')
         if compiler is None:
             self.skipTest('C compiler required for production IRQ helper')
-        patch = Path(__file__).parent.parent / 'qemu-patches/0059-hw-arm-filogic-preserve-Keenetic-4.9-FE-receive-IRQ.patch'
+        patch = Path(__file__).parent.parent / 'qemu-patches/0060-hw-arm-filogic-preserve-Keenetic-4.9-FE-receive-IRQ.patch'
         section = patch.read_text().split('+++ b/hw/arm/filogic/mtk_eth_irq.h\n', 1)[1]
         header = '\n'.join(line[1:] for line in section.splitlines() if line.startswith('+'))
         with tempfile.TemporaryDirectory() as directory:
