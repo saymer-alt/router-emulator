@@ -15,6 +15,7 @@ import struct
 import subprocess
 import tarfile
 import tempfile
+import time
 import urllib.request
 
 LOCK = Path(__file__).with_name("entware.lock.json")
@@ -29,8 +30,18 @@ def fetch(url, digest, destination):
     if not url.startswith("https://bin.entware.net/aarch64-k3.10/"):
         raise ValueError("unexpected bootstrap origin")
     if not destination.exists():
-        with urllib.request.urlopen(url, timeout=90) as response:
-            data = response.read()
+        # bin.entware.net intermittently answers 503 to runner IPs; three
+        # bounded attempts for 502/503/504 only. Every downloaded byte is
+        # still pinned by the digest check below.
+        for attempt in (1, 2, 3):
+            try:
+                with urllib.request.urlopen(url, timeout=90) as response:
+                    data = response.read()
+                break
+            except urllib.error.HTTPError as error:
+                if attempt == 3 or error.code not in (502, 503, 504):
+                    raise
+                time.sleep(2 * attempt)
         if hashlib.sha256(data).hexdigest() != digest:
             raise ValueError("download digest mismatch")
         destination.parent.mkdir(parents=True, exist_ok=True)
