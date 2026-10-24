@@ -500,6 +500,9 @@ def uninstall(guest, mirror, evidence, foreign, revision):
     # leave ONLY ledger-owned resources removed, accept an idempotent re-run,
     # and the guest must accept a clean reinstall afterwards.
     if code != 0 or '[PASS] KAS removal transaction complete' not in plain(output):
+        for line in (plain(output) + '\n' + errors).splitlines():
+            if line.startswith(('[BLOCKED]', '[PASS]', '[REVIEW]', '[INFO]')):
+                print('KAS UNINSTALL GUEST: ' + line, flush=True)
         evidence.set('KAS_UNINSTALL', 'FAIL', 'native_uninstall_failed')
         return False
     if not removal_teardown_clean(guest, foreign):
