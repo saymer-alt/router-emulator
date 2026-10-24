@@ -473,6 +473,9 @@ def uninstall(guest, mirror, evidence, foreign, revision):
             phase('transaction --prepare')
             code, output, errors = guest.execute('sh /opt/lab/uninstall-transaction.sh --prepare ' + snapshot_name)
             transaction = code == 0
+            for line in (plain(output) + '\n' + errors).splitlines():
+                if line.startswith(('[BLOCKED]', '[PASS]', '[REVIEW]', '[INFO]')):
+                    print('KAS PREPARE GUEST: ' + line, flush=True)
     evidence.check('KAS_TRANSACTION_GATE', 'PASS' if transaction else 'BLOCKED',
                    'native_command_verified' if transaction else 'snapshot_gate_blocked')
     # The frozen baseline's remove branch has no deletion code. On a changed
