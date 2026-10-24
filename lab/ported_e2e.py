@@ -188,7 +188,9 @@ def main():
         if result == 0:
             result = run_entware(args, private, credentials, coldboot, evidence)
         return result
-    except Exception:
+    except Exception as error:
+        print('RUN_ENTWARE EXCEPTION: %s: %s'
+              % (type(error).__name__, str(error)[:200]), flush=True)
         if evidence.gates['BOOT_READY']['status'] != 'PASS':
             evidence.set('BOOT_READY', 'FAIL', 'runner_failure')
         elif evidence.gates['AUTH_READY']['status'] == 'PASS':
