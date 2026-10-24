@@ -442,13 +442,21 @@ def update_and_rollback(guest, mirror, revision, evidence, foreign):
 
 
 def uninstall(guest, mirror, evidence, foreign, revision):
+    def phase(marker):
+        # Public fixed-format progress marker; the controller side owns it.
+        print('KAS UNINSTALL PHASE: ' + marker, flush=True)
+    phase('contract snapshot')
     before = contract(guest, mirror, foreign)
+    phase('read-only --check')
     guest.command('sh /opt/lab/uninstall.sh --check')
+    phase('read-only --plan')
     guest.execute('sh /opt/lab/uninstall.sh --plan')
     ready = False
     snapshot_name = None
+    phase('snapshot --check')
     code, output, errors = guest.execute('sh /opt/lab/uninstall-snapshot.sh --check')
     if code == 0:
+        phase('snapshot --create')
         code, output, errors = guest.execute('sh /opt/lab/uninstall-snapshot.sh --create')
         match = re.search(r'snapshot created: /opt/kas-uninstall-backups/([A-Za-z0-9_-]+)', output)
         if code == 0 and match:
@@ -459,8 +467,10 @@ def uninstall(guest, mirror, evidence, foreign, revision):
                    'native_command_verified' if ready else 'snapshot_gate_blocked')
     transaction = False
     if ready:
+        phase('transaction gate --check')
         code, output, errors = guest.execute('sh /opt/lab/uninstall-transaction-gate.sh --check ' + snapshot_name)
         if code == 0:
+            phase('transaction --prepare')
             code, output, errors = guest.execute('sh /opt/lab/uninstall-transaction.sh --prepare ' + snapshot_name)
             transaction = code == 0
     evidence.check('KAS_TRANSACTION_GATE', 'PASS' if transaction else 'BLOCKED',
@@ -474,7 +484,9 @@ def uninstall(guest, mirror, evidence, foreign, revision):
     if not transaction and not known_no_remove:
         evidence.set('KAS_UNINSTALL', 'BLOCKED', 'snapshot_gate_blocked')
         return False
+    phase('real --remove' if not known_no_remove else 'code-3 guard --remove')
     code, output, errors = guest.execute('sh /opt/lab/uninstall.sh --remove', timeout=900)
+    phase('--remove finished with exit %d' % code)
     if known_no_remove:
         if code == 3 and '[BLOCKED]' in output + errors and contract(guest, mirror, foreign) == before:
             evidence.set('KAS_UNINSTALL', 'BLOCKED', 'native_remove_not_implemented')
@@ -493,15 +505,19 @@ def uninstall(guest, mirror, evidence, foreign, revision):
     if not removal_teardown_clean(guest, foreign):
         evidence.set('KAS_UNINSTALL', 'FAIL', 'native_uninstall_failed')
         return False
+    phase('idempotent second --remove')
     code, output, errors = guest.execute('sh /opt/lab/uninstall.sh --remove', timeout=300)
+    phase('second --remove finished with exit %d' % code)
     if code != 0 or 'already fully removed' not in plain(output):
         evidence.set('KAS_UNINSTALL', 'FAIL', 'native_uninstall_failed')
         return False
     evidence.check('KAS_UNINSTALL_GUARD', 'PASS', 'native_command_verified')
     print('KAS UNINSTALL: owned resources removed, foreign preserved, idempotent re-run PASS', flush=True)
+    phase('clean reinstall')
     if not install(guest, mirror, revision, evidence, foreign):
         evidence.set('KAS_UNINSTALL', 'FAIL', 'native_uninstall_failed')
         return False
+    phase('post-reinstall doctor')
     if not doctor(guest, evidence, revision):
         evidence.set('KAS_UNINSTALL', 'FAIL', 'native_uninstall_failed')
         return False

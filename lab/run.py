@@ -390,6 +390,8 @@ def run(args):
                                 snapshot=snapshot)
     except Exception as error:
         failure = "%s: setup or emulator start failed" % type(error).__name__
+        print('CONTROLLER EXCEPTION: %s: %s'
+              % (type(error).__name__, str(error)[:200]), flush=True)
         rows.append({"action": "setup", "outcome": "FAIL",
                      "elapsed_seconds": round(time.monotonic() - begin, 2), "reason": failure})
     finally:
