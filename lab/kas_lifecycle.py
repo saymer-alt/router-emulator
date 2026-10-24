@@ -549,7 +549,7 @@ def removal_teardown_clean(guest, foreign):
         ('owned cron schedule removed', absent("grep mihomo_watchdog /opt/etc/crontab")),
         ('mangle chain removed', absent('iptables -t mangle -S _CUST_BYPASS_WA_')),
         ('policy removed', absent('/bin/ndmc -c "show running-config" | grep -c "^ip policy bypass_wa$"')),
-        ('owned proxy removed', absent('/bin/ndmc -c "show running-config" | grep -c "^interface Proxy0$"')),
+        ('owned proxy removed', absent('/bin/ndmc -c "show running-config" | grep "proxy upstream 127.0.0.1 7890"')),
         ('packages removed', absent('opkg list-installed | grep -E "^(mihomo|magitrickle) "')),
         ('dns intercept preserved', present('/bin/ndmc -c "show running-config" | grep "intercept enable"')),
         ('journal complete', present('tail -n 1 /opt/kas-uninstall-backups/*/transaction/journal.v1 | grep -x complete')),
