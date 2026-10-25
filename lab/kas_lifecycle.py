@@ -1,5 +1,8 @@
 """Run the real committed KAS scripts inside the authenticated disposable OS."""
 import hashlib
+import io
+import shlex
+import tarfile
 import re
 import time
 
@@ -460,7 +463,141 @@ def update_and_rollback(guest, mirror, revision, evidence, foreign):
     return True
 
 
-def uninstall(guest, mirror, evidence, foreign, revision):
+def lab_origin(guest, mirror):
+    """Provenance only for a fresh controller-owned VM, never production."""
+    code, output, errors = guest.execute('''
+for n in mihomo magitrickled; do
+    if pidof "$n" >/dev/null 2>&1; then exit 3; else [ "$?" = 1 ] || exit 3; fi
+done
+for p in /opt/bin/mihomo /opt/sbin/mihomo /opt/bin/magitrickled; do
+    [ ! -e "$p" ] && [ ! -L "$p" ] || exit 3
+done
+list=$(opkg list-installed) || exit 3
+printf '%s\n' "$list" | grep -E '^(mihomo|magitrickle) ' && exit 3
+exit 0
+''')
+    if code != 0:
+        raise ContractFailure('lab_process_provenance_unproven')
+    payloads = {name: set() for name in ('mihomo', 'magitrickled')}
+    # KASMirror already checked these package bytes against the locked SHA256.
+    for route, data in mirror.routes.items():
+        if not route[2].endswith('.ipk') or not any('/' + p in route[2] for p in ('mihomo_', 'magitrickle_')):
+            continue
+        with tarfile.open(fileobj=io.BytesIO(data)) as package:
+            member = next(m for m in package if m.name.endswith('data.tar.gz'))
+            with tarfile.open(fileobj=io.BytesIO(package.extractfile(member).read())) as files:
+                blobs = {m.name.removeprefix('./'): files.extractfile(m).read() for m in files if m.isfile()}
+        for name in payloads:
+            init = 'S99mihomo' if name == 'mihomo' else 'S99magitrickle'
+            if 'opt/bin/' + name in blobs and 'opt/etc/init.d/' + init in blobs:
+                payloads[name].add(tuple(hashlib.sha256(blobs[p]).hexdigest() for p in
+                                        ('opt/bin/' + name, 'opt/etc/init.d/' + init)))
+    if not all(payloads.values()):
+        raise ContractFailure('lab_process_provenance_unproven')
+    return payloads
+
+
+def lab_identities(guest, origin):
+    if not origin:
+        raise ContractFailure('lab_process_provenance_unproven')
+    result = {}
+    for name, allowed in origin.items():
+        init = 'S99mihomo' if name == 'mihomo' else 'S99magitrickle'
+        code, output, errors = guest.execute(r'''p=$(pidof NAME) || exit 3
+case "$p" in ''|*[!0-9]*) exit 3;; esac
+printf '%s\n' "$p"
+cat /proc/$p/stat
+readlink /proc/$p/exe
+tr '\000' '|' < /proc/$p/cmdline; echo
+grep '^Uid:' /proc/$p/status
+[ /proc/$p/exe -ef /opt/bin/NAME ] || exit 3
+sha256sum /proc/$p/exe /opt/bin/NAME /opt/etc/init.d/INIT
+'''.replace('NAME', name).replace('INIT', init))
+        try:
+            pid, stat, exe, args, uid, process_hash, binary_hash, init_hash = output.splitlines()
+            start = stat.rsplit(') ', 1)[1].split()[19]
+            argv = '-d|/opt/etc/mihomo|' if name == 'mihomo' else ''
+            if not (code == 0 and pid.isdigit() and int(pid) > 1 and start.isdigit()
+                    and exe == '/opt/bin/' + name and uid.split()[1:] == ['0'] * 4
+                    and args in (name + '|' + argv, '/opt/bin/' + name + '|' + argv)):
+                raise ValueError('unproven process')
+            hashes = process_hash.split()[0], binary_hash.split()[0], init_hash.split()[0]
+            if hashes[0] != hashes[1] or (hashes[0], hashes[2]) not in allowed:
+                raise ValueError('unproven payload')
+        except (ValueError, IndexError):
+            raise ContractFailure('lab_process_provenance_unproven') from None
+        result[name] = (pid, start, hashes[0], hashes[2], args)
+    return result
+
+
+def lab_stop_script(mirror, identities):
+    source = mirror.sources['uninstall-transaction.sh'].decode()
+    lock = source[source.index('# BEGIN MIHOMO LIFECYCLE LOCK'):source.index('# END MIHOMO LIFECYCLE LOCK')]
+    guard = source[source.index('txn_step_services_done() {'):source.index('# Refuse unproven live processes')]
+    script = 'set -eu\n' + lock + r'''
+fail() { exit 3; }
+trap 'ml_lifecycle_release' EXIT
+trap 'exit 3' INT TERM HUP
+ml_lifecycle_acquire || exit 3
+echo 'KAS LAB STOP: lifecycle_locked'
+verify() {
+    [ "$(ml_starttime "$1")" = "$2" ] &&
+    [ /proc/$1/exe -ef /opt/bin/$3 ] &&
+    [ "$(sha256sum /proc/$1/exe | cut -d' ' -f1)" = "$4" ] &&
+    [ "$(sha256sum /opt/etc/init.d/$6 | cut -d' ' -f1)" = "$5" ] &&
+    [ "$(tr '\000' '|' < /proc/$1/cmdline)" = "$7" ] &&
+    awk '/^Uid:/ { found=1; if ($2 != 0 || $3 != 0 || $4 != 0 || $5 != 0) exit 1 }
+         END { if (!found) exit 1 }' /proc/$1/status
+}
+'''
+    records = []
+    for name, (pid, start, binary, init_hash, args) in identities.items():
+        init = 'S99mihomo' if name == 'mihomo' else 'S99magitrickle'
+        record = ' '.join(shlex.quote(v) for v in (pid, start, name, binary, init_hash, init, args))
+        records.append(record)
+        script += 'verify ' + record + ' || exit 3\n'
+    script += '''before=$(grep -c 'maintenance in progress - checks skipped' /opt/var/log/mihomo_watchdog.log || true)
+tries=0
+while :; do
+    sh /opt/bin/mihomo_watchdog.sh || exit 3
+    after=$(grep -c 'maintenance in progress - checks skipped' /opt/var/log/mihomo_watchdog.log || true)
+    [ "$after" -gt "$before" ] && break
+    tries=$((tries+1)); [ "$tries" -le 30 ] || exit 3
+    sleep 2
+done
+echo 'KAS LAB STOP: watchdog_excluded'
+'''
+    for record in records:
+        script += 'verify ' + record + ' || exit 3\n'
+    for record in records:
+        script += 'set -- ' + record + '''
+verify "$@" || exit 3
+echo "KAS LAB STOP: term_$3"
+kill -TERM "$1" || exit 3
+tries=0
+while [ -d /proc/$1 ]; do
+    state=$(sed 's/^.*) //' /proc/$1/stat | cut -d' ' -f1)
+    case "$state" in Z|X) break;; esac
+    if ! verify "$@"; then [ ! -d /proc/$1 ] && break; exit 3; fi
+    tries=$((tries+1)); [ "$tries" -le 15 ] || exit 3
+    if [ "$tries" = 10 ]; then
+        echo "KAS LAB STOP: kill_$3"
+        kill -KILL "$1" || exit 3
+    fi
+    sleep 2
+done
+echo "KAS LAB STOP: stopped_$3"
+'''
+    return script + '\nroot=\n' + guard + '''
+tries=0
+until txn_step_services_done; do
+    tries=$((tries+1)); [ "$tries" -le 5 ] || exit 3
+    sleep 1
+done
+'''
+
+
+def uninstall(guest, mirror, evidence, foreign, revision, origin=None):
     def phase(marker):
         # Public fixed-format progress marker; the controller side owns it.
         print('KAS UNINSTALL PHASE: ' + marker, flush=True)
@@ -506,6 +643,36 @@ def uninstall(guest, mirror, evidence, foreign, revision):
     if not transaction and not known_no_remove:
         evidence.set('KAS_UNINSTALL', 'BLOCKED', 'snapshot_gate_blocked')
         return False
+    if not known_no_remove:
+        phase('live-process refusal and controller-owned manual stop')
+        try:
+            identities = lab_identities(guest, origin)
+            code, output, errors = guest.execute('sh /opt/lab/uninstall.sh --remove', timeout=120)
+            if (code != 3 or 'live service ownership unproven' not in output + errors
+                    or before != contract(guest, mirror, foreign)
+                    or identities != lab_identities(guest, origin)):
+                raise ContractFailure('native_uninstall_guard_failed')
+            evidence.check('KAS_UNINSTALL_GUARD', 'PASS', 'native_command_verified')
+            guest.command('[ ! -e /tmp/mihomo-lifecycle.lock.d ] && [ ! -e /tmp/mihomo.maintenance ] && '
+                          '[ ! -e /opt/kas-uninstall-backups/' + snapshot_name + '/transaction/journal.v1 ]')
+            code, output, errors = guest.execute('sh', timeout=240,
+                                                input_data=lab_stop_script(mirror, identities))
+            markers = {'lifecycle_locked', 'watchdog_excluded'} | {
+                action + '_' + name for action in ('term', 'kill', 'stopped')
+                for name in ('mihomo', 'magitrickled')}
+            for line in output.splitlines():
+                if line.removeprefix('KAS LAB STOP: ') in markers:
+                    print(line, flush=True)
+            if code != 0:
+                raise ContractFailure('lab_manual_stop_failed')
+            evidence.check('KAS_MANUAL_STOP', 'PASS', 'native_command_verified')
+            print('KAS MANUAL STOP: VM origin, exact identities, watchdog exclusion PASS', flush=True)
+            guest.command('sh /opt/lab/uninstall-snapshot-verify.sh ' + snapshot_name)
+            guest.command('sh /opt/lab/uninstall-transaction-gate.sh --check ' + snapshot_name)
+            guest.command('sh /opt/lab/uninstall-transaction.sh --prepare ' + snapshot_name, timeout=300)
+        except ContractFailure as error:
+            evidence.set('KAS_UNINSTALL', 'BLOCKED', error.reason)
+            return False
     phase('real --remove' if not known_no_remove else 'code-3 guard --remove')
     code, output, errors = guest.execute('sh /opt/lab/uninstall.sh --remove', timeout=900)
     phase('--remove finished with exit %d' % code)
@@ -543,6 +710,10 @@ def uninstall(guest, mirror, evidence, foreign, revision):
         evidence.set('KAS_UNINSTALL', 'FAIL', 'native_uninstall_failed')
         return False
     phase('post-reinstall doctor')
+    # Actual offline-WAN checks generate history; no fabricated healthy entry.
+    if not wan_guard(guest, evidence):
+        evidence.set('KAS_UNINSTALL', 'BLOCKED', 'execution_failed')
+        return False
     if not doctor(guest, evidence, revision):
         verdict = evidence.gates['KAS_DOCTOR']
         evidence.set('KAS_UNINSTALL', verdict['status'], verdict['reason'])
@@ -611,6 +782,11 @@ def lifecycle(guest, mirror, revision, evidence, context, private, phase):
         evidence.set('KAS_INSTALL', 'BLOCKED', 'verified_tls_source_failed')
         return False
     context['snapshot'](private / 'before-kas')
+    try:
+        origin = lab_origin(guest, mirror)
+    except ContractFailure as error:
+        evidence.set('KAS_INSTALL', 'BLOCKED', error.reason)
+        return False
     if not install(guest, mirror, revision, evidence):
         return False
     if not wan_guard(guest, evidence):
@@ -633,7 +809,7 @@ def lifecycle(guest, mirror, revision, evidence, context, private, phase):
         return False
     phase['name'] = 'KAS_UNINSTALL'
     evidence.set('KAS_UNINSTALL', 'NOT_TESTED', 'unattempted')
-    return uninstall(guest, mirror, evidence, None, revision)
+    return uninstall(guest, mirror, evidence, None, revision, origin)
 
 
 def foreign_profile(args, private, credentials, coldboot, mirror, port, tls_port, evidence):
@@ -672,6 +848,7 @@ def foreign_profile(args, private, credentials, coldboot, mirror, port, tls_port
             prepare(guest, mirror, args.kas_ref)
             failure['reason'] = 'foreign_setup_failed'
             foreign = foreign_resources(guest)
+            origin = lab_origin(guest, mirror)
             failure['reason'] = 'native_installer_failed'
             if not install(guest, mirror, args.kas_ref, local, foreign):
                 recorded = local.gates['KAS_INSTALL']
@@ -688,7 +865,7 @@ def foreign_profile(args, private, credentials, coldboot, mirror, port, tls_port
                 recorded = local.gates['KAS_REBOOT']
                 failure['reason'] = recorded['reason'] if recorded['status'] == 'FAIL' else 'native_reboot_failed'
                 return
-            completed['ok'] = uninstall(guest, mirror, local, foreign, args.kas_ref)
+            completed['ok'] = uninstall(guest, mirror, local, foreign, args.kas_ref, origin)
             if not completed['ok']:
                 recorded = local.gates['KAS_UNINSTALL']
                 failure['reason'] = recorded['reason'] if recorded['status'] == 'FAIL' else 'execution_failed'
@@ -720,8 +897,10 @@ def foreign_profile(args, private, credentials, coldboot, mirror, port, tls_port
             # The UART scenario failed, or the controller hook raised; only a
             # scenario failure may be reported as a serial timeout.
             failure['reason'] = 'serial_timeout' if not started['probes'] else 'runner_failure'
-        if result == 0 and verdict['status'] == 'BLOCKED':
-            evidence.check('KAS_FOREIGN_RESOURCES', 'BLOCKED', verdict['reason'])
+        blocked = local.gates['KAS_UNINSTALL']
+        if result == 0 and (verdict['status'] == 'BLOCKED' or blocked['status'] == 'BLOCKED'):
+            evidence.check('KAS_FOREIGN_RESOURCES', 'BLOCKED',
+                           verdict['reason'] if verdict['status'] == 'BLOCKED' else blocked['reason'])
         else:
             evidence.check('KAS_FOREIGN_RESOURCES', 'FAIL', failure['reason'])
     return passed

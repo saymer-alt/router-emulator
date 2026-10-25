@@ -240,6 +240,30 @@ tags, releases or automatic merges are part of this laboratory.
 
 ## Foreign-profile Doctor warning: local reproduction and evidence limits
 
+The safe-remove acceptance uses a controller-executed manual prerequisite,
+without changing production KAS process attribution. Before the initial install,
+`lab_origin()` requires no daemon/package/canonical executable in the disposable
+VM and records expected executable/init SHA256 pairs from locked IPK payloads.
+All subsequent launchers are the pinned installer, its init/watchdog and the
+controller's reset. This closed-world provenance is essential: matching PID,
+inode or argv on an arbitrary router never authorizes this laboratory helper.
+
+With services running, the native `--remove` must return the ownership BLOCKED
+message, preserve the contract and PID/starttime identities, and create no
+journal/maintenance marker. The controller then revalidates both processes,
+takes the existing KAS lifecycle lock, runs the real watchdog to prove its
+maintenance skip, and addresses only those PID/starttime identities. TERM and
+bounded KILL recheck inode, payload/init hashes and argv; uncertainty blocks.
+After absence is proved and the lock released, snapshot/gate/cache are checked
+again before actual removal. A concurrent restart is caught by native KAS guards,
+never followed by an automatic complete-scenario retry.
+
+After reinstall, the real `wan_guard()` probes run before Doctor, generating only
+genuine offline-WAN history. No healthy heartbeat is fabricated. A remaining
+Doctor WARN is still BLOCKED with foreign counters retained. `KAS_MANUAL_STOP`
+records the separate laboratory prerequisite. Manual dispatch accepts an explicit
+full `kas_ref`; both source commits are checked and retained in `gates.json`.
+
 At KAS `891c336cf389c34b5c2b504a2bc67979ba8d287a`, `install.sh` touches
 `/opt/var/log/mihomo_watchdog.log`. After fresh tmpfs or before the first
 scheduled watchdog run it can be empty. The clean lifecycle invokes
