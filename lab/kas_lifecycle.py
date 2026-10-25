@@ -790,23 +790,42 @@ def simple_uninstall(guest, mirror, evidence, foreign, revision, origin):
                    for line in output.splitlines()):
                 return fail()
             print('KAS SIMPLE REMOVE: native result ' + ('SUCCESS' if code == 0 else 'PARTIAL') +
-                  ('; repeated removal verified' if attempt else '; shared feed/storage/provenance may remain'), flush=True)
-        proxy = guest.command("awk -F'|' '$2==\"proxy\" {print $3}' /opt/etc/keenetic-auto-setup/ownership.v1")
-        if not re.fullmatch(r'Proxy[0-9]+', proxy):
-            return fail()
-        guest.command('list=$(opkg list-installed) || exit 3; ! printf "%s\\n" "$list" | grep -E "^(mihomo|magitrickle) "')
-        guest.command('rules=$(iptables -t mangle -S) || exit 3; ! printf "%s\\n" "$rules" | grep _CUST_BYPASS_WA_')
-        guest.command('cfg=$(/bin/ndmc -c "show running-config") || exit 3; '
-                      'printf "%s\\n" "$cfg" | grep -q "^interface " || exit 3; '
-                      '! printf "%s\\n" "$cfg" | grep -E "^ip policy bypass_wa$|^interface ' + proxy + '$"')
-        guest.command('test ! -e /tmp/mihomo-lifecycle.lock.d && test ! -e /tmp/mihomo_watchdog.lock.d && test ! -e /tmp/mihomo.maintenance')
-        if guest.command(yaml_command) != yaml_before:
+                  ('; repeated command returned; postconditions pending' if attempt else '; postconditions pending'), flush=True)
+        # Never lose the failed postcondition behind a generic runner error.
+        # Only fixed labels leave the private guest channel, never its text.
+        def probe(label, command, expected=None):
+            code, data, _ = guest.execute(command)
+            ok = code == 0 and (expected is None or data == expected)
+            print('KAS SIMPLE VERIFY: ' + label + (' PASS' if ok else ' FAIL'), flush=True)
+            return ok, data
+
+        code, proxy, _ = guest.execute("awk -F'|' '$2==\"proxy\" {print $3}' /opt/etc/keenetic-auto-setup/ownership.v1")
+        if code != 0 or not re.fullmatch(r'Proxy[0-9]+', proxy):
+            print('KAS SIMPLE VERIFY: ledger_proxy FAIL', flush=True)
+            return fail('native_ownership_invalid')
+        print('KAS SIMPLE VERIFY: ledger_proxy PASS', flush=True)
+        checks = [
+            ('packages_absent', 'list=$(opkg list-installed) || exit 3; ! printf "%s\\n" "$list" | grep -E "^(mihomo|magitrickle) "'),
+            ('mangle_absent', 'rules=$(iptables -t mangle -S) || exit 3; ! printf "%s\\n" "$rules" | grep _CUST_BYPASS_WA_'),
+            ('routing_absent', 'cfg=$(/bin/ndmc -c "show running-config") || exit 3; '
+             'cfg=$(printf "%s\\n" "$cfg" | tr -d "\\r"); '
+             'printf "%s\\n" "$cfg" | grep -q "^interface " || exit 3; '
+             '! printf "%s\\n" "$cfg" | grep -E "^ip policy bypass_wa$|^interface ' + proxy + '$"'),
+            ('locks_absent', 'test ! -e /tmp/mihomo-lifecycle.lock.d && test ! -e /tmp/mihomo_watchdog.lock.d && test ! -e /tmp/mihomo.maintenance'),
+        ]
+        for label, command in checks:
+            if not probe(label, command)[0]:
+                return fail()
+        if not probe('yaml_preserved', yaml_command, yaml_before)[0]:
             return fail('mihomo_config_changed')
-        if not foreign_rule or guest.command('iptables -t mangle -S PREROUTING | grep 65000') != foreign_rule:
+        if not foreign_rule or not probe('foreign_netfilter', 'iptables -t mangle -S PREROUTING | grep 65000', foreign_rule)[0]:
             return fail('netfilter_changed')
         if foreign is not None:
-            guest.command('/bin/ndmc -c "show running-config" | grep -A4 "^interface Proxy0$" | grep 1081')
-            guest.command('grep foreign-job /opt/etc/crontab')
+            if not probe('foreign_proxy', '/bin/ndmc -c "show running-config" | grep -A4 "^interface Proxy0$" | grep 1081')[0]:
+                return fail('foreign_proxy_changed')
+            if not probe('foreign_cron', 'grep foreign-job /opt/etc/crontab')[0]:
+                return fail('foreign_cron_changed')
+        print('KAS SIMPLE VERIFY: postconditions PASS', flush=True)
     except ContractFailure as error:
         evidence.set('KAS_UNINSTALL', 'BLOCKED', error.reason)
         return False

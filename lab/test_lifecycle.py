@@ -449,12 +449,25 @@ txn_step_services() { txn_step_services_done || fail; }
             def command(self, command):
                 if command.startswith('sha256sum'): return 'yaml-digests'
                 if command.endswith('grep 65000'): return 'fixture foreign rule'
-                if command.startswith('awk'): return 'Proxy1'
+                if command.startswith('awk'):
+                    with tempfile.TemporaryDirectory() as temp:
+                        ledger = Path(temp) / 'ownership.v1'
+                        ledger.write_text('KAS_OWNERSHIP_V1\nowned|proxy|Proxy1\n')
+                        for shell in (['dash'], ['busybox', 'ash']):
+                            result = subprocess.run(shell + ['-c', command.replace('/opt/etc/keenetic-auto-setup/ownership.v1', str(ledger))],
+                                                    text=True, capture_output=True)
+                            if result.returncode:
+                                raise AssertionError((shell, result.stderr))
+                            if result.stdout.strip() != 'Proxy1':
+                                raise AssertionError(result.stdout)
+                    return result.stdout.strip()
                 return ''
             def execute(self, command, **kwargs):
                 if '--remove' in command:
                     self.calls += 1
                     return 1, '[PARTIAL] retained shared feed\n[LEFT] /opt/etc/opkg/magitrickle.conf — shared\n', ''
+                if command.startswith(('awk', 'sha256sum')) or command.endswith('grep 65000'):
+                    return 0, self.command(command), ''
                 return 0, '', ''
         evidence = Evidence()
         def warning(*args):
@@ -474,3 +487,31 @@ txn_step_services() { txn_step_services_done || fail; }
         self.assertEqual(evidence.gates['KAS_DOCTOR']['status'], 'BLOCKED')
         self.assertEqual(evidence.measurements['doctor_warn'], 1)
         self.assertNotIn('KAS_TRANSACTION_GATE', evidence.checks)
+
+    def test_simple_postcondition_failure_has_safe_specific_category(self):
+        import lab.kas_lifecycle as lifecycle
+        class Guest:
+            def command(self, cmd):
+                if cmd.startswith('sha256sum'): return 'yaml-digests'
+                if cmd.endswith('grep 65000'): return 'foreign-rule'
+                if cmd.startswith('awk'): return 'Proxy0'
+                if cmd.startswith('rules='): raise RuntimeError('private details')
+                return ''
+            def execute(self, cmd, **kwargs):
+                if '--remove' in cmd: return 1, '[PARTIAL] shared metadata retained', ''
+                if cmd.startswith('rules='): return 1, '', 'PRIVATE_SENTINEL'
+                if cmd.startswith('awk'): return 0, 'Proxy0', ''
+                if cmd.startswith('sha256sum'): return 0, 'yaml-digests', ''
+                if cmd.endswith('grep 65000'): return 0, 'foreign-rule', ''
+                return 0, '', ''
+        evidence = Evidence()
+        output = io.StringIO()
+        identity = {'mihomo': ('101','500','hash','init-hash','mihomo|')}
+        with patch.object(lifecycle, 'lab_identities', return_value=identity), \
+                patch.object(lifecycle, 'lab_stop_script', return_value='verified VM stop'), \
+                contextlib.redirect_stdout(output):
+            self.assertFalse(lifecycle.simple_uninstall(Guest(), object(), evidence, None, 'a'*40, {}))
+        self.assertEqual(evidence.gates['KAS_UNINSTALL']['status'], 'FAIL')
+        self.assertIn('KAS SIMPLE VERIFY: mangle_absent FAIL', output.getvalue())
+        self.assertNotIn('PRIVATE_SENTINEL', output.getvalue())
+        self.assertNotIn('postconditions PASS', output.getvalue())
