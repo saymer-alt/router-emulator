@@ -56,15 +56,15 @@ def assets(cache):
                 # Pinned origins intermittently answer 503 to runner IPs;
                 # three bounded attempts before giving up (the digest check
                 # below still rejects any wrong bytes unconditionally).
-                for attempt in (1, 2, 3):
+                for attempt in (1, 2, 3, 4, 5):
                     try:
                         with urllib.request.urlopen(record['fetch_url'], timeout=120) as response:
                             path.write_bytes(response.read())
                         break
                     except urllib.error.HTTPError as error:
-                        if attempt == 3 or error.code not in (503, 502, 504):
+                        if attempt == 5 or error.code not in (503, 502, 504):
                             raise
-                        time.sleep(2 * attempt)
+                        time.sleep(min(15, 3 * attempt))
             data = path.read_bytes()
         if hashlib.sha256(data).hexdigest() != record['sha256']:
             raise ValueError('pinned KAS dependency digest mismatch')
