@@ -16,6 +16,38 @@ from unittest.mock import patch
 
 
 class LifecycleDataTests(unittest.TestCase):
+    def test_blocked_handoff_only_publishes_fixed_diagnostics(self):
+        import lab.kas_lifecycle as lifecycle
+        class Guest:
+            def command(self, *args, **kwargs):
+                return ''
+            def execute(self, command, **kwargs):
+                if command.endswith('--create'):
+                    return 0, 'snapshot created: /opt/kas-uninstall-backups/test', ''
+                if command.endswith('--remove'):
+                    return 3, '', 'live service ownership unproven'
+                if command == 'sh':
+                    return 3, ('KAS LAB STOP: manual_stop_verified\nKAS LAB STOP: native_remove_begin\n'
+                               'KAS LAB DIAG: mihomo_identity_changed\n'
+                               'KAS LAB DIAG: private-sensitive-data'), ''
+                if command.startswith('cat /opt/lab/uninstall-blocked.private'):
+                    return 0, 'private-sensitive-data', ''
+                return 0, '', ''
+        with tempfile.TemporaryDirectory() as temp:
+            guest = Guest()
+            guest.private = Path(temp)
+            evidence, stream = Evidence(), io.StringIO()
+            mirror = SimpleNamespace(sources={'uninstall.sh': b'changed candidate'})
+            with patch.object(lifecycle, 'contract', return_value={}), \
+                    patch.object(lifecycle, 'lab_identities', return_value={}), \
+                    patch.object(lifecycle, 'lab_stop_script', return_value='fixture stop'), \
+                    contextlib.redirect_stdout(stream):
+                result = lifecycle.uninstall(guest, mirror, evidence, None, 'a' * 40)
+            self.assertFalse(result)
+            self.assertIn('KAS LAB DIAG: mihomo_identity_changed', stream.getvalue())
+            self.assertNotIn('private-sensitive-data', stream.getvalue())
+            self.assertEqual((guest.private / 'uninstall-processes.private').read_text(), 'private-sensitive-data')
+
     def test_lab_origin_needs_empty_guest_and_package_payload(self):
         from lab.kas_lifecycle import lab_origin
         content = io.BytesIO()
@@ -52,6 +84,10 @@ class LifecycleDataTests(unittest.TestCase):
                 return ''
 
             def execute(self, command, **kwargs):
+                if command == 'sh':
+                    self.removes = 2
+                    return 0, ('KAS LAB STOP: manual_stop_verified\nKAS LAB STOP: native_remove_begin\n'
+                               '[PASS] KAS removal transaction complete'), ''
                 if 'mihomo-doctor.sh' in command:
                     return 1, ('[WARN] Watchdog log is empty - the watchdog has not logged anything yet\n'
                                'OK: 35\nWARN: 1\nFAIL: 0\n[WARN] Overall status: WARN'), ''
@@ -83,6 +119,36 @@ class LifecycleDataTests(unittest.TestCase):
         self.assertNotIn('Doctor passed', stream.getvalue())
         self.assertNotIn('unclassified_warning', stream.getvalue())
 
+    def test_process_diagnostics_are_private_without_raw_arguments(self):
+        from lab.kas_lifecycle import lab_diagnostic_script
+        for shell in (['dash'], ['busybox', 'ash']):
+            with tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                proc = root / 'proc/123'
+                proc.mkdir(parents=True)
+                (root / 'opt/bin').mkdir(parents=True)
+                (root / 'opt/lab').mkdir()
+                binary = root / 'opt/bin/mihomo'
+                binary.write_bytes(b'fixture')
+                (proc / 'exe').symlink_to(binary)
+                (proc / 'comm').write_text('mihomo\n')
+                (proc / 'cmdline').write_bytes(b'mihomo\0--secret=DO_NOT_PUBLISH\0')
+                (proc / 'status').write_text('Uid: 0 0 0 0\n')
+                (proc / 'stat').write_text('123 (mihomo) S 1\n')
+                (proc / 'start').write_text('999')
+                identities = {'mihomo': ('123', '456', hashlib.sha256(b'fixture').hexdigest(), 'b'*64, '')}
+                script = lab_diagnostic_script(identities) + '\nml_starttime() { cat /proc/$1/start; }\nlab_diagnose\n'
+                script = script.replace('/proc/', temp + '/proc/').replace('/opt/', temp + '/opt/')
+                result = subprocess.run(shell, input=script, text=True, capture_output=True, timeout=10)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn('mihomo_identity_changed', result.stdout)
+                self.assertIn('mihomo_parent_reparented', result.stdout)
+                self.assertNotIn('123', result.stdout)
+                details = root / 'opt/lab/uninstall-blocked.private'
+                self.assertIn('pid=123 start=999 expected_pid=123 expected_start=456', details.read_text())
+                self.assertEqual(details.stat().st_mode & 0o777, 0o600)
+                self.assertNotIn('DO_NOT_PUBLISH', result.stdout + details.read_text())
+
     def test_lab_identity_needs_origin_and_all_runtime_fields(self):
         from lab.kas_lifecycle import lab_identities
         rows = ['123', '123 (mihomo) S ' + '0 ' * 18 + '456', '/opt/bin/mihomo',
@@ -110,8 +176,10 @@ class LifecycleDataTests(unittest.TestCase):
         # Shell fixtures only. The actual watchdog/lock race is independently
         # exercised by KAS lifecycle-regression on dash and BusyBox ash.
         source = b'''# BEGIN MIHOMO LIFECYCLE LOCK
-ml_lifecycle_acquire() { touch /opt/held; }
-ml_lifecycle_release() { rm -f /opt/held; }
+ml_lifecycle_acquire() { [ ! -e /opt/held ] || return 1; touch /opt/held /opt/marker; }
+ml_lifecycle_release() { rm -f /opt/held /opt/marker; }
+ml_lock_acquire() { [ ! -e /opt/watchdog-held ] || return 1; touch /opt/watchdog-held; }
+ml_lock_release() { rm -f /opt/watchdog-held; }
 ml_starttime() { cat /proc/$1/start; }
 # END MIHOMO LIFECYCLE LOCK
 txn_step_services_done() { [ ! -d /proc/101 ] && [ ! -d /proc/102 ]; }
@@ -119,15 +187,18 @@ txn_step_services() { txn_step_services_done || fail; }
 # Refuse unproven live processes
 '''
         for shell in (['dash'], ['busybox', 'ash']):
-            for drift in (False, True):
+            for drift, child_status, missing_log in ((False, 0, False), (True, 0, False),
+                                                     (False, 3, False), (False, 0, True)):
                 with tempfile.TemporaryDirectory() as temp:
                     root = Path(temp)
                     (root / 'opt/etc/init.d').mkdir(parents=True)
                     (root / 'opt/bin').mkdir()
                     (root / 'opt/var/log').mkdir(parents=True)
-                    (root / 'opt/var/log/mihomo_watchdog.log').touch()
+                    if not missing_log:
+                        (root / 'opt/var/log/mihomo_watchdog.log').touch()
                     watchdog = root / 'opt/bin/mihomo_watchdog.sh'
-                    watchdog.write_text('[ -e "' + temp + '/opt/held" ] || exit 1\n'
+                    watchdog.write_text('[ ! -e "' + temp + '/opt/watchdog-held" ] || exit 0\n'
+                                        '[ -e "' + temp + '/opt/held" ] || exit 1\n'
                                         'echo "maintenance in progress - checks skipped" >> "'
                                         + temp + '/opt/var/log/mihomo_watchdog.log"\n')
                     identities = {}
@@ -146,13 +217,25 @@ txn_step_services() { txn_step_services_done || fail; }
                         identities[name] = (pid, '456', hashlib.sha256(binary.read_bytes()).hexdigest(),
                                             hashlib.sha256(init.read_bytes()).hexdigest(), args)
                     script = lab_stop_script(SimpleNamespace(sources={'uninstall-transaction.sh': source}), identities)
+                    # Cache verification and child remove run in this SAME shell.
+                    # The child must acquire the distinct lifecycle lock while
+                    # the parent still excludes watchdog. Aborts must clean both.
+                    script += '''
+[ -e /opt/watchdog-held ] && [ ! -e /opt/held ] || exit 9
+sh /opt/bin/mihomo_watchdog.sh || exit 9
+[ ! -e /opt/held ] || exit 9
+ml_lifecycle_acquire || exit 9
+ml_lifecycle_release
+exit ''' + str(child_status) + '\n'
                     script = script.replace('/proc/', temp + '/proc/').replace('/opt/', temp + '/opt/')
                     fake_kill = ('kill() { echo "$*" >> "' + temp + '/signals"; '
                                  'rm -f "' + temp + '/proc/$2/"*; rmdir "' + temp + '/proc/$2"; }\n')
                     script = script.replace('verify() {', fake_kill + 'verify() {')
                     result = subprocess.run(shell, input=script, text=True, capture_output=True, timeout=10)
-                    self.assertEqual(result.returncode, 3 if drift else 0, result.stderr)
+                    self.assertEqual(result.returncode, 3 if drift else child_status, result.stderr)
                     self.assertFalse((root / 'opt/held').exists())
+                    self.assertFalse((root / 'opt/marker').exists())
+                    self.assertFalse((root / 'opt/watchdog-held').exists())
                     if drift:
                         self.assertFalse((root / 'signals').exists())
                     else:

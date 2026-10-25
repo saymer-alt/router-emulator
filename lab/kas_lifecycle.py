@@ -1,6 +1,7 @@
 """Run the real committed KAS scripts inside the authenticated disposable OS."""
 import hashlib
 import io
+import os
 import shlex
 import tarfile
 import re
@@ -536,7 +537,21 @@ def lab_stop_script(mirror, identities):
     guard = source[source.index('txn_step_services_done() {'):source.index('# Refuse unproven live processes')]
     script = 'set -eu\n' + lock + r'''
 fail() { exit 3; }
-trap 'ml_lifecycle_release' EXIT
+LAB_WATCHDOG_LOCK=/tmp/mihomo_watchdog.lock.d
+LAB_WATCHDOG_HELD=0
+lab_cleanup() {
+    result=$?
+    if [ "$result" != 0 ] && command -v lab_diagnose >/dev/null 2>&1; then
+        lab_diagnose || true
+    fi
+    ml_lifecycle_release || result=3
+    if [ "$LAB_WATCHDOG_HELD" = 1 ]; then
+        ml_lock_release "$LAB_WATCHDOG_LOCK" || result=3
+    fi
+    trap - EXIT
+    exit "$result"
+}
+trap lab_cleanup EXIT
 trap 'exit 3' INT TERM HUP
 ml_lifecycle_acquire || exit 3
 echo 'KAS LAB STOP: lifecycle_locked'
@@ -556,16 +571,25 @@ verify() {
         record = ' '.join(shlex.quote(v) for v in (pid, start, name, binary, init_hash, init, args))
         records.append(record)
         script += 'verify ' + record + ' || exit 3\n'
-    script += '''before=$(grep -c 'maintenance in progress - checks skipped' /opt/var/log/mihomo_watchdog.log || true)
+    script += '''before=$(grep -c 'maintenance in progress - checks skipped' /opt/var/log/mihomo_watchdog.log 2>/dev/null || true)
+before=${before:-0}
 tries=0
 while :; do
     sh /opt/bin/mihomo_watchdog.sh || exit 3
-    after=$(grep -c 'maintenance in progress - checks skipped' /opt/var/log/mihomo_watchdog.log || true)
+    after=$(grep -c 'maintenance in progress - checks skipped' /opt/var/log/mihomo_watchdog.log 2>/dev/null || true)
+    after=${after:-0}
     [ "$after" -gt "$before" ] && break
     tries=$((tries+1)); [ "$tries" -le 30 ] || exit 3
     sleep 2
 done
 echo 'KAS LAB STOP: watchdog_excluded'
+# Take the two locks in watchdog's order. Nothing has been stopped yet;
+# drift in this short reacquisition interval is checked before any signal.
+ml_lifecycle_release || exit 3
+ml_lock_acquire "$LAB_WATCHDOG_LOCK" || exit 3
+LAB_WATCHDOG_HELD=1
+ml_lifecycle_acquire || exit 3
+echo 'KAS LAB STOP: watchdog_run_locked'
 '''
     for record in records:
         script += 'verify ' + record + ' || exit 3\n'
@@ -594,6 +618,82 @@ until txn_step_services_done; do
     tries=$((tries+1)); [ "$tries" -le 5 ] || exit 3
     sleep 1
 done
+echo 'KAS LAB STOP: manual_stop_verified'
+ml_lifecycle_release || exit 3
+echo 'KAS LAB STOP: handoff_ready'
+'''
+
+
+def lab_diagnostic_script(identities):
+    comparisons = ''
+    for name, (pid, start, binary, _, _) in identities.items():
+        comparisons += (name + ') expected_pid=' + shlex.quote(pid) + '; expected_start='
+                        + shlex.quote(start) + '; expected_binary=' + shlex.quote(binary) + ';;\n')
+    return r'''
+lab_diagnose() {
+    umask 077
+    file=/opt/lab/uninstall-blocked.private
+    : > "$file"; chmod 600 "$file"
+    found=0
+    for proc in /proc/[0-9]*; do
+        [ -d "$proc" ] || continue
+        p=${proc##*/}
+        comm=$(cat "$proc/comm" 2>/dev/null) || continue
+        exe=$(readlink "$proc/exe" 2>/dev/null) || exe=unreadable
+        name=''
+        case "$comm" in mihomo|magitrickled) name=$comm;; esac
+        case "${exe% (deleted)}" in */mihomo) name=mihomo;; */magitrickled) name=magitrickled;; esac
+        for n in mihomo magitrickled; do
+            [ "$proc/exe" -ef "/opt/bin/$n" ] && name=$n
+        done
+        [ -n "$name" ] || continue
+        found=1
+        start=$(ml_starttime "$p") || start=unknown
+        binary=$(sha256sum "$proc/exe" 2>/dev/null | cut -d' ' -f1)
+        expected_pid=''; expected_start=''; expected_binary=''
+        case "$name" in
+''' + comparisons + r'''
+        esac
+        identity=identity_changed
+        [ -n "$expected_pid" ] || identity=identity_unrecorded
+        [ "$start" != unknown ] || identity=identity_unknown
+        if [ "$p" = "$expected_pid" ] && [ "$start" = "$expected_start" ]; then identity=identity_same; fi
+        printf 'KAS LAB DIAG: %s_%s\n' "$name" "$identity"
+        payload=payload_changed
+        [ -n "$expected_binary" ] && [ "$binary" = "$expected_binary" ] && payload=payload_same
+        printf 'KAS LAB DIAG: %s_%s\n' "$name" "$payload"
+        stat=$(cat "$proc/stat" 2>/dev/null) || stat=''
+        tail=${stat##*) }
+        parent=$(printf '%s\n' "$tail" | awk '{print $2}')
+        category=parent_unknown
+        case "$parent" in
+            ''|*[!0-9]*) parent=0;;
+            1) category=parent_reparented;;
+            *)
+                parent_args=$(tr '\000' '|' < /proc/$parent/cmdline 2>/dev/null) || parent_args=''
+                case "$parent_args" in
+                    *'|/opt/bin/mihomo_watchdog.sh|'*|*'|/opt/etc/cron.5mins/mihomo_watchdog|'*) category=parent_watchdog_argv;;
+                    *'|/opt/etc/init.d/S99mihomo|'*|*'|/opt/etc/init.d/S99magitrickle|'*) category=parent_init_argv;;
+                esac
+                [ "$parent" != "$$" ] || category=parent_controller
+                ;;
+        esac
+        printf 'KAS LAB DIAG: %s_%s\n' "$name" "$category"
+        {
+            printf 'name=%s pid=%s start=%s expected_pid=%s expected_start=%s exe=%s parent=%s category=%s\n' \
+                "$name" "$p" "$start" "$expected_pid" "$expected_start" "$exe" "$parent" "$category"
+            printf 'stat=%s\n' "$stat"
+            grep '^Uid:' "$proc/status"
+            sha256sum "$proc/exe" "$proc/cmdline"
+            if [ "$parent" != 0 ]; then
+                cat /proc/$parent/stat
+                readlink /proc/$parent/exe
+                sha256sum /proc/$parent/cmdline
+            fi
+        } >> "$file" 2>&1
+    done
+    [ "$found" = 1 ] || echo 'KAS LAB DIAG: no_matching_process'
+}
 '''
 
 
@@ -655,26 +755,51 @@ def uninstall(guest, mirror, evidence, foreign, revision, origin=None):
             evidence.check('KAS_UNINSTALL_GUARD', 'PASS', 'native_command_verified')
             guest.command('[ ! -e /tmp/mihomo-lifecycle.lock.d ] && [ ! -e /tmp/mihomo.maintenance ] && '
                           '[ ! -e /opt/kas-uninstall-backups/' + snapshot_name + '/transaction/journal.v1 ]')
-            code, output, errors = guest.execute('sh', timeout=240,
-                                                input_data=lab_stop_script(mirror, identities))
-            markers = {'lifecycle_locked', 'watchdog_excluded'} | {
+            snapshot = shlex.quote(snapshot_name)
+            script = lab_diagnostic_script(identities) + lab_stop_script(mirror, identities)
+            script += ('\nsh /opt/lab/uninstall-snapshot-verify.sh ' + snapshot + ' || exit 3\n'
+                       'sh /opt/lab/uninstall-transaction-gate.sh --check ' + snapshot + ' || exit 3\n'
+                       'sh /opt/lab/uninstall-transaction.sh --prepare ' + snapshot + ' || exit 3\n'
+                       "echo 'KAS LAB STOP: native_remove_begin'\n"
+                       'sh /opt/lab/uninstall.sh --remove ' + snapshot + '\n')
+            code, output, errors = guest.execute('sh', timeout=1200, input_data=script)
+            markers = {'lifecycle_locked', 'watchdog_excluded', 'watchdog_run_locked',
+                       'manual_stop_verified', 'handoff_ready', 'native_remove_begin'} | {
                 action + '_' + name for action in ('term', 'kill', 'stopped')
                 for name in ('mihomo', 'magitrickled')}
             for line in output.splitlines():
                 if line.removeprefix('KAS LAB STOP: ') in markers:
                     print(line, flush=True)
+            categories = {'no_matching_process'} | {
+                name + '_' + category for name in ('mihomo', 'magitrickled') for category in
+                ('identity_same', 'identity_changed', 'identity_unknown', 'identity_unrecorded',
+                 'payload_same', 'payload_changed', 'parent_unknown', 'parent_reparented',
+                 'parent_watchdog_argv', 'parent_init_argv', 'parent_controller')}
+            for line in output.splitlines():
+                if line.removeprefix('KAS LAB DIAG: ') in categories:
+                    print(line, flush=True)
             if code != 0:
+                try:
+                    detail_code, details, _ = guest.execute('cat /opt/lab/uninstall-blocked.private')
+                    if detail_code != 0:
+                        raise RuntimeError('private diagnostic unavailable')
+                    path = guest.private / 'uninstall-processes.private'
+                    with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), 'w') as file:
+                        file.write(details)
+                except (RuntimeError, TimeoutError, OSError):
+                    print('KAS LAB DIAG: private_snapshot_unavailable', flush=True)
+            if 'KAS LAB STOP: manual_stop_verified' not in output.splitlines():
                 raise ContractFailure('lab_manual_stop_failed')
             evidence.check('KAS_MANUAL_STOP', 'PASS', 'native_command_verified')
             print('KAS MANUAL STOP: VM origin, exact identities, watchdog exclusion PASS', flush=True)
-            guest.command('sh /opt/lab/uninstall-snapshot-verify.sh ' + snapshot_name)
-            guest.command('sh /opt/lab/uninstall-transaction-gate.sh --check ' + snapshot_name)
-            guest.command('sh /opt/lab/uninstall-transaction.sh --prepare ' + snapshot_name, timeout=300)
+            if 'KAS LAB STOP: native_remove_begin' not in output.splitlines():
+                raise ContractFailure('snapshot_gate_blocked')
         except ContractFailure as error:
             evidence.set('KAS_UNINSTALL', 'BLOCKED', error.reason)
             return False
-    phase('real --remove' if not known_no_remove else 'code-3 guard --remove')
-    code, output, errors = guest.execute('sh /opt/lab/uninstall.sh --remove', timeout=900)
+    if known_no_remove:
+        phase('code-3 guard --remove')
+        code, output, errors = guest.execute('sh /opt/lab/uninstall.sh --remove', timeout=900)
     phase('--remove finished with exit %d' % code)
     if known_no_remove:
         if code == 3 and '[BLOCKED]' in output + errors and contract(guest, mirror, foreign) == before:

@@ -254,9 +254,26 @@ journal/maintenance marker. The controller then revalidates both processes,
 takes the existing KAS lifecycle lock, runs the real watchdog to prove its
 maintenance skip, and addresses only those PID/starttime identities. TERM and
 bounded KILL recheck inode, payload/init hashes and argv; uncertainty blocks.
-After absence is proved and the lock released, snapshot/gate/cache are checked
-again before actual removal. A concurrent restart is caught by native KAS guards,
-never followed by an automatic complete-scenario retry.
+After the real watchdog skip, the controller releases lifecycle while processes
+still run, takes the existing watchdog per-run lock, and reacquires lifecycle
+without waiting. Both identities are rechecked before the first signal. After
+absence is proved, only lifecycle is released: the SAME guest shell retains
+watchdog per-run ownership across snapshot/gate/cache and the child native
+`--remove`. The child takes its own lifecycle lock; EXIT cleanup releases the
+parent's remaining lock on success and abort. No lock ownership is transferred,
+no stale lock is stolen, and a busy acquisition blocks instead of waiting in a
+cycle. A concurrent non-watchdog process is still caught by native KAS guards.
+
+On unexpected refusal, the parent captures process identity/parent information
+before releasing its watchdog lock. Public output contains only allowlisted
+daemon, identity-change, payload-match and observed-parent categories. Parent
+argv matches are observations, not proof of the original launcher; reparented
+processes remain unattributed. No discovered process is signalled by diagnostics.
+PID/starttime/executable/parent data and cmdline hashes are saved mode 0600 in
+guest `/opt/lab/uninstall-blocked.private` and host `uninstall-processes.private`.
+Raw argv is never collected. These files follow the existing private-dir cleanup
+policy and are never uploaded plaintext to public artifacts; public categories
+are retained in the Actions log. A complete-scenario retry is never automatic.
 
 After reinstall, the real `wan_guard()` probes run before Doctor, generating only
 genuine offline-WAN history. No healthy heartbeat is fabricated. A remaining
