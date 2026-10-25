@@ -540,6 +540,20 @@ def removal_teardown_clean(guest, foreign):
     def present(command):
         code, output, errors = guest.execute(command)
         return code == 0 and bool(output.strip())
+
+    def owned_proxy_removed(guest):
+        # The engine records the interface it removed (journal line
+        # 'owned-proxy ProxyN'). Assert THAT interface is absent; a foreign
+        # ProxyN to another upstream must not influence this check.
+        code, output, _ = guest.execute(
+            'grep -m1 owned-proxy /opt/kas-uninstall-backups/*/transaction/journal.v1')
+        if code != 0:
+            return False
+        match = re.search(r'owned-proxy (Proxy[0-9]+)', output)
+        if not match:
+            return False
+        return absent('/bin/ndmc -c "show running-config" | grep -c "^interface ' + match.group(1) + '$"')
+
     checks = [
         ('ledger removed', absent('cat /opt/etc/keenetic-auto-setup/ownership.v1')),
         ('watchdog wrapper removed', absent('cat /opt/etc/cron.5mins/mihomo_watchdog')),
@@ -549,7 +563,7 @@ def removal_teardown_clean(guest, foreign):
         ('owned cron schedule removed', absent("grep mihomo_watchdog /opt/etc/crontab")),
         ('mangle chain removed', absent('iptables -t mangle -S _CUST_BYPASS_WA_')),
         ('policy removed', absent('/bin/ndmc -c "show running-config" | grep -c "^ip policy bypass_wa$"')),
-        ('owned proxy removed', absent('/bin/ndmc -c "show running-config" | grep "proxy upstream 127.0.0.1 7890"')),
+        ('owned proxy removed', owned_proxy_removed(guest)),
         ('packages removed', absent('opkg list-installed | grep -E "^(mihomo|magitrickle) "')),
         ('dns intercept preserved', present('/bin/ndmc -c "show running-config" | grep "intercept enable"')),
         ('journal complete', present('tail -n 1 /opt/kas-uninstall-backups/*/transaction/journal.v1 | grep -x complete')),
