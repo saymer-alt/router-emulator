@@ -491,8 +491,11 @@ exit 0
         for name in payloads:
             init = 'S99mihomo' if name == 'mihomo' else 'S99magitrickle'
             if 'opt/bin/' + name in blobs and 'opt/etc/init.d/' + init in blobs:
-                payloads[name].add(tuple(hashlib.sha256(blobs[p]).hexdigest() for p in
-                                        ('opt/bin/' + name, 'opt/etc/init.d/' + init)))
+                binary = hashlib.sha256(blobs['opt/bin/' + name]).hexdigest()
+                init_data = blobs['opt/etc/init.d/' + init]
+                payloads[name].add((binary, hashlib.sha256(init_data).hexdigest()))
+                if 'uninstall-remove.sh' in getattr(mirror, 'sources', {}):
+                    payloads[name].add((binary, hashlib.sha256(init_data.replace(b'ENABLED=yes\n', b'ENABLED=no\n')).hexdigest()))
     if not all(payloads.values()):
         raise ContractFailure('lab_process_provenance_unproven')
     return payloads
@@ -560,9 +563,14 @@ echo 'KAS LAB STOP: boot_startup_settled'
 
 
 def lab_stop_script(mirror, identities):
-    source = mirror.sources['uninstall-transaction.sh'].decode()
+    simple = 'uninstall-remove.sh' in mirror.sources
+    source = mirror.sources['uninstall-remove.sh' if simple else 'uninstall-transaction.sh'].decode()
     lock = source[source.index('# BEGIN MIHOMO LIFECYCLE LOCK'):source.index('# END MIHOMO LIFECYCLE LOCK')]
-    guard = source[source.index('txn_step_services_done() {'):source.index('# Refuse unproven live processes')]
+    if simple:
+        guard = ('ROOT=\n' + source[source.index('sr_processes() {'):source.index('# A reference in another scheduled/init job')] +
+                 '\ntxn_step_services_done() { sr_processes; [ "$SR_BUSY" -eq 0 ]; }\n')
+    else:
+        guard = source[source.index('txn_step_services_done() {'):source.index('# Refuse unproven live processes')]
     script = 'set -eu\n' + lock + r'''
 fail() { exit 3; }
 LAB_WATCHDOG_LOCK=/tmp/mihomo_watchdog.lock.d
@@ -599,6 +607,7 @@ verify() {
         record = ' '.join(shlex.quote(v) for v in (pid, start, name, binary, init_hash, init, args))
         records.append(record)
         script += 'verify ' + record + ' || exit 3\n'
+    script += ('''if [ -f /opt/bin/mihomo_watchdog.sh ]; then\n''' if simple else '')
     script += '''before=$(grep -c 'maintenance in progress - checks skipped' /opt/var/log/mihomo_watchdog.log 2>/dev/null || true)
 before=${before:-0}
 tries=0
@@ -611,7 +620,9 @@ while :; do
     sleep 2
 done
 echo 'KAS LAB STOP: watchdog_excluded'
-# Take the two locks in watchdog's order. Nothing has been stopped yet;
+'''
+    script += ('fi\n' if simple else '')
+    script += '''# Take the two locks in watchdog's order. Nothing has been stopped yet;
 # drift in this short reacquisition interval is checked before any signal.
 ml_lifecycle_release || exit 3
 ml_lock_acquire "$LAB_WATCHDOG_LOCK" || exit 3
@@ -640,7 +651,7 @@ while [ -d /proc/$1 ]; do
 done
 echo "KAS LAB STOP: stopped_$3"
 '''
-    return script + '\nroot=\n' + guard + '''
+    script += '\nroot=\n' + guard + '''
 tries=0
 until txn_step_services_done; do
     tries=$((tries+1)); [ "$tries" -le 5 ] || exit 3
@@ -650,6 +661,11 @@ echo 'KAS LAB STOP: manual_stop_verified'
 ml_lifecycle_release || exit 3
 echo 'KAS LAB STOP: handoff_ready'
 '''
+    if simple:
+        # Native PARTIAL already disabled the verified autostart and removed
+        # watchdog files. No parent lock is inherited by the native remover.
+        script += '\nml_lock_release "$LAB_WATCHDOG_LOCK" || exit 3\nLAB_WATCHDOG_HELD=0\n'
+    return script
 
 
 def lab_diagnostic_script(identities):
@@ -725,7 +741,86 @@ lab_diagnose() {
 '''
 
 
+def simple_uninstall(guest, mirror, evidence, foreign, revision, origin):
+    """Exercise the public simple command, including its honest PARTIAL path.
+
+    Stopping processes below is controller-only: fresh VM origin and exact
+    identities are required by the existing lab_stop_script. Native remove
+    never receives that authority and never invokes transaction preparation.
+    """
+    def fail(reason='native_uninstall_failed'):
+        evidence.set('KAS_UNINSTALL', 'FAIL', reason)
+        return False
+    yaml_command = 'sha256sum /opt/etc/mihomo/config.yaml /opt/var/lib/magitrickle/config.yaml'
+    yaml_before = guest.command(yaml_command)
+    guest.command('iptables -t mangle -A PREROUTING -p udp --dport 65000 -j RETURN')
+    foreign_rule = guest.command('iptables -t mangle -S PREROUTING | grep 65000')
+    try:
+        code, _, _ = guest.execute('sh', timeout=370, input_data=lab_startup_settle_script())
+        if code != 0:
+            raise ContractFailure('lab_process_provenance_unproven')
+        before = lab_identities(guest, origin)
+        code, output, errors = guest.execute('sh /opt/lab/uninstall.sh --remove', timeout=180, input_data='REMOVE\n')
+        if code != 1 or '[PARTIAL]' not in output:
+            return fail()
+        after = lab_identities(guest, origin)
+        if ({k: (v[0], v[1], v[2], v[4]) for k, v in before.items()} !=
+                {k: (v[0], v[1], v[2], v[4]) for k, v in after.items()}):
+            return fail('native_uninstall_guard_failed')
+        guest.command('test ! -e /opt/bin/mihomo_watchdog.sh && '
+                      'test ! -e /opt/etc/cron.5mins/mihomo_watchdog && '
+                      'grep -qx ENABLED=no /opt/etc/init.d/S99mihomo && '
+                      'grep -qx ENABLED=no /opt/etc/init.d/S99magitrickle')
+        evidence.check('KAS_UNINSTALL_GUARD', 'PASS', 'native_command_verified')
+        print('KAS SIMPLE REMOVE: active processes preserved, autostart disabled, native PARTIAL verified', flush=True)
+        stop = lab_stop_script(mirror, after)
+        code, output, errors = guest.execute('sh', timeout=180, input_data=stop)
+        if code != 0:
+            raise ContractFailure('lab_manual_stop_failed')
+        evidence.check('KAS_MANUAL_STOP', 'PASS', 'native_command_verified')
+        # The production command excludes watchdog itself; no inherited lock,
+        # snapshot, gate, cache or recovery journal is supplied by the controller.
+        for attempt in range(2):
+            code, output, errors = guest.execute('sh /opt/lab/uninstall.sh --remove', timeout=240, input_data='REMOVE\n')
+            if code not in (0, 1) or ('[SUCCESS]' if code == 0 else '[PARTIAL]') not in output:
+                return fail()
+            allowed = ('/opt/etc/opkg/magitrickle.conf', '/opt/etc/init.d/S00ubifs',
+                       '/opt/etc/keenetic-auto-setup-mihomo.state')
+            if any(line.startswith('[LEFT] ') and not any(line.startswith('[LEFT] ' + p + ' —') for p in allowed)
+                   for line in output.splitlines()):
+                return fail()
+            print('KAS SIMPLE REMOVE: native result ' + ('SUCCESS' if code == 0 else 'PARTIAL') +
+                  ('; repeated removal verified' if attempt else '; shared feed/storage/provenance may remain'), flush=True)
+        proxy = guest.command("awk -F'|' '$2==\"proxy\" {print $3}' /opt/etc/keenetic-auto-setup/ownership.v1")
+        if not re.fullmatch(r'Proxy[0-9]+', proxy):
+            return fail()
+        guest.command('! opkg list-installed | grep -E "^(mihomo|magitrickle) "')
+        guest.command('! iptables -t mangle -S | grep _CUST_BYPASS_WA_')
+        guest.command('! /bin/ndmc -c "show running-config" | grep -E "^ip policy bypass_wa$|^interface ' + proxy + '$"')
+        guest.command('test ! -e /tmp/mihomo-lifecycle.lock.d && test ! -e /tmp/mihomo_watchdog.lock.d && test ! -e /tmp/mihomo.maintenance')
+        if guest.command(yaml_command) != yaml_before:
+            return fail('mihomo_config_changed')
+        if not foreign_rule or guest.command('iptables -t mangle -S PREROUTING | grep 65000') != foreign_rule:
+            return fail('netfilter_changed')
+        if foreign is not None:
+            guest.command('/bin/ndmc -c "show running-config" | grep -A4 "^interface Proxy0$" | grep 1081')
+            guest.command('grep foreign-job /opt/etc/crontab')
+    except ContractFailure as error:
+        evidence.set('KAS_UNINSTALL', 'BLOCKED', error.reason)
+        return False
+    if not install(guest, mirror, revision, evidence, foreign) or not wan_guard(guest, evidence):
+        return fail()
+    doctor_pass = doctor(guest, evidence, revision)
+    # A Doctor warning is retained in its own gate and counters. Removal has
+    # independent evidence; never claim Doctor PASS from lack of FAIL.
+    print('KAS SIMPLE REMOVE: reinstall Doctor ' + evidence.gates['KAS_DOCTOR']['status'], flush=True)
+    evidence.set('KAS_UNINSTALL', 'PASS', 'native_uninstall_passed')
+    return doctor_pass
+
+
 def uninstall(guest, mirror, evidence, foreign, revision, origin=None):
+    if 'uninstall-remove.sh' in mirror.sources:
+        return simple_uninstall(guest, mirror, evidence, foreign, revision, origin)
     def phase(marker):
         # Public fixed-format progress marker; the controller side owns it.
         print('KAS UNINSTALL PHASE: ' + marker, flush=True)

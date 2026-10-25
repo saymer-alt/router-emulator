@@ -237,8 +237,9 @@ txn_step_services() { txn_step_services_done || fail; }
 # Refuse unproven live processes
 '''
         for shell in (['dash'], ['busybox', 'ash']):
-            for drift, child_status, missing_log in ((False, 0, False), (True, 0, False),
-                                                     (False, 3, False), (False, 0, True)):
+            for drift, child_status, missing_log, simple in ((d, c, m, simple)
+                    for d, c, m in ((False, 0, False), (True, 0, False), (False, 3, False), (False, 0, True))
+                    for simple in (False, True)):
                 with tempfile.TemporaryDirectory() as temp:
                     root = Path(temp)
                     (root / 'opt/etc/init.d').mkdir(parents=True)
@@ -266,17 +267,26 @@ txn_step_services() { txn_step_services_done || fail; }
                         (proc / 'start').write_text('999' if drift and pid == '102' else '456')
                         identities[name] = (pid, '456', hashlib.sha256(binary.read_bytes()).hexdigest(),
                                             hashlib.sha256(init.read_bytes()).hexdigest(), args)
-                    script = lab_stop_script(SimpleNamespace(sources={'uninstall-transaction.sh': source}), identities)
+                    if simple:
+                        watchdog.unlink()
+                        simple_source = source[:source.index(b'txn_step_services_done')] + b'sr_processes() { SR_BUSY=0; [ ! -d /proc/101 ] && [ ! -d /proc/102 ] || SR_BUSY=1; }\n# A reference in another scheduled/init job\n'
+                        sources = {'uninstall-remove.sh': simple_source}
+                    else:
+                        sources = {'uninstall-transaction.sh': source}
+                    script = lab_stop_script(SimpleNamespace(sources=sources), identities)
                     # Cache verification and child remove run in this SAME shell.
                     # The child must acquire the distinct lifecycle lock while
                     # the parent still excludes watchdog. Aborts must clean both.
-                    script += '''
-[ -e /opt/watchdog-held ] && [ ! -e /opt/held ] || exit 9
-sh /opt/bin/mihomo_watchdog.sh || exit 9
-[ ! -e /opt/held ] || exit 9
-ml_lifecycle_acquire || exit 9
-ml_lifecycle_release
-exit ''' + str(child_status) + '\n'
+                    if simple:
+                        script += '\n[ ! -e /opt/watchdog-held ] && [ ! -e /opt/held ] || exit 9\nml_lifecycle_acquire || exit 9\nml_lifecycle_release\nexit ' + str(child_status) + '\n'
+                    else:
+                        script += '''
+    [ -e /opt/watchdog-held ] && [ ! -e /opt/held ] || exit 9
+    sh /opt/bin/mihomo_watchdog.sh || exit 9
+    [ ! -e /opt/held ] || exit 9
+    ml_lifecycle_acquire || exit 9
+    ml_lifecycle_release
+    exit ''' + str(child_status) + '\n'
                     script = script.replace('/proc/', temp + '/proc/').replace('/opt/', temp + '/opt/')
                     fake_kill = ('kill() { echo "$*" >> "' + temp + '/signals"; '
                                  'rm -f "' + temp + '/proc/$2/"*; rmdir "' + temp + '/proc/$2"; }\n')
@@ -422,3 +432,45 @@ exit ''' + str(child_status) + '\n'
         finally:
             lifecycle.time.sleep = original_sleep
         self.assertEqual(raised.exception.reason, 'native_rules_not_ready')
+
+    def test_simple_removal_dispatch_never_requires_transaction_prepare(self):
+        import lab.kas_lifecycle as lifecycle
+        mirror = SimpleNamespace(sources={'uninstall-remove.sh': b'new companion'})
+        evidence = Evidence()
+        with patch.object(lifecycle, 'simple_uninstall', return_value=True, create=True) as simple:
+            self.assertTrue(lifecycle.uninstall(object(), mirror, evidence, None, 'a' * 40))
+            simple.assert_called_once()
+        self.assertNotIn('KAS_TRANSACTION_GATE', evidence.checks)
+
+    def test_simple_removal_preserves_native_partial_and_doctor_warning(self):
+        import lab.kas_lifecycle as lifecycle
+        class Guest:
+            calls = 0
+            def command(self, command):
+                if command.startswith('sha256sum'): return 'yaml-digests'
+                if command.endswith('grep 65000'): return 'fixture foreign rule'
+                if command.startswith('awk'): return 'Proxy1'
+                return ''
+            def execute(self, command, **kwargs):
+                if '--remove' in command:
+                    self.calls += 1
+                    return 1, '[PARTIAL] retained shared feed\n[LEFT] /opt/etc/opkg/magitrickle.conf — shared\n', ''
+                return 0, '', ''
+        evidence = Evidence()
+        def warning(*args):
+            evidence.set('KAS_DOCTOR', 'BLOCKED', 'doctor_warning')
+            evidence.measurement('doctor_warn', 1)
+            return False
+        identity = {'mihomo': ('101','500','hash','init-hash','mihomo|')}
+        with patch.object(lifecycle, 'lab_identities', return_value=identity), \
+                patch.object(lifecycle, 'lab_stop_script', return_value='verified VM stop'), \
+                patch.object(lifecycle, 'install', return_value=True), \
+                patch.object(lifecycle, 'wan_guard', return_value=True), \
+                patch.object(lifecycle, 'doctor', side_effect=warning):
+            guest = Guest()
+            self.assertFalse(lifecycle.simple_uninstall(guest, object(), evidence, None, 'a'*40, {}))
+            self.assertEqual(guest.calls, 3)
+        self.assertEqual(evidence.gates['KAS_UNINSTALL']['status'], 'PASS')
+        self.assertEqual(evidence.gates['KAS_DOCTOR']['status'], 'BLOCKED')
+        self.assertEqual(evidence.measurements['doctor_warn'], 1)
+        self.assertNotIn('KAS_TRANSACTION_GATE', evidence.checks)
