@@ -531,6 +531,34 @@ sha256sum /proc/$p/exe /opt/bin/NAME /opt/etc/init.d/INIT
     return result
 
 
+def lab_startup_settle_script():
+    # The locked KN S99magitrickle has its own 5s startup loop until
+    # uptime > 300. It does not use the KAS watchdog lock. Wait for its
+    # natural exit before recording identities; never signal the init shell.
+    return r'''
+tries=0
+observed=0
+while :; do
+    uptime=$(cut -d. -f1 /proc/uptime) || exit 3
+    case "$uptime" in ''|*[!0-9]*) exit 3;; esac
+    active=0
+    for file in /proc/[0-9]*/cmdline; do
+        [ -e "$file" ] || continue
+        args=$(tr '\000' '|' < "$file") || { [ ! -e "$file" ] && continue; exit 3; }
+        case "$args" in *'S99magitrickle|'*) active=1;; esac
+    done
+    if [ "$active" = 1 ] && [ "$observed" = 0 ]; then
+        echo 'KAS LAB STOP: boot_startup_loop_observed'
+        observed=1
+    fi
+    [ "$uptime" -gt 300 ] && [ "$active" = 0 ] && break
+    tries=$((tries+1)); [ "$tries" -le 70 ] || exit 3
+    sleep 5
+done
+echo 'KAS LAB STOP: boot_startup_settled'
+'''
+
+
 def lab_stop_script(mirror, identities):
     source = mirror.sources['uninstall-transaction.sh'].decode()
     lock = source[source.index('# BEGIN MIHOMO LIFECYCLE LOCK'):source.index('# END MIHOMO LIFECYCLE LOCK')]
@@ -746,6 +774,15 @@ def uninstall(guest, mirror, evidence, foreign, revision, origin=None):
     if not known_no_remove:
         phase('live-process refusal and controller-owned manual stop')
         try:
+            phase('wait for KN init boot loop to finish naturally')
+            # execute() returns nonzero without raising: require the actual
+            # bounded read-only prerequisite before trusting daemon identities.
+            code, output, errors = guest.execute('sh', timeout=370, input_data=lab_startup_settle_script())
+            if code != 0:
+                raise ContractFailure('lab_process_provenance_unproven')
+            if 'KAS LAB STOP: boot_startup_loop_observed' in output.splitlines():
+                print('KAS LAB STOP: boot_startup_loop_observed', flush=True)
+            print('KAS LAB STOP: boot_startup_settled', flush=True)
             identities = lab_identities(guest, origin)
             code, output, errors = guest.execute('sh /opt/lab/uninstall.sh --remove', timeout=120)
             if (code != 3 or 'live service ownership unproven' not in output + errors
@@ -872,6 +909,10 @@ def removal_teardown_clean(guest, foreign):
         return absent('/bin/ndmc -c "show running-config" | grep -c "^interface ' + match.group(1) + '$"')
 
     checks = [
+        ('locks and maintenance cleaned', guest.execute(
+            'test ! -e /tmp/mihomo-lifecycle.lock.d && '
+            'test ! -e /tmp/mihomo_watchdog.lock.d && '
+            'test ! -e /tmp/mihomo.maintenance')[0] == 0),
         ('ledger removed', absent('cat /opt/etc/keenetic-auto-setup/ownership.v1')),
         ('watchdog wrapper removed', absent('cat /opt/etc/cron.5mins/mihomo_watchdog')),
         ('watchdog binary removed', absent('cat /opt/bin/mihomo_watchdog.sh')),

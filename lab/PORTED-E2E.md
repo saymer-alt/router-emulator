@@ -250,7 +250,13 @@ inode or argv on an arbitrary router never authorizes this laboratory helper.
 
 With services running, the native `--remove` must return the ownership BLOCKED
 message, preserve the contract and PID/starttime identities, and create no
-journal/maintenance marker. The controller then revalidates both processes,
+journal/maintenance marker. Before recording identities, the controller waits
+read-only for uptime > 300 and absence of the KN init shell (bounded to 350s).
+The locked KN `S99magitrickle` starts its own background `startup_loop` below
+that uptime, checking every 5s and restarting absent MagiTrickle independently
+of KAS watchdog locks. Waiting for its natural exit avoids stopping a daemon
+while that boot launcher is still active; no init shell is signalled or changed.
+An unknown or persistent init process blocks at the deadline. The controller then revalidates both processes,
 takes the existing KAS lifecycle lock, runs the real watchdog to prove its
 maintenance skip, and addresses only those PID/starttime identities. TERM and
 bounded KILL recheck inode, payload/init hashes and argv; uncertainty blocks.
@@ -263,6 +269,8 @@ watchdog per-run ownership across snapshot/gate/cache and the child native
 parent's remaining lock on success and abort. No lock ownership is transferred,
 no stale lock is stolen, and a busy acquisition blocks instead of waiting in a
 cycle. A concurrent non-watchdog process is still caught by native KAS guards.
+Completed removal also requires both lock directories and the maintenance
+marker to be absent, alongside the completed journal and preserved rollback cache.
 
 On unexpected refusal, the parent captures process identity/parent information
 before releasing its watchdog lock. Public output contains only allowlisted

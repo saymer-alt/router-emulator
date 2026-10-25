@@ -16,12 +16,60 @@ from unittest.mock import patch
 
 
 class LifecycleDataTests(unittest.TestCase):
+    def test_teardown_rejects_leftover_lock_or_maintenance(self):
+        from lab.kas_lifecycle import removal_teardown_clean
+        class Guest:
+            stale = False
+            def execute(self, command):
+                if command.startswith('test ! -e /tmp/'):
+                    return int(self.stale), '', ''
+                if command.startswith('grep -m1 owned-proxy'):
+                    return 0, 'owned-proxy Proxy1', ''
+                if ('dns' in command or 'intercept enable' in command or
+                        command.startswith(('tail -n 1', 'cat /opt/kas-uninstall-backups/'))):
+                    return 0, 'fixture present', ''
+                return 1, '', ''
+        guest = Guest()
+        self.assertTrue(removal_teardown_clean(guest, None))
+        guest.stale = True
+        self.assertFalse(removal_teardown_clean(guest, None))
+
+    def test_boot_startup_loop_must_finish_before_manual_stop(self):
+        from lab.kas_lifecycle import lab_startup_settle_script
+        for shell in (['dash'], ['busybox', 'ash']):
+            for stuck in (False, True):
+                with tempfile.TemporaryDirectory() as temp:
+                    root = Path(temp)
+                    (root / 'proc/123').mkdir(parents=True)
+                    (root / 'proc/uptime').write_text('100.00 0.00\n')
+                    (root / 'proc/123/cmdline').write_bytes(
+                        b'/bin/sh\0/opt/etc/init.d/S99magitrickle\0start\0')
+                    script = lab_startup_settle_script().replace('/proc/', temp + '/proc/')
+                    # First the uptime boundary passes while the init loop is
+                    # still present. Only its later exit permits stopping.
+                    setup = '''steps=0
+sleep() {
+    steps=$((steps+1))
+    echo '306.00 0.00' > ROOT/proc/uptime
+    if [ "$steps" -ge 2 ] && [ STUCK = no ]; then
+        rm -f ROOT/proc/123/cmdline
+    fi
+}
+'''.replace('ROOT', temp).replace('STUCK', 'yes' if stuck else 'no')
+                    result = subprocess.run(shell, input=setup + script +
+                                            '\n[ "$steps" = 2 ]\n', text=True,
+                                            capture_output=True, timeout=10)
+                    self.assertEqual(result.returncode, 3 if stuck else 0, result.stderr)
+                    self.assertEqual((root / 'proc/123/cmdline').exists(), stuck)
+
     def test_blocked_handoff_only_publishes_fixed_diagnostics(self):
         import lab.kas_lifecycle as lifecycle
         class Guest:
             def command(self, *args, **kwargs):
                 return ''
             def execute(self, command, **kwargs):
+                if command == 'sh' and 'boot_startup_settled' in kwargs.get('input_data', ''):
+                    return 0, 'KAS LAB STOP: boot_startup_settled\n', ''
                 if command.endswith('--create'):
                     return 0, 'snapshot created: /opt/kas-uninstall-backups/test', ''
                 if command.endswith('--remove'):
@@ -84,6 +132,8 @@ class LifecycleDataTests(unittest.TestCase):
                 return ''
 
             def execute(self, command, **kwargs):
+                if command == 'sh' and 'boot_startup_settled' in kwargs.get('input_data', ''):
+                    return 0, 'KAS LAB STOP: boot_startup_settled\n', ''
                 if command == 'sh':
                     self.removes = 2
                     return 0, ('KAS LAB STOP: manual_stop_verified\nKAS LAB STOP: native_remove_begin\n'
