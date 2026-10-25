@@ -33,15 +33,15 @@ def fetch(url, digest, destination):
         # bin.entware.net intermittently answers 503 to runner IPs; three
         # bounded attempts for 502/503/504 only. Every downloaded byte is
         # still pinned by the digest check below.
-        for attempt in (1, 2, 3):
+        for attempt in (1, 2, 3, 4, 5):
             try:
                 with urllib.request.urlopen(url, timeout=90) as response:
                     data = response.read()
                 break
             except urllib.error.HTTPError as error:
-                if attempt == 3 or error.code not in (502, 503, 504):
+                if attempt == 5 or error.code not in (502, 503, 504):
                     raise
-                time.sleep(2 * attempt)
+                time.sleep(min(15, 3 * attempt))
         if hashlib.sha256(data).hexdigest() != digest:
             raise ValueError("download digest mismatch")
         destination.parent.mkdir(parents=True, exist_ok=True)
