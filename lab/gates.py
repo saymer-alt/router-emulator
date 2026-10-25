@@ -28,7 +28,7 @@ REASONS.update({'native_services_duplicate', 'native_services_not_ready', 'nativ
     'foreign_setup_failed', 'native_socks_not_ready', 'native_command_failed', 'native_command_timed_out',
     'mihomo_config_changed', 'magi_config_changed', 'watchdog_changed', 'hook_changed',
     'crontab_changed', 'ledger_changed', 'proxy_changed', 'policy_changed', 'netfilter_changed'})
-CHECKS = ('KAS_IDEMPOTENCE', 'KAS_INSTALL_INTERRUPTION', 'KAS_UPDATE', 'KAS_FOREIGN_RESOURCES',
+CHECKS = ('KAS_IDEMPOTENCE', 'KAS_INSTALL_INTERRUPTION', 'KAS_UPDATE', 'KAS_FOREIGN_RESOURCES', 'KAS_FOREIGN_DOCTOR',
           'KAS_UNINSTALL_SNAPSHOT', 'KAS_TRANSACTION_GATE', 'KAS_WAN_RESTART_GUARD', 'KAS_UNINSTALL_GUARD')
 
 
@@ -48,7 +48,8 @@ class Evidence:
         self.references[name] = value
 
     def measurement(self, name, value):
-        if name not in ('doctor_ok', 'doctor_warn', 'doctor_fail') or not isinstance(value, int) or not 0 <= value <= 10000:
+        if name not in ('doctor_ok', 'doctor_warn', 'doctor_fail',
+                        'foreign_doctor_ok', 'foreign_doctor_warn', 'foreign_doctor_fail') or not isinstance(value, int) or not 0 <= value <= 10000:
             raise ValueError('invalid public measurement')
         self.measurements[name] = value
 

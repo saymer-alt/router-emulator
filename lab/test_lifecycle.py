@@ -3,10 +3,76 @@ import json
 from pathlib import Path
 import unittest
 from lab.kas_lifecycle import (ContractFailure, block, changed_reason,
-                              netfilter_settled, plain, wait_netfilter_settled)
+                              doctor, netfilter_settled, plain, wait_netfilter_settled)
+from lab.gates import Evidence
+import contextlib
+import io
+import tempfile
+from types import SimpleNamespace
+from unittest.mock import patch
 
 
 class LifecycleDataTests(unittest.TestCase):
+    def test_reinstall_warning_never_reports_doctor_pass(self):
+        import lab.kas_lifecycle as lifecycle
+
+        class Guest:
+            removes = 0
+
+            def command(self, *args, **kwargs):
+                return ''
+
+            def execute(self, command, **kwargs):
+                if 'mihomo-doctor.sh' in command:
+                    return 1, ('[WARN] Watchdog log is empty - the watchdog has not logged anything yet\n'
+                               'OK: 35\nWARN: 1\nFAIL: 0\n[WARN] Overall status: WARN'), ''
+                if command.endswith('--create'):
+                    return 0, 'snapshot created: /opt/kas-uninstall-backups/test', ''
+                if command.endswith('--remove'):
+                    self.removes += 1
+                    return 0, ('[PASS] KAS removal transaction complete' if self.removes == 1
+                               else 'already fully removed'), ''
+                return 0, '', ''
+
+        evidence = Evidence()
+        stream = io.StringIO()
+        mirror = SimpleNamespace(sources={'uninstall.sh': b'changed candidate'})
+        with patch.object(lifecycle, 'contract', return_value={}), \
+                patch.object(lifecycle, 'removal_teardown_clean', return_value=True), \
+                patch.object(lifecycle, 'install', return_value=True), \
+                contextlib.redirect_stdout(stream):
+            result = lifecycle.uninstall(Guest(), mirror, evidence, None, 'a' * 40)
+        self.assertFalse(result)
+        self.assertEqual(evidence.gates['KAS_UNINSTALL']['status'], 'BLOCKED')
+        self.assertIn('KAS DOCTOR WARNING: Watchdog log is empty', stream.getvalue())
+        self.assertIn('Doctor BLOCKED', stream.getvalue())
+        self.assertNotIn('Doctor passed', stream.getvalue())
+        self.assertNotIn('unclassified_warning', stream.getvalue())
+
+    def test_doctor_requires_full_pass(self):
+        for code, warnings, failures, overall, expected in (
+                (0, 0, 0, 'OK', 'PASS'), (1, 1, 0, 'WARN', 'BLOCKED'),
+                (2, 0, 1, 'FAIL', 'FAIL'), (1, 0, 0, 'missing', 'FAIL'),
+                (0, 1, 0, 'OK', 'FAIL')):
+            class Guest:
+                def execute(self, *args, **kwargs):
+                    return code, ('[WARN] private-router-data\nOK: 35\nWARN: %d\nFAIL: %d\nOverall status: %s'
+                                  % (warnings, failures, overall)), ''
+            evidence = Evidence()
+            stream = io.StringIO()
+            with contextlib.redirect_stdout(stream):
+                result = doctor(Guest(), evidence, 'a' * 40)
+            self.assertEqual(result, expected == 'PASS')
+            self.assertEqual(evidence.gates['KAS_DOCTOR']['status'], expected)
+            self.assertNotIn('private-router-data', stream.getvalue())
+            # Persisting a clean PASS beside a foreign BLOCKED cannot turn green.
+            evidence.check('KAS_FOREIGN_DOCTOR', expected, evidence.gates['KAS_DOCTOR']['reason'])
+            for gate in evidence.gates:
+                evidence.set(gate, 'PASS', 'native_command_verified')
+            with tempfile.TemporaryDirectory() as temp:
+                evidence.write(temp)
+                self.assertEqual(json.loads((Path(temp) / 'gates.json').read_text())['outcome'], expected)
+
     def test_proxy_and_policy_blocks_never_share_directives(self):
         config = 'interface Proxy0\n    proxy upstream 127.0.0.1 1081\n!\ninterface Proxy1\n    proxy upstream 127.0.0.1 7890\n!\nip policy bypass_wa\n    permit global Proxy1\n!\n'
         self.assertNotIn('7890', block(config, 'interface Proxy0'))

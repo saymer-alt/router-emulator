@@ -115,14 +115,33 @@ def doctor(guest, evidence, revision):
         if count:
             evidence.measurement(key, int(count[1]))
     failures = re.search(r'(?m)^FAIL:\s+(\d+)', output)
-    if code == 0 and failures and int(failures[1]) == 0 and 'Overall status: OK' in output:
+    warnings = re.search(r'(?m)^WARN:\s+(\d+)', output)
+    if code == 0 and warnings and int(warnings[1]) == 0 and failures and int(failures[1]) == 0 and 'Overall status: OK' in output:
         evidence.set('KAS_DOCTOR', 'PASS', 'native_doctor_passed')
-    elif code == 1 and failures and int(failures[1]) == 0 and 'Overall status: WARN' in output:
+    elif code == 1 and warnings and int(warnings[1]) > 0 and failures and int(failures[1]) == 0 and 'Overall status: WARN' in output:
         evidence.set('KAS_DOCTOR', 'BLOCKED', 'doctor_warning')
     else:
         evidence.set('KAS_DOCTOR', 'FAIL', 'native_doctor_failed')
+    # Publish only source-defined finding prefixes, never arbitrary guest text.
+    # The full diagnostic remains in ssh-private.log.
+    warning_prefixes = (
+        'Watchdog log not found', 'Watchdog log is empty',
+        'No healthy check recorded', "No '[OK] All good' entry found",
+        'Historical stability: WARN', 'Repeated failures:',
+        'Watchdog interventions in the last 24h:',
+        'magitrickled is running but DNS proxy port',
+        'bypass_wa policy exists but has no interface permit',
+        'bypass_wa policy not found', 'DNS resolution FAILED',
+    )
+    for line in output.splitlines():
+        if '[WARN] ' in line:
+            finding = line.split('[WARN] ', 1)[1]
+            if finding.startswith('Overall status:'):
+                continue
+            label = next((p for p in warning_prefixes if finding.startswith(p)), 'unclassified_warning')
+            print('KAS DOCTOR WARNING: ' + label, flush=True)
     print('KAS DOCTOR: ' + evidence.gates['KAS_DOCTOR']['status'], flush=True)
-    return code in (0, 1) and failures and int(failures[1]) == 0
+    return evidence.gates['KAS_DOCTOR']['status'] == 'PASS'
 
 
 STABLE_FILES = ('/opt/etc/mihomo/config.yaml', '/opt/var/lib/magitrickle/config.yaml',
@@ -525,7 +544,9 @@ def uninstall(guest, mirror, evidence, foreign, revision):
         return False
     phase('post-reinstall doctor')
     if not doctor(guest, evidence, revision):
-        evidence.set('KAS_UNINSTALL', 'FAIL', 'native_uninstall_failed')
+        verdict = evidence.gates['KAS_DOCTOR']
+        evidence.set('KAS_UNINSTALL', verdict['status'], verdict['reason'])
+        print('KAS UNINSTALL: removal and reinstall completed; Doctor ' + verdict['status'], flush=True)
         return False
     evidence.set('KAS_UNINSTALL', 'PASS', 'native_uninstall_passed')
     print('KAS UNINSTALL: clean reinstall and Doctor passed after removal', flush=True)
@@ -687,6 +708,11 @@ def foreign_profile(args, private, credentials, coldboot, mirror, port, tls_port
         lan_forwards='8080:80;8022:222', mirror_port=port,
         mirror_tls_port=tls_port, after_scenario=probes))
     passed = result == 0 and completed['ok']
+    # The clean profile must not hide the foreign profile's Doctor verdict.
+    verdict = local.gates['KAS_DOCTOR']
+    evidence.check('KAS_FOREIGN_DOCTOR', verdict['status'], verdict['reason'])
+    for key, value in local.measurements.items():
+        evidence.measurement('foreign_' + key, value)
     if passed:
         evidence.check('KAS_FOREIGN_RESOURCES', 'PASS', 'native_command_verified')
     else:
@@ -694,5 +720,8 @@ def foreign_profile(args, private, credentials, coldboot, mirror, port, tls_port
             # The UART scenario failed, or the controller hook raised; only a
             # scenario failure may be reported as a serial timeout.
             failure['reason'] = 'serial_timeout' if not started['probes'] else 'runner_failure'
-        evidence.check('KAS_FOREIGN_RESOURCES', 'FAIL', failure['reason'])
+        if result == 0 and verdict['status'] == 'BLOCKED':
+            evidence.check('KAS_FOREIGN_RESOURCES', 'BLOCKED', verdict['reason'])
+        else:
+            evidence.check('KAS_FOREIGN_RESOURCES', 'FAIL', failure['reason'])
     return passed

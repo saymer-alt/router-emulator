@@ -238,5 +238,32 @@ accept those projects automatically.
 No schedule is enabled. No changes to real routers, networks, VPS, main/stable,
 tags, releases or automatic merges are part of this laboratory.
 
+## Foreign-profile Doctor warning: local reproduction and evidence limits
+
+At KAS `891c336cf389c34b5c2b504a2bc67979ba8d287a`, `install.sh` touches
+`/opt/var/log/mihomo_watchdog.log`. After fresh tmpfs or before the first
+scheduled watchdog run it can be empty. The clean lifecycle invokes
+`wan_guard()` before Doctor; the foreign lifecycle does not. The production
+Doctor history section reports `Watchdog log is empty`, WARN=1, FAIL=0 and
+exit 1 for that state. A missing log similarly warns. This is a reproducible
+cause, not proof of the warning in historical run 40184425498: that run's
+private SSH log was deleted and its public artifact omitted foreign counters.
+
+Local reproduction from the KAS checkout, without guests or network:
+
+```sh
+python3 tests/maintenance-regression.py
+```
+
+`doctor_fresh_history()` executes the actual Doctor history section and summary
+on missing, empty and recent WAN-outage-only logs under dash and BusyBox ash.
+It preserves WARN for missing/empty history. A WAN-outage-only log exercises
+the existing informational path; the test does not fabricate a healthy run.
+`lab.test_lifecycle` separately verifies that post-reinstall WARN returns false,
+stays BLOCKED and never prints `Doctor passed`. `KAS_FOREIGN_DOCTOR` and
+`foreign_doctor_*` counters retain the foreign result in public gate evidence.
+No cron timing change, fabricated watchdog log or relaxed Doctor criterion is
+an acceptable way to turn this warning into PASS.
+
 References: [native password command](https://storage.googleapis.com/docs.help.keenetic.com/cli/4.3/en/cli_manual_kn-3610.pdf),
 [official Entware USB installation](https://support.keenetic.com/titan/kn-1812/en/20980-installing-the-entware-repository-on-a-usb-drive.html).
