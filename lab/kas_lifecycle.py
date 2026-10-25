@@ -794,9 +794,11 @@ def simple_uninstall(guest, mirror, evidence, foreign, revision, origin):
         proxy = guest.command("awk -F'|' '$2==\"proxy\" {print $3}' /opt/etc/keenetic-auto-setup/ownership.v1")
         if not re.fullmatch(r'Proxy[0-9]+', proxy):
             return fail()
-        guest.command('! opkg list-installed | grep -E "^(mihomo|magitrickle) "')
-        guest.command('! iptables -t mangle -S | grep _CUST_BYPASS_WA_')
-        guest.command('! /bin/ndmc -c "show running-config" | grep -E "^ip policy bypass_wa$|^interface ' + proxy + '$"')
+        guest.command('list=$(opkg list-installed) || exit 3; ! printf "%s\\n" "$list" | grep -E "^(mihomo|magitrickle) "')
+        guest.command('rules=$(iptables -t mangle -S) || exit 3; ! printf "%s\\n" "$rules" | grep _CUST_BYPASS_WA_')
+        guest.command('cfg=$(/bin/ndmc -c "show running-config") || exit 3; '
+                      'printf "%s\\n" "$cfg" | grep -q "^interface " || exit 3; '
+                      '! printf "%s\\n" "$cfg" | grep -E "^ip policy bypass_wa$|^interface ' + proxy + '$"')
         guest.command('test ! -e /tmp/mihomo-lifecycle.lock.d && test ! -e /tmp/mihomo_watchdog.lock.d && test ! -e /tmp/mihomo.maintenance')
         if guest.command(yaml_command) != yaml_before:
             return fail('mihomo_config_changed')
