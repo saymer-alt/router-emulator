@@ -15,6 +15,14 @@ on:
         default: kas
   workflow_dispatch:
     inputs:
+      emulator_ref:
+        description: 'Router Emulator commit to check out (defaults to this ref)'
+        required: false
+        type: string
+      kas_ref:
+        description: 'Full 40-hex keenetic-auto-setup commit under test'
+        required: false
+        type: string
       stage:
         description: 'Laboratory stage: kas (full lifecycle) or uninstall-packages (minimal package uninstall)'
         required: false
