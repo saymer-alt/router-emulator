@@ -1,0 +1,152 @@
+# Daily check for a new upstream release of stavultras/router-emulator.
+#
+#   Report-only. Never updates code, never opens PRs or merges, never
+#   builds anything. A new upstream release (compared against VERSION in
+#   this repository) opens exactly one issue; while that issue stays
+#   open, later runs of the same version do not duplicate it. The SHA of
+#   upstream/main is always reported, so commits without a release are
+#   visible in the run summary. An API or network error fails the run —
+#   it is never treated as "no updates".
+#
+# The schedule fires on the default branch; gh needs no extra setup on
+# GitHub runners.
+name: Upstream release watch
+
+on:
+  schedule:
+    - cron: '17 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: upstream-watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Read upstream state
+        id: upstream
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPSTREAM: stavultras/router-emulator
+        run: |
+          set -euo pipefail
+          # every command here must succeed: an API or network failure is
+          # not evidence of "no updates"
+          tag=$(gh api "repos/$UPSTREAM/releases/latest" --jq '.tag_name')
+          sha=$(gh api "repos/$UPSTREAM/commits/main" --jq '.sha')
+          msg=$(gh api "repos/$UPSTREAM/commits/main" --jq '.commit.message' | head -n 1)
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "msg=$msg" >> "$GITHUB_OUTPUT"
+
+      - name: Compare with local VERSION
+        id: cmp
+        env:
+          TAG: ${{ steps.upstream.outputs.tag }}
+        run: |
+          set -euo pipefail
+          local=$(tr -d ' \r\n' < VERSION)
+          up=${TAG#v}
+          newest=$(printf '%s\n%s\n' "$local" "$up" | sort -V | tail -n 1)
+          verdict=same
+          if [ "$up" != "$local" ] && [ "$newest" = "$up" ]; then
+            verdict=new
+          elif [ "$up" != "$local" ]; then
+            verdict=local-ahead
+          fi
+          echo "local=$local" >> "$GITHUB_OUTPUT"
+          echo "up=$up" >> "$GITHUB_OUTPUT"
+          echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
+
+      - name: Summary
+        env:
+          LOCAL: ${{ steps.cmp.outputs.local }}
+          UP: ${{ steps.cmp.outputs.up }}
+          VERDICT: ${{ steps.cmp.outputs.verdict }}
+          TAG: ${{ steps.upstream.outputs.tag }}
+          SHA: ${{ steps.upstream.outputs.sha }}
+          MSG: ${{ steps.upstream.outputs.msg }}
+        run: |
+          case $VERDICT in
+            same) v="up to date (local $LOCAL == upstream $UP)" ;;
+            new) v="NEW upstream release: v$UP (local is $LOCAL)" ;;
+            local-ahead) v="local $LOCAL is ahead of the latest upstream release v$UP" ;;
+          esac
+          {
+            echo "## Upstream release watch"
+            echo
+            echo "- Local \`VERSION\`: $LOCAL"
+            echo "- Upstream latest release: [$TAG](https://github.com/stavultras/router-emulator/releases/tag/$TAG)"
+            echo "- Upstream main: [$SHA](https://github.com/stavultras/router-emulator/commit/$SHA)"
+            echo "- Upstream main head: $MSG"
+            echo "- Verdict: **$v**"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "Upstream watch: $v"
+
+      - name: Open an issue for a new version
+        if: steps.cmp.outputs.verdict == 'new'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPSTREAM: stavultras/router-emulator
+          LOCAL: ${{ steps.cmp.outputs.local }}
+          UP: ${{ steps.cmp.outputs.up }}
+          TAG: ${{ steps.upstream.outputs.tag }}
+          SHA: ${{ steps.upstream.outputs.sha }}
+          MSG: ${{ steps.upstream.outputs.msg }}
+        run: |
+          set -euo pipefail
+          title="Upstream release $TAG is available (local: $LOCAL)"
+          # exact-title match over the watcher's issues; if GitHub API fails
+          # here the run fails — never create blindly on a broken dedupe check
+          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open \
+            --search "Upstream release in:title" --limit 100 --json title \
+            --jq "[.[] | select(.title == \"$title\")] | length")
+          if [ "$existing" -gt 0 ]; then
+            echo "Issue for $TAG already open, not duplicating"
+            exit 0
+          fi
+          # brief difference: commits of upstream between the local and the
+          # new version; a compare failure must not lose the issue itself
+          commits=$(gh api "repos/$UPSTREAM/compare/v$LOCAL...v$UP" \
+            --jq '.commits | length' 2>/dev/null || echo "?")
+          subjects=$(gh api "repos/$UPSTREAM/compare/v$LOCAL...v$UP" \
+            --jq '.commits[] | "- " + (.commit.message | split("\n")[0])' 2>/dev/null |
+            head -n 10 || true)
+          if [ -z "${subjects:-}" ]; then
+            subjects="- (the $LOCAL...$UP comparison failed; see the release page)"
+          fi
+          extra=""
+          if [ "$commits" != "?" ] && [ "$commits" -gt 10 ]; then extra=" …"; fi
+          body=$(cat <<EOF
+          A new upstream release was published while this repository is on \`$LOCAL\`.
+
+          - **Upstream release:** [$TAG](https://github.com/stavultras/router-emulator/releases/tag/$TAG)
+          - **Upstream main:** [$SHA](https://github.com/stavultras/router-emulator/commit/$SHA) — $MSG
+          - **Commits** \`v$LOCAL...v$UP\`: $commits
+
+          <details><summary>Upstream commit subjects (first 10)</summary>
+
+          ${subjects}${extra}
+
+          </details>
+
+          Follow \`docs/UPSTREAM-SYNC.md\` for the merge procedure (keep our
+          \`README.md\`, renumber the lab FE patch on a number collision,
+          update the workflow path filters). Note: landing a \`VERSION\` bump
+          on \`main\` publishes release \`v<VERSION>\` automatically
+          (\`build.yml\`) — plan the release deliberately.
+          EOF
+          )
+          gh issue create --repo "$GITHUB_REPOSITORY" \
+            --title "$title" --body "$body"
