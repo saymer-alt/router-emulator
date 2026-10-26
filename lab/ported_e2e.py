@@ -61,8 +61,10 @@ def run_entware(args, private, credentials, coldboot, evidence):
     write_at(files, CONFIG_OFFSET, config_image(synthetic_config(secret['username'], secret['password'], entware_config())))
     image, mirror = private / 'opt.img', private / 'mirror'
     build(image, mirror, private / 'cache', credentials)
-    if args.stage != 'entware':
+    if args.stage not in ('entware', 'knvr'):
         add_packages(mirror, private / 'cache', Path(__file__).with_name('kas-packages.lock.json'))
+    if args.stage == 'knvr':
+        add_packages(mirror, private / 'cache', Path(__file__).with_name('knvr-packages.lock.json'))
     tls = None
     if args.stage in ('kas', 'uninstall-packages'):
         from lab.kas_mirror import KASMirror
@@ -91,6 +93,10 @@ def run_entware(args, private, credentials, coldboot, evidence):
             print('ENTWARE: authenticated SSH, filesystem and packages survived reset', flush=True)
             if args.stage == 'entware':
                 return
+            if args.stage == 'knvr':
+                from lab.knvr_e2e import lifecycle
+                completed['ok'] = lifecycle(guest, args, evidence, context, private, cameras)
+                return
             phase['name'] = 'KAS_PREFLIGHT'
             evidence.set('KAS_PREFLIGHT', 'NOT_TESTED', 'unattempted')
             guest.command('opkg update && opkg install ca-bundle curl jq iptables ip-full nano cron socat', timeout=240)
@@ -113,12 +119,20 @@ def run_entware(args, private, credentials, coldboot, evidence):
             guest.close()
 
     with ExitStack() as stack:
+        cameras = None
+        archive = None
+        if args.stage == 'knvr':
+            from lab.knvr_e2e import archive_image
+            from lab.knvr_rtsp import Cameras
+            archive = archive_image(private / 'archive.img')
+            cameras = stack.enter_context(Cameras(args.mediamtx, private))
         tls_port = stack.enter_context(tls) if tls else None
         port = stack.enter_context(Mirror(mirror, tls.http_routes if tls else None))
         result = run(SimpleNamespace(scenario=scenario, emulator_root=args.emulator_root,
             nand_dir=nand, output_dir=private / 'entware-uart', max_seconds=2400,
             preset='cudy-wr3000p-v1', lan_forwards='8080:80;8022:222',
-            opt_image=image, mirror_port=port, mirror_tls_port=tls_port, after_scenario=probes))
+            opt_image=image, archive_image=archive, rtsp_port=cameras.port if cameras else None,
+            mirror_port=port, mirror_tls_port=tls_port, after_scenario=probes))
         if result == 0 and completed['ok'] and args.stage == 'kas':
             # A separate copy of the pre-install snapshot exercises collision
             # handling without changing the clean profile's nine gate results.
@@ -140,12 +154,17 @@ def main():
     parser.add_argument('--nand-dir', required=True)
     parser.add_argument('--private-dir', required=True)
     parser.add_argument('--report-dir', required=True)
-    parser.add_argument('--stage', choices=('entware', 'preflight', 'kas', 'uninstall-packages'), default='kas')
+    parser.add_argument('--stage', choices=('entware', 'preflight', 'kas', 'uninstall-packages', 'knvr'), default='kas')
+    parser.add_argument('--knvr-dir')
+    parser.add_argument('--knvr-ref')
+    parser.add_argument('--mediamtx')
     parser.add_argument('--kas-dir')
     parser.add_argument('--kas-ref', default='6dd6438e2b64bad0fe9205ab6575795f808dabd8')
     args = parser.parse_args()
     if args.stage in ('kas', 'uninstall-packages') and not args.kas_dir:
         parser.error('--kas-dir is required for actual KAS execution')
+    if args.stage == 'knvr' and not all((args.knvr_dir, args.knvr_ref, args.mediamtx)):
+        parser.error('KNVR requires --knvr-dir, --knvr-ref and --mediamtx')
     private = Path(args.private_dir).resolve()
     if private.exists():
         parser.error('private workspace must be new')

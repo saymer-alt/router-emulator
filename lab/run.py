@@ -169,6 +169,17 @@ def write_report(out, scenario, steps, outcome, reason, elapsed):
     ET.ElementTree(suite).write(out / "junit.xml", encoding="utf-8", xml_declaration=True)
 
 
+def storage_args(source, work, node):
+    source = Path(source)
+    if node not in ('labopt', 'labarchive') or source.is_symlink() or not source.is_file() or source.suffix != '.img':
+        raise ValueError('USB input must be a regular .img file')
+    # Each virtual drive receives a separate disposable copy.
+    copy = Path(work) / ('opt.img' if node == 'labopt' else 'labarchive.img')
+    shutil.copyfile(source.resolve(), copy)
+    return ['-drive', 'if=none,id=%s,format=raw,file=%s' % (node, copy),
+            '-device', 'usb-storage,drive=' + node]
+
+
 def run(args):
     scenario = load_scenario(args.scenario)
     credentials = None
@@ -307,14 +318,11 @@ def run(args):
             "-o", "lan-forwards=%s" % args.lan_forwards,
         ]
         if getattr(args, "opt_image", None):
-            source_opt = Path(args.opt_image)
-            if source_opt.is_symlink() or not source_opt.is_file() or source_opt.suffix != ".img":
-                raise ValueError("USB input must be a regular .img file")
-            source_opt = source_opt.resolve()
-            opt_copy = work / "opt.img"
-            shutil.copyfile(source_opt, opt_copy)
-            command += ["--", "-drive", "if=none,id=labopt,format=raw,file=" + str(opt_copy),
-                        "-device", "usb-storage,drive=labopt"]
+            command += ['--'] + storage_args(args.opt_image, work, 'labopt')
+        if getattr(args, 'archive_image', None):
+            if '--' not in command:
+                command += ['--']
+            command += storage_args(args.archive_image, work, 'labarchive')
         env = os.environ.copy()
         # Caller environment cannot silently add an external slirp tunnel.
         env.pop("WAN_EXTRA", None)
@@ -331,6 +339,11 @@ def run(args):
                 if not 1024 <= tls_port <= 65535:
                     raise ValueError('invalid loopback TLS mirror port')
                 env['LAN_EXTRA'] += ',guestfwd=tcp:192.168.1.100:443-cmd:socat STDIO TCP4:127.0.0.1:%d' % tls_port
+        if getattr(args, 'rtsp_port', None):
+            port = int(args.rtsp_port)
+            if not 1024 <= port <= 65535:
+                raise ValueError('invalid loopback RTSP port')
+            env['LAN_EXTRA'] = env.get('LAN_EXTRA', '') + ',guestfwd=tcp:192.168.1.100:554-cmd:socat STDIO TCP4:127.0.0.1:%d' % port
         proc = subprocess.Popen(command, cwd=root, stdout=app_fd,
                                 stderr=subprocess.STDOUT, start_new_session=True, env=env,
                                 umask=0o077)
