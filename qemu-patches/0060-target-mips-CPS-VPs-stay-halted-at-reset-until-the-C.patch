@@ -1,0 +1,40 @@
+From 30bfb548c7e8930a3bd48e408177611d37386d05 Mon Sep 17 00:00:00 2001
+From: Dmitry Mostovoy <stavultras@gmail.com>
+Date: Sun, 25 Oct 2026 04:10:23 -0400
+Subject: [PATCH] target/mips: CPS VPs stay halted at reset until the CPC
+ starts them
+
+With the MT ASE, the reset started VPE 0 of every core, also of cores a
+CPC powers up later.  MT7621: core 1 then ran the bootloader from the
+reset vector next to core 0 at every reset - after a reboot from Linux,
+from Linux's reset base, into the SPL in locked L2, so the Xiaomi 4A
+Gigabit v2 U-Boot 2018.09 hung after "Trying to boot from NOR".  VPs
+with start-powered-off (all of a CPS) now wait for the CPC.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_012GbUcwR34gg9RgGTEtNN6J
+---
+ target/mips/cpu.c | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/target/mips/cpu.c b/target/mips/cpu.c
+index 7facb12..6d54b6a 100644
+--- a/target/mips/cpu.c
++++ b/target/mips/cpu.c
+@@ -350,8 +350,11 @@ static void mips_cpu_reset_hold(Object *obj, ResetType type)
+             env->mvp->CP0_MVPControl |= (1 << CP0MVPCo_EVP);
+             env->CP0_VPEConf0 |= (1 << CP0VPEC0_MVP) | (1 << CP0VPEC0_VPA);
+ 
+-            /* TC0 starts up unhalted.  */
+-            cs->halted = 0;
++            /*
++             * TC0 starts up unhalted, unless the VP waits to be powered
++             * up (CPS: the CPC starts the cores)
++             */
++            cs->halted = cs->start_powered_off;
+             env->active_tc.CP0_TCHalt = 0;
+             env->tcs[0].CP0_TCHalt = 0;
+             /* With thread 0 active.  */
+-- 
+2.47.3
+

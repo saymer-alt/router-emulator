@@ -1,0 +1,316 @@
+From ea9d07f417b6c5fda3b4e309166876c18b0e5581 Mon Sep 17 00:00:00 2001
+From: Dmitry Mostovoy <stavultras@gmail.com>
+Date: Sun, 25 Oct 2026 04:10:23 -0400
+Subject: [PATCH] target/mips, hw/mips/mt7621: access hook, D-cache model keeps
+ both views
+
+A board hook before every load and store (translated in when set, like
+the store hook).  The MT7621 D-cache model no longer undoes an uncached
+store into a dirty line at once: the line becomes stale, the RAM keeps
+the cached data (cached accesses see it, Breed relies on that) and the
+DRAM's data is shown to uncached loads and stores of the line; a write
+back or eviction drops it, an invalidate leaves the DRAM's data.  The
+stock Xiaomi U-Boot 2018.09 sizes the DRAM with get_ram_size() through
+kseg1 over lines its early malloc keeps dirty: it found 32 KiB.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_012GbUcwR34gg9RgGTEtNN6J
+---
+ hw/mips/mt7621.c                        | 106 +++++++++++++++++++++---
+ target/mips/cpu.h                       |   6 ++
+ target/mips/tcg/system/special_helper.c |   7 ++
+ target/mips/tcg/system_helper.h.inc     |   1 +
+ target/mips/tcg/translate.c             |  11 +++
+ target/mips/tcg/translate.h             |   1 +
+ 6 files changed, 122 insertions(+), 10 deletions(-)
+
+diff --git a/hw/mips/mt7621.c b/hw/mips/mt7621.c
+index 58ad0e5..42c1090 100644
+--- a/hw/mips/mt7621.c
++++ b/hw/mips/mt7621.c
+@@ -264,7 +264,9 @@ static const TypeInfo mt7621_spi_type = {
+ typedef struct DCacheLine {
+     uint32_t tag;               /* line address | 1, 0: no dirty line */
+     uint32_t age;
+-    uint8_t data[DC_LINE];
++    bool stale;                 /* an uncached store went past the line */
++    uint8_t data[DC_LINE];      /* the cached data */
++    uint8_t dram[DC_LINE];      /* if stale: what the DRAM holds */
+ } DCacheLine;
+ 
+ typedef struct MT7621Board {
+@@ -282,6 +284,8 @@ typedef struct MT7621Board {
+     bool poweroff_halt;         /* poweroff=halt: stay halted (hardware) */
+     DCacheLine dcache[DC_SETS][DC_WAYS];        /* dirty L1 data lines */
+     uint32_t dc_clock;
++    int dc_nstale;              /* stale lines */
++    DCacheLine *dc_shown;       /* stale line whose DRAM data the RAM shows */
+     MemoryRegion dram_alias[16];
+     MemoryRegion lowmem;
+     MemoryRegion highmem;
+@@ -559,19 +563,81 @@ static void mt7621_dead_wait(CPUMIPSState *env)
+     }
+ }
+ 
++/*
++ * The RAM holds what the CPU's cached accesses see.  Where an uncached
++ * store went past a dirty line (the line is "stale"), the DRAM holds
++ * something else until the line is written back: uncached accesses to
++ * that line see the DRAM's data, put into the RAM around them.
++ */
++static void dc_unshow(MT7621Board *b)
++{
++    DCacheLine *l = b->dc_shown;
++
++    if (l) {
++        b->dc_shown = NULL;
++        cpu_physical_memory_write(l->tag & ~1, l->data, DC_LINE);
++    }
++}
++
++/* the line leaves the cache: written back (the DRAM gets the cached data) */
++static void dc_drop(MT7621Board *b, DCacheLine *l, bool writeback)
++{
++    if (l->stale) {
++        if (!writeback) {       /* the DRAM's data is what remains */
++            cpu_physical_memory_write(l->tag & ~1, l->dram, DC_LINE);
++        }
++        l->stale = false;
++        b->dc_nstale--;
++    }
++    l->tag = 0;
++}
++
++static void dc_off(CPUMIPSState *env)
++{
++    CPUState *cs;
++
++    CPU_FOREACH(cs) {           /* an OS runs: the model is off */
++        cpu_env(cs)->store_hook = NULL;
++        cpu_env(cs)->access_hook = NULL;
++    }
++    tb_flush(env_cpu(env));
++}
++
++/* before every load and store */
++static void mt7621_access_hook(CPUMIPSState *env, target_ulong addr)
++{
++    MT7621Board *b = the_board;
++    DCacheLine *l = NULL;
++
++    if (!b->dc_nstale) {
++        return;
++    }
++    if ((addr & 0xe0000000) == 0xa0000000) {
++        l = dc_find(b, addr);
++        if (l && !l->stale) {
++            l = NULL;
++        }
++    }
++    if (b->dc_shown != l) {
++        dc_unshow(b);
++        if (l) {
++            cpu_physical_memory_write(l->tag & ~1, l->dram, DC_LINE);
++            b->dc_shown = l;
++        }
++    }
++}
++
++/* after every store */
+ static void mt7621_store_hook(CPUMIPSState *env, target_ulong addr)
+ {
+     MT7621Board *b = the_board;
+     uint32_t seg = addr & 0xe0000000, pa = addr & 0x1fffffe0;
+     DCacheLine *l, *set;
+-    CPUState *cs;
+     uint8_t *ram;
+ 
+     if ((env->hflags & MIPS_HFLAG_KSU) == MIPS_HFLAG_UM) {
+-        CPU_FOREACH(cs) {       /* an OS runs: the model is off */
+-            cpu_env(cs)->store_hook = NULL;
+-        }
+-        tb_flush(env_cpu(env));
++        dc_unshow(b);
++        dc_off(env);
+         return;
+     }
+     if ((seg != 0x80000000 && seg != 0xa0000000) || !(ram = dc_ram(b, pa))) {
+@@ -579,8 +645,16 @@ static void mt7621_store_hook(CPUMIPSState *env, target_ulong addr)
+     }
+     l = dc_find(b, addr);
+     if (seg == 0xa0000000) {
+-        if (l) {                /* uncached store into a dirty line */
+-            cpu_physical_memory_write(pa, l->data, DC_LINE);
++        if (l) {                /* uncached store past a dirty line */
++            memcpy(l->dram, ram, DC_LINE);
++            memcpy(ram, l->data, DC_LINE);
++            if (!l->stale) {
++                l->stale = true;
++                b->dc_nstale++;
++            }
++            if (b->dc_shown == l) {
++                b->dc_shown = NULL;
++            }
+         }
+         return;
+     }
+@@ -592,6 +666,9 @@ static void mt7621_store_hook(CPUMIPSState *env, target_ulong addr)
+                 l = &set[w];
+             }
+         }
++        if (l->tag) {
++            dc_drop(b, l, true);        /* evicted: written back */
++        }
+         l->tag = pa | 1;
+     }
+     l->age = ++b->dc_clock;
+@@ -603,17 +680,21 @@ static void dc_cache_op(MT7621Board *b, target_ulong addr, uint32_t op)
+ {
+     DCacheLine *l;
+ 
++    dc_unshow(b);
+     switch (op) {
+     case 0:                     /* Index Writeback Invalidate */
+     case 2:                     /* Index Store Tag */
+-        b->dcache[(addr / DC_LINE) % DC_SETS][(addr >> 13) % DC_WAYS].tag = 0;
++        l = &b->dcache[(addr / DC_LINE) % DC_SETS][(addr >> 13) % DC_WAYS];
++        if (l->tag) {
++            dc_drop(b, l, op == 0);
++        }
+         break;
+     case 4:                     /* Hit Invalidate */
+     case 5:                     /* Hit Writeback Invalidate */
+     case 6:                     /* Hit Writeback */
+         l = dc_find(b, addr);
+         if (l) {
+-            l->tag = 0;
++            dc_drop(b, l, op != 4);
+         }
+         break;
+     }
+@@ -789,11 +870,14 @@ static void mt7621_reset(void *opaque)
+     palmbus_reset(b);
+     b->l2_npages = 0;
+     memset(b->dcache, 0, sizeof(b->dcache));
++    b->dc_nstale = 0;
++    b->dc_shown = NULL;
+     if (b->dcache_model) {
+         CPUState *cs;
+ 
+         CPU_FOREACH(cs) {
+             cpu_env(cs)->store_hook = mt7621_store_hook;
++            cpu_env(cs)->access_hook = mt7621_access_hook;
+         }
+         tb_flush(first_cpu);
+     }
+@@ -1116,6 +1200,7 @@ static void mt7621_init(MachineState *machine)
+         cpu_env(cs)->dead_wait_hook = mt7621_dead_wait;
+         if (b->dcache_model) {
+             cpu_env(cs)->store_hook = mt7621_store_hook;
++            cpu_env(cs)->access_hook = mt7621_access_hook;
+         }
+     }
+     memory_region_init_ram(&b->l2_ovl, NULL, "mt7621.l2-locked",
+@@ -1573,3 +1658,4 @@ static void mt7621_machine_register(void)
+ }
+ 
+ type_init(mt7621_machine_register)
++
+diff --git a/target/mips/cpu.h b/target/mips/cpu.h
+index 58c7bdc..73ccee2 100644
+--- a/target/mips/cpu.h
++++ b/target/mips/cpu.h
+@@ -1210,6 +1210,12 @@ typedef struct CPUArchState {
+      * it, it flushes the translations.
+      */
+     void (*store_hook)(struct CPUArchState *env, target_ulong addr);
++    /*
++     * Board hook called before every load and store (address of the
++     * access), e.g. to show an uncached load what the DRAM holds where a
++     * dirty cache line hides it.  Translated in like store_hook.
++     */
++    void (*access_hook)(struct CPUArchState *env, target_ulong addr);
+     /*
+      * Board hook: a WAIT that nothing can end (Status.IE and all IM bits
+      * clear), e.g. Linux's machine_hang() after "poweroff" or "halt"
+diff --git a/target/mips/tcg/system/special_helper.c b/target/mips/tcg/system/special_helper.c
+index 0f6415d..15bc3e4 100644
+--- a/target/mips/tcg/system/special_helper.c
++++ b/target/mips/tcg/system/special_helper.c
+@@ -146,6 +146,13 @@ void helper_store_hook(CPUMIPSState *env, target_ulong addr)
+     }
+ }
+ 
++void helper_access_hook(CPUMIPSState *env, target_ulong addr)
++{
++    if (env->access_hook) {     /* the board may turn it off any time */
++        env->access_hook(env, addr);
++    }
++}
++
+ void helper_cache(CPUMIPSState *env, target_ulong addr, uint32_t op)
+ {
+     static const char *const type_name[] = {
+diff --git a/target/mips/tcg/system_helper.h.inc b/target/mips/tcg/system_helper.h.inc
+index 4e9e29a..e3033ab 100644
+--- a/target/mips/tcg/system_helper.h.inc
++++ b/target/mips/tcg/system_helper.h.inc
+@@ -176,6 +176,7 @@ DEF_HELPER_1(eretnc, void, env)
+ DEF_HELPER_1(deret, void, env)
+ DEF_HELPER_3(cache, void, env, tl, i32)
+ DEF_HELPER_2(store_hook, void, env, tl)
++DEF_HELPER_2(access_hook, void, env, tl)
+ 
+ #ifdef TARGET_MIPS64
+ /* Longson CSR */
+diff --git a/target/mips/tcg/translate.c b/target/mips/tcg/translate.c
+index b4950c5..e9981bd 100644
+--- a/target/mips/tcg/translate.c
++++ b/target/mips/tcg/translate.c
+@@ -2064,6 +2064,11 @@ static void gen_ld(DisasContext *ctx, uint32_t opc,
+ 
+     t0 = tcg_temp_new();
+     gen_base_offset_addr(ctx, t0, base, offset);
++#ifndef CONFIG_USER_ONLY
++    if (ctx->access_hook) {
++        gen_helper_access_hook(tcg_env, t0);
++    }
++#endif
+ 
+     switch (opc) {
+ #if defined(TARGET_MIPS64)
+@@ -2186,6 +2191,11 @@ static void gen_st(DisasContext *ctx, uint32_t opc, int rt,
+ 
+     gen_base_offset_addr(ctx, t0, base, offset);
+     gen_load_gpr(t1, rt);
++#ifndef CONFIG_USER_ONLY
++    if (ctx->access_hook) {
++        gen_helper_access_hook(tcg_env, t0);
++    }
++#endif
+     switch (opc) {
+ #if defined(TARGET_MIPS64)
+     case OPC_SD:
+@@ -15094,6 +15104,7 @@ static void mips_tr_init_disas_context(DisasContextBase *dcbase, CPUState *cs)
+     ctx->cmgcr = (env->CP0_Config3 >> CP0C3_CMGCR) & 1;
+     ctx->cache_hook = env->cache_hook != NULL;
+     ctx->store_hook = env->store_hook != NULL;
++    ctx->access_hook = env->access_hook != NULL;
+     /* Restore delay slot state from the tb context.  */
+     ctx->hflags = (uint32_t)ctx->base.tb->flags; /* FIXME: maybe use 64 bits? */
+     ctx->ulri = (env->CP0_Config3 >> CP0C3_ULRI) & 1;
+diff --git a/target/mips/tcg/translate.h b/target/mips/tcg/translate.h
+index 60591fd..825f47d 100644
+--- a/target/mips/tcg/translate.h
++++ b/target/mips/tcg/translate.h
+@@ -48,6 +48,7 @@ typedef struct DisasContext {
+     bool cmgcr;
+     bool cache_hook;
+     bool store_hook;
++    bool access_hook;
+     bool mrp;
+     bool nan2008;
+     bool abs2008;
+-- 
+2.47.3
+
