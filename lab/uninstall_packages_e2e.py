@@ -190,7 +190,8 @@ def uninstall_packages(guest, mirror, revision, evidence, context, private, phas
     code, output, errors = guest.execute('cd /opt/lab && KEENETIC_AUTO_SETUP_REF=' + revision +
                                          ' sh uninstall-packages.sh', timeout=900)
     plain_out = re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', output)
-    for line in plain_out.splitlines():
+    plain_err = re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', errors)
+    for line in plain_out.splitlines() + plain_err.splitlines():
         if line.startswith(('[OK]', '[SKIP]', '[REMOVE]', '[SAVED]', '[WARN]', '[ERROR]', '[INFO]', '[PARTIAL]')):
             print('UNINSTALL E2E GUEST: ' + line, flush=True)
     failed = []
@@ -252,7 +253,8 @@ def uninstall_packages(guest, mirror, revision, evidence, context, private, phas
     phase('second run on already removed packages')
     code, output, errors = guest.execute('cd /opt/lab && sh uninstall-packages.sh', timeout=300)
     plain_out = re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', output)
-    for line in plain_out.splitlines():
+    plain_err = re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', errors)
+    for line in plain_out.splitlines() + plain_err.splitlines():
         if line.startswith(('[OK]', '[SKIP]', '[ERROR]', '[PARTIAL]')):
             print('UNINSTALL E2E GUEST: ' + line, flush=True)
     repeat_ok = (code == 0 and '[SKIP] mihomo is not installed' in plain_out
