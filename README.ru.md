@@ -195,6 +195,8 @@ WS2812B, 74HC595, PWM), GPIO
 | Xiaomi Mi Router 4 (стоковый U-Boot) (**MT7621A**, MIPS) | 1G WAN (PHY 4 MT7530 напрямую на GMAC1) + 2×1G LAN MT7530; Wi-Fi MT7603E + MT7612E на PCIe («радиомолчащие») | DDR3 128 МБ | **параллельный NAND 128 МБ** (разметка Xiaomi) | – | стоковый U-Boot 1.1.3 Xiaomi + OpenWrt |
 | Cudy WR1300S (**MT7621A**, MIPS) | 1G WAN (PHY 0 MT7530 напрямую на GMAC1) + 4×1G LAN MT7530; Wi-Fi MT7603E + MT7663E (MT7613BE) на PCIe («радиомолчащие») | DDR3 128 МБ | **SPI-NOR 16 МБ** | 3.0 | стоковый U-Boot 1.1.3 Cudy + OpenWrt 25.12.5 (сторонняя сборка, платы ещё нет в OpenWrt) |
 | Cudy M1300 v2 (**MT7621A**, MIPS) | 1G WAN (PHY 4 MT7530 напрямую на GMAC1) + 1G LAN порт 3 MT7530; Wi-Fi MT7603E + MT7663E (MT7613BE) на PCIe («радиомолчащие») | DDR3 128 МБ | **SPI-NOR 16 МБ** | – | стоковый U-Boot 1.1.3 Cudy + OpenWrt; стоковая прошивка Cudy (LEDE, ядро 4.4) — из дампа флеша вашего роутера |
+| Xiaomi Mi Router 4A Gigabit Edition v2 (**MT7621A**, MIPS) | 1G WAN (порт 3 MT7530) + 2×1G LAN MT7530; Wi-Fi MT7603E + MT7663E (MT7613BE) на PCIe («радиомолчащие») | DDR3 128 МБ | **SPI-NOR 16 МБ** (разметка Xiaomi) | – | стоковый U-Boot 2018.09 Xiaomi + OpenWrt |
+| Xiaomi Mi Router 4A Gigabit Edition v2, 32 / 64 МБ (**MT7621A**, MIPS) | 1G WAN (порт 3 MT7530) + 2×1G LAN MT7530; Wi-Fi MT7603E + MT7663E (MT7613BE) на PCIe («радиомолчащие») | DDR3 128 МБ | **SPI-NOR 32 / 64 МБ** (заменённый чип) | – | Breed 1.1 (32 МБ) / U-Boot OpenWrt, собранный под неё + OpenWrt (ImageBuilder, свой DTB) |
 
 У плат Netis нет раздела bdinfo (FIP с 0x380000, ubi с 0x580000; MAC — в
 Factory): в пресетах стоит `openwrt-no-bdinfo=1`. У плат на MT7986 та же
@@ -359,7 +361,7 @@ tools/prepare-nand.sh --nor-nand openwrt-one openwrt_one 25.12.5
 запускает blob инициализации DDR от MediaTek в SRAM Frame Engine, дальше
 U-Boot и OpenWrt; NAND-платы грузятся через BootROM для NAND (stage1 с
 инициализацией DDR — в заблокированный L2, затем загрузчик). Эмулируется: MIPS 1004Kc, 2 ядра × 2 VPE (MT ASE: 4 CPU в Linux,
-chip ID MT7621A; `-smp 2` — одно ядро, MT7621S; `-smp 1`), CM/GIC/CPC
+chip ID MT7621A; `-smp 2` — одно ядро, MT7621S; `-smp 1`), CM/GIC (64-битный общий счётчик)/CPC
 (ядра включает CPC, VPE — код MT ASE; таймер CP0 первого VPE —
 на его IP7, остальных — через GIC), DRAM 128/256/512 МБ (выше 448 МБ — по
 `0x20000000`, как у SoC), SPI-контроллер + SPI-NOR, UART, Frame Engine
@@ -377,9 +379,13 @@ EEPROM во флеше получает минимальный из eFuse с MAC
 он остаётся остановленным, как сам чип, который не умеет выключать
 питание); кэш
 данных L1 с обратной записью — в части некэшируемых записей (`dcache=on`,
-по умолчанию: Breed выходит некэшируемым memset за конец буфера в заголовок
-malloc и полагается на грязную копию в кэше; включён от сброса до первого
-пользовательского кода ОС, так что OpenWrt работает на полной скорости).
+по умолчанию): некэшируемая запись в грязную строку доходит до DRAM,
+некэшируемые чтения её видят, кэшируемые — данные строки, пока она не
+записана обратно (Breed выходит некэшируемым memset за конец буфера в
+заголовок malloc и полагается на грязную копию в кэше; стоковый U-Boot
+2018.09 Xiaomi определяет объём DRAM некэшируемыми записями в строки,
+которые его ранний malloc держит грязными); включён от сброса до первого
+пользовательского кода ОС, так что OpenWrt работает на полной скорости.
 Пока нет: SD-карты.
 
 ```bash
@@ -453,6 +459,52 @@ OpenWrt в `kernel` (0x600000, «System 2») и `rootfs0.bin` в `ubi`;
 метки и пропускает ядро): если эти блоки не покрыты ни одним дампом,
 эмулятор сам кладёт туда таблицу «все блоки хорошие». У любого дампа `X` может быть `X.oob` (его spare, 64 байта на
 страницу).
+
+**Xiaomi Mi Router 4A Gigabit Edition v2** (SPI-NOR, стоковый U-Boot
+2018.09 Xiaomi, пресет `xiaomi-mi-router-4a-gigabit-v2`, папка
+`nor-mi-router-4a-gigabit-v2`): своего загрузчика для него в OpenWrt нет,
+в папку идут `u-boot` и `factory` роутера (калибровка Wi-Fi; все четыре
+MAC заменяются: LAN 80:af:ca:11:22:33, WAN …:34, Wi-Fi …:35 / …:36) и
+sysupgrade.bin OpenWrt в `firmware` («System 1»); остальные разделы
+стёрты. В `Config` (окружение стокового U-Boot) и `Bdata` — серийный номер
+роутера, пароли Wi-Fi и администратора: не берите их, U-Boot загружается
+и без них. `openwrt-parts` пресета — разметка Xiaomi:
+
+```bash
+# DIR: *mtd0*.bin или *u-boot*.bin, *factory*.bin
+tools/prepare-nand.sh --soc mt7621 --nor --stock DIR --parts u-boot:0x30000,u-boot-env:0x10000,Bdata:0x10000,factory:0x10000,crash:0x10000,cfg_bak:0x10000,overlay:0x100000,firmware:0xe70000,Config:0x10000 xiaomi_mi-router-4a-gigabit-v2 25.12.5 nor-mi-router-4a-gigabit-v2
+./emulator.sh -P xiaomi-mi-router-4a-gigabit-v2
+```
+
+**4A Gigabit v2 с флешкой побольше** (чип 16 МБ заменён на 32 или 64 МБ):
+образа для неё в OpenWrt нет, `prepare-nand.sh --nor-mb 32|64` собирает
+его сам, [`tools/ib-flash-size.py`](tools/ib-flash-size.py): официальный
+ImageBuilder релиза (скачивается в `work/ib/`, sha256 проверяется), в ядре
+меняется только device tree — `firmware` от 0x180000 до конца флешки,
+`Config` убран (около 23 / 55 МБ под настройки и пакеты). Ни стоковый
+U-Boot, ни Breed 1.1 не знают чип 64 МБ (W25Q512JV), поэтому пресетов два:
+
+- `xiaomi-mi-router-4a-gigabit-v2-breed` (папка
+  `nor-mi-router-4a-gigabit-v2-breed`, W25Q256JV 32 МБ): загрузчик
+  Breed 1.1; в DIR ещё настройки Breed, `*u-boot-env*.bin` (пишутся в
+  `u-boot-env` как есть: `ENV\0` + `autoboot.command=boot flash
+  0x00180000`, без них Breed прошивку не загружает);
+- `xiaomi-mi-router-4a-gigabit-v2-64m-uboot` (папка
+  `nor-mi-router-4a-gigabit-v2-64m-uboot`, W25Q512JV 64 МБ): U-Boot 2026.07
+  OpenWrt, собранный под плату, исходники и `build.sh` в
+  [`tools/uboot-mi-router-4a-gigabit-v2`](tools/uboot-mi-router-4a-gigabit-v2)
+  (CI его не собирает: берите тот, что на вашем роутере). Один бинарник
+  для 16, 32 и 64 МБ: разметка Xiaomi, `firmware` обрезается по чипу,
+  чипы больше 16 МБ — через регистр банка (чип остаётся в 3-байтном
+  режиме, в котором его читает boot ROM после перезагрузки), меню
+  загрузки с восстановлением по TFTP, MAC из `factory`.
+
+```bash
+# DIR: загрузчик (*mtd0*.bin или *u-boot*.bin), *factory*.bin
+# (+ *u-boot-env*.bin Breed); PARTS: openwrt-parts пресета
+tools/prepare-nand.sh --soc mt7621 --nor --nor-mb 64 --stock DIR --parts PARTS xiaomi_mi-router-4a-gigabit-v2 25.12.5 nor-mi-router-4a-gigabit-v2-64m-uboot
+./emulator.sh -P xiaomi-mi-router-4a-gigabit-v2-64m-uboot    # 32 МБ: -P xiaomi-mi-router-4a-gigabit-v2-breed (--nor-mb 32)
+```
 
 ## Что эмулируется
 
@@ -591,6 +643,9 @@ tools/                    prepare-nand.sh, mknand.py, host-bridge.sh,
                           gen_dramc_table.py (статусы DRAMC по умолчанию)
 tools/uboot-rutc50/       U-Boot пресета Teltonika RUTC50 (исходники,
                           build.sh, собранный FIP)
+tools/uboot-mi-router-4a-gigabit-v2/  U-Boot 4A Gigabit v2 с флешкой
+                          32 / 64 МБ (исходники, build.sh)
+tools/ib-flash-size.py    образ OpenWrt под SPI-NOR побольше (ImageBuilder)
 windows/                  лаунчер, редактор пресетов, терминал (C#),
                           README.txt для пакета
 languages/                тексты лаунчера (en.ini, ru.ini)

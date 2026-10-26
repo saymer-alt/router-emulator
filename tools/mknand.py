@@ -409,6 +409,17 @@ def sysupgrade_ubi(path, env, env_size):
         return open(out, "rb").read()
 
 
+def factory_macs(data, base):
+    """MT7621 factory (Xiaomi boards): MAC at 0xe000, +1 at 0xe006; the
+    Wi-Fi EEPROMs at 0 and 0x8000 (if present) get +2 and +3."""
+    mac = int(base.replace(":", ""), 16)
+    for at, d in ((0xe000, 0), (0xe006, 1), (0x4, 2), (0x8004, 3)):
+        if at < 0xe000 and data[at - 4:at - 2] == b"\xff\xff":
+            continue            # no Wi-Fi EEPROM there
+        data[at:at + 6] = ((mac + d) & 0xffffffffffff).to_bytes(6, "big")
+    print(f"base MAC: {base}")
+
+
 def cmd_nor(args):
     """Folder of NOR partition files: BL2, u-boot-env, Factory, bdinfo, FIP,
     firmware (OpenWrt sysupgrade.bin = FIT kernel + squashfs + jffs2 data)."""
@@ -425,7 +436,7 @@ def cmd_nor(args):
     # boards, where one image holds TPL, SPL and U-Boot)
     files = {"BL2": args.bl2, "u-boot": args.bl2, "FIP": args.fip,
              "Factory": args.factory, "factory": args.factory,
-             "bdinfo": args.bdinfo}
+             "bdinfo": args.bdinfo, "u-boot-env": args.env_bin}
     labels = [p[0] for p in parts]
     if not args.raw and not (args.bl2 and (args.fip or "FIP" not in labels)):
         sys.exit("nor: --bl2 and --fip, or --raw")
@@ -449,6 +460,8 @@ def cmd_nor(args):
         elif src:
             blob = open(src, "rb").read()[:size]   # e.g. a NAND-size Factory
             data[:len(blob)] = blob
+            if label == "factory" and args.mac and "bdinfo" not in labels:
+                factory_macs(data, args.mac)
         elif label == "bdinfo" or label == args.mac_part:
             mac = args.mac or "80:af:ca:%02x:%02x:%02x" % tuple(
                 random.randrange(256) for _ in range(3))
@@ -491,7 +504,6 @@ def cmd_mt7621_nand(args):
         off += size
     if off > total - BBT_BLOCKS * BLOCK:
         sys.exit("partitions overlap the factory BBT in the last blocks")
-    mac = int(args.mac.replace(":", ""), 16)
     files = {parts[0][0]: args.bootloader, "factory": args.factory,
              "kernel": args.kernel, "ubi": args.ubi}
     os.makedirs(args.output, exist_ok=True)
@@ -516,11 +528,7 @@ def cmd_mt7621_nand(args):
                          f"{label} ({size})")
             data[:len(blob)] = blob
         if label == "factory":
-            for at, d in ((0xe000, 0), (0xe006, 1), (0x4, 2), (0x8004, 3)):
-                if at < 0xe000 and data[at - 4:at - 2] == b"\xff\xff":
-                    continue        # no Wi-Fi EEPROM there
-                data[at:at + 6] = ((mac + d) & 0xffffffffffff).to_bytes(6, "big")
-            print(f"base MAC: {args.mac}")
+            factory_macs(data, args.mac)
         put(i, label, poff, data)
     print(f"wrote {args.output}")
 
@@ -720,6 +728,9 @@ def main():
     n.add_argument("--env", metavar="FILE",
                    help="U-Boot environment (one name=value per line) for "
                         "'u-boot-env'")
+    n.add_argument("--env-bin", metavar="FILE",
+                   help="image of 'u-boot-env' as it is (e.g. Breed's "
+                        "environment: \"ENV\\0\" + name=value\\0 ...)")
     n.add_argument("--env-size", type=parse_int, default=0x4000,
                    help="CONFIG_ENV_SIZE of the U-Boot (default 0x4000)")
     n.add_argument("--env-ubi", action="store_true",

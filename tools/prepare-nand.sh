@@ -47,7 +47,14 @@
 #                     U-Boot (e.g. cudy_wr1300s): DIR holds u-boot
 #                     (*mtd0*.bin or *u-boot*.bin), factory and may hold
 #                     the OpenWrt *sysupgrade.bin (e.g. a third-party build);
-#                     bdinfo is generated (MAC at 0xde00)
+#                     bdinfo is generated (MAC at 0xde00); with --parts
+#                     without bdinfo (Xiaomi NOR boards, e.g.
+#                     xiaomi_mi-router-4a-gigabit-v2) the factory's MACs
+#                     are replaced instead; a *u-boot-env*.bin in DIR
+#                     goes to u-boot-env as it is (e.g. Breed's settings);
+#                     with --nor-mb 32|64 and no sysupgrade.bin in DIR the
+#                     release is built for that flash size by
+#                     tools/ib-flash-size.py (official ImageBuilder)
 #     --parts SPEC    own flash layout for mknand.py, "label:size,...",
 #                     size "-" = rest (e.g. Xiaomi boards: BL2, Nvram, Bdata,
 #                     Factory, FIP, ..., ubi); BL2, Factory, bdinfo, FIP and
@@ -111,7 +118,7 @@ while [ $# -gt 0 ]; do
     --ubi-fip) LAYOUT="--parts BL2:0x200000,ubi:-"; UBIFIP=--fip-in-ubi; shift ;;
     --ubi-factory) UBIFAC="--factory-volume $2"; shift 2 ;;
     --parts) LAYOUT="--parts $2"; shift 2 ;;
-    -h|--help) sed -n '2,83p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,90p' "$0"; exit 0 ;;
     *) break ;;
     esac
 done
@@ -246,13 +253,21 @@ if [ "$SOC" = mt7621 ] && [ -n "$STOCK" ] && [ -n "$NOR" ]; then
     # board OpenWrt does not have yet) from DIR, bdinfo generated
     BL=$(ls "$STOCK"/*mtd0*.bin "$STOCK"/*u-boot*.bin 2>/dev/null | head -1)
     F=$(ls "$STOCK"/*[Ff]actory*.bin 2>/dev/null | head -1)
+    ENVB=$(ls "$STOCK"/*u-boot-env*.bin 2>/dev/null | head -1)
     SYS=$(ls "$STOCK"/*sysupgrade.bin 2>/dev/null | head -1)
     [ -n "$BL" ] || { echo "need $STOCK/*mtd0*.bin or *u-boot*.bin (vendor U-Boot)" >&2; exit 1; }
+    if [ -z "$SYS" ] && [ "$NORMB" -gt 16 ] && [ "$V" != snapshot ]; then
+        # a bigger chip than the board has: the release built for it
+        # (tools/ib-flash-size.py, "firmware" to the end of the flash)
+        SYS=$DL/$BASE-${NORMB}m-squashfs-sysupgrade.bin
+        [ -s "$SYS" ] || python3 tools/ib-flash-size.py --version "$V" --profile "$P" \
+            --mb "$NORMB" -o "$DL" >&2
+    fi
     [ -n "$SYS" ] || SYS=$(pick "squashfs-sysupgrade.bin")
     [ -n "$SYS" ] || exit 1
     echo "$P (vendor bootloader): $BL + $(basename "$SYS")"
     python3 tools/mknand.py --prefix mt7621 nor -o "$OUT/" --size-mb "$NORMB" \
-        --bl2 "$BL" ${F:+--factory "$F"} --sysupgrade "$SYS" \
+        --bl2 "$BL" ${F:+--factory "$F"} ${ENVB:+--env-bin "$ENVB"} --sysupgrade "$SYS" \
         ${LAYOUT:---parts u-boot:0x30000,u-boot-env:0x10000,factory:0x10000,firmware:0xfa0000,bdinfo:0x10000} \
         --mac 80:af:ca:11:22:33
     exit 0

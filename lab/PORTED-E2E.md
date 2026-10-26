@@ -3,7 +3,8 @@
 This branch starts at `e38cf0ce0c15ba0ccdf9976e5b16e268956e6d0a`.
 It uses the Router Emulator 3.8 wrapper/presets, compatible KeenBOOT KB-41 and
 the unchanged Ported 5.1.8 FIT, all checked by SHA256. E3 requires the minimal
-FE IRQ fix in patch 0059, built on pinned QEMU v10.1.0 commit
+FE IRQ fix in patch 0063 (renumbered 0059 → 0060 → 0063 through the
+upstream 3.9/4.0 patch-number collisions), built on pinned QEMU v10.1.0 commit
 `f8b2f64e2336a28bf0d50b6ef8a7d8c013e9bcf3` plus this repository's patch series.
 Only AArch64 is built; CI caches it by the exact patch-series hash.
 
@@ -73,7 +74,7 @@ frames reaching the virtual LAN, while native `show ip arp` stayed empty.
 
 A disposable MMIO experiment changing only FE_INT_GRP to `0x21021000` immediately
 restored the native SSH banner. This diagnosis is not an E3 acceptance run.
-Patch 0059 compares only nibbles for modeled interrupt sources. It preserves
+Patch 0063 compares only nibbles for modeled interrupt sources. It preserves
 the separate newer SDK layout `0x210ffff2`; the exact production C helper is
 compiled and tested for reset, mainline, Keenetic and SDK values.
 

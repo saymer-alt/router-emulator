@@ -1,0 +1,36 @@
+ethaddr_factory=mtd read factory $loadaddr 0x0 0x10000 ; setexpr macoffs $loadaddr + 0xe000 ; env readmem -b ethaddr $macoffs 0x6 ; setenv ethaddr_factory
+ipaddr=192.168.1.1
+serverip=192.168.1.254
+loadaddr=0x83000000
+bootcmd=run boot_nor
+bootdelay=0
+bootfile=openwrt-ramips-mt7621-xiaomi_mi-router-4a-gigabit-v2-initramfs-kernel.bin
+bootfile_uboot=u-boot-mt7621.bin
+bootfile_upg=openwrt-ramips-mt7621-xiaomi_mi-router-4a-gigabit-v2-squashfs-sysupgrade.bin
+bootmenu_confirm_return=askenv - Press ENTER to return to menu ; bootmenu 60
+bootmenu_default=0
+bootmenu_delay=0
+bootmenu_title=      [0;34m( ( ( [1;39mOpenWrt[0;34m ) ) )[0m
+bootmenu_0=Initialize environment.=run _firstboot
+bootmenu_0d=Run default boot command.=run boot_default
+bootmenu_1=Boot system via TFTP.=run boot_tftp ; run bootmenu_confirm_return
+bootmenu_2=Boot system from flash.=run boot_nor ; run bootmenu_confirm_return
+bootmenu_3=Load system via TFTP then write to flash.=run boot_tftp_sysupgrade ; run bootmenu_confirm_return
+bootmenu_4=[31mLoad U-Boot via TFTP then write to flash.[0m=run boot_tftp_write_uboot ; run bootmenu_confirm_return
+bootmenu_5=Reset all settings to factory defaults.=run reset_factory ; reset
+bootmenu_6=Reboot.=reset
+boot_first=if button reset ; then run boot_tftp ; setenv flag_recover 1 ; run boot_default ; fi ; bootmenu
+boot_default=if env exists flag_recover ; then else run bootcmd ; fi ; run boot_tftp_forever
+boot_nor=mtd read firmware $loadaddr 0x0 0x800000 && bootm $loadaddr
+boot_tftp=tftpboot $loadaddr $bootfile && bootm $loadaddr
+boot_tftp_forever=while true ; do run boot_tftp ; sleep 1 ; done
+boot_tftp_sysupgrade=tftpboot $loadaddr $bootfile_upg && iminfo $loadaddr && run nor_write_production
+boot_tftp_write_uboot=tftpboot $loadaddr $bootfile_uboot && run nor_write_uboot
+reset_factory=mtd erase u-boot-env 0x0 0x10000 && reset
+nor_pad_size=setexpr image_eb $filesize / 0x10000 ; setexpr tmp1 $filesize % 0x10000 ; test 0x$tmp1 -gt 0 && setexpr image_eb $image_eb + 1 ; setexpr image_eb $image_eb * 0x10000
+nor_write_production=run nor_pad_size ; mtd erase firmware 0x0 0x$image_eb && mtd write firmware $loadaddr 0x0 $filesize
+nor_write_uboot=mtd erase u-boot 0x0 0x30000 && mtd write u-boot $loadaddr 0x0 0x30000
+_init_env=setenv _init_env ; saveenv
+_firstboot=setenv _firstboot ; run _switch_to_menu ; run ethaddr_factory ; run _init_env ; run boot_first
+_switch_to_menu=setenv _switch_to_menu ; setenv bootdelay 3 ; setenv bootmenu_delay 3 ; setenv bootmenu_0 $bootmenu_0d ; setenv bootmenu_0d ; run _bootmenu_update_title
+_bootmenu_update_title=setenv _bootmenu_update_title ; setenv bootmenu_title "$bootmenu_title       [33m$ver[0m"

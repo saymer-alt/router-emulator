@@ -28,9 +28,9 @@ name: Build/release
 
 on:
   push:
-    paths-ignore: ['**.md', 'lab/**', 'qemu-patches/0060-hw-arm-filogic-preserve-Keenetic-4.9-FE-receive-IRQ.patch', '.github/workflows/keenetic-lab.yml', '.github/workflows/ported-boot-experiment.yml', '.github/workflows/ported-entware-kas.yml', '.github/workflows/build.yml']
+    paths-ignore: ['**.md', 'lab/**', 'qemu-patches/0063-hw-arm-filogic-preserve-Keenetic-4.9-FE-receive-IRQ.patch', '.github/workflows/keenetic-lab.yml', '.github/workflows/ported-boot-experiment.yml', '.github/workflows/ported-entware-kas.yml', '.github/workflows/build.yml']
   pull_request:
-    paths-ignore: ['**.md', 'lab/**', 'qemu-patches/0060-hw-arm-filogic-preserve-Keenetic-4.9-FE-receive-IRQ.patch', '.github/workflows/keenetic-lab.yml', '.github/workflows/ported-boot-experiment.yml', '.github/workflows/ported-entware-kas.yml', '.github/workflows/build.yml']
+    paths-ignore: ['**.md', 'lab/**', 'qemu-patches/0063-hw-arm-filogic-preserve-Keenetic-4.9-FE-receive-IRQ.patch', '.github/workflows/keenetic-lab.yml', '.github/workflows/ported-boot-experiment.yml', '.github/workflows/ported-entware-kas.yml', '.github/workflows/build.yml']
   workflow_dispatch:
 
 permissions:
