@@ -64,7 +64,7 @@ def run_entware(args, private, credentials, coldboot, evidence):
     if args.stage != 'entware':
         add_packages(mirror, private / 'cache', Path(__file__).with_name('kas-packages.lock.json'))
     tls = None
-    if args.stage == 'kas':
+    if args.stage in ('kas', 'uninstall-packages'):
         from lab.kas_mirror import KASMirror
         tls = KASMirror(args.kas_dir, args.kas_ref, private, private / 'cache')
     completed = {'ok': True}
@@ -102,9 +102,13 @@ def run_entware(args, private, credentials, coldboot, evidence):
                 completed['ok'] = False
                 return
             print('KAS PREFLIGHT: native runtime capabilities verified', flush=True)
-            if args.stage == 'kas':
-                from lab.kas_lifecycle import lifecycle
-                completed['ok'] = lifecycle(guest, tls, args.kas_ref, evidence, context, private, phase)
+            if args.stage in ('kas', 'uninstall-packages'):
+                if args.stage == 'kas':
+                    from lab.kas_lifecycle import lifecycle
+                    completed['ok'] = lifecycle(guest, tls, args.kas_ref, evidence, context, private, phase)
+                else:
+                    from lab.uninstall_packages_e2e import uninstall_packages
+                    completed['ok'] = uninstall_packages(guest, tls, args.kas_ref, evidence, context, private, phase)
         finally:
             guest.close()
 
@@ -136,11 +140,11 @@ def main():
     parser.add_argument('--nand-dir', required=True)
     parser.add_argument('--private-dir', required=True)
     parser.add_argument('--report-dir', required=True)
-    parser.add_argument('--stage', choices=('entware', 'preflight', 'kas'), default='kas')
+    parser.add_argument('--stage', choices=('entware', 'preflight', 'kas', 'uninstall-packages'), default='kas')
     parser.add_argument('--kas-dir')
     parser.add_argument('--kas-ref', default='6dd6438e2b64bad0fe9205ab6575795f808dabd8')
     args = parser.parse_args()
-    if args.stage == 'kas' and not args.kas_dir:
+    if args.stage in ('kas', 'uninstall-packages') and not args.kas_dir:
         parser.error('--kas-dir is required for actual KAS execution')
     private = Path(args.private_dir).resolve()
     if private.exists():
@@ -157,7 +161,7 @@ def main():
     evidence.reference('keenboot_sha256', '8b8615b345d912187853fea6bef6b1868760fd52ed92ba7c3a380ad5533cbf08')
     for name, filename in (('entware_lock_sha256', 'entware.lock.json'), ('kas_assets_lock_sha256', 'kas-assets.lock.json')):
         evidence.reference(name, hashlib.sha256(Path(__file__).with_name(filename).read_bytes()).hexdigest())
-    if args.stage == 'kas':
+    if args.stage in ('kas', 'uninstall-packages'):
         evidence.reference('kas_commit', args.kas_ref)
     try:
         nand = private / 'nand'
