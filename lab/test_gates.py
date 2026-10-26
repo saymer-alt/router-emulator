@@ -41,7 +41,7 @@ class GateTests(unittest.TestCase):
             self.assertEqual(report['gates']['AUTH_READY']['status'], 'FAIL')
             root = ET.parse(Path(directory) / 'junit.xml').getroot()
             self.assertEqual(len(root.findall('testcase/failure')), 1)
-            self.assertEqual(len(root.findall('testcase/skipped')), 8)
+            self.assertEqual(len(root.findall('testcase/skipped')), 9)
 
     def test_foreign_failure_phase_labels_are_public(self):
         evidence = Evidence()

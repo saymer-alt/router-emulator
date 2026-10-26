@@ -9,7 +9,17 @@ on:
       kas_ref:
         type: string
         required: true
+      stage:
+        type: string
+        required: false
+        default: kas
   workflow_dispatch:
+    inputs:
+      stage:
+        description: 'Laboratory stage: kas (full lifecycle) or uninstall-packages (minimal package uninstall)'
+        required: false
+        default: kas
+        type: string
   pull_request:
     paths:
       - 'lab/**'
@@ -26,7 +36,7 @@ concurrency:
 jobs:
   ported-lab:
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
         with:
@@ -99,6 +109,7 @@ jobs:
             --nand-dir "$RUNNER_TEMP/ported-nand" \
             --private-dir "$RUNNER_TEMP/ported-private" \
             --report-dir "$RUNNER_TEMP/ported-public" \
+            --stage "${{ inputs.stage || 'kas' }}" \
             --kas-dir "$GITHUB_WORKSPACE/kas-source" \
             --kas-ref "${{ inputs.kas_ref || '6dd6438e2b64bad0fe9205ab6575795f808dabd8' }}"
       - name: Public fixed-label summary
