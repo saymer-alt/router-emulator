@@ -24,37 +24,81 @@ def phase(marker):
     print('UNINSTALL E2E PHASE: ' + marker, flush=True)
 
 
+class SnapshotBlocked(RuntimeError):
+    def __init__(self, label):
+        self.label = label
+        super().__init__(label)
+
+
+def probe(guest, command):
+    """One transport retry; the command's own exit code is returned as is."""
+    try:
+        return guest.execute(command)
+    except Exception:
+        time.sleep(2)
+        return guest.execute(command)
+
+
 def snapshot_state(guest):
-    """Read the real installed/running state; raises on a broken guest."""
+    """Read the real installed/running state.
+
+    Each prerequisite of the uninstaller itself (packages installed, both
+    daemons running, watchdog cron present, init autostart enabled) is
+    mandatory and raises SnapshotBlocked with a public label. Observational
+    state (foreign package list, mounts) is recorded without failing the
+    snapshot; preservation is asserted later against this same record.
+    """
     state = {}
-    state['installed'] = guest.command('opkg list-installed')
+    code, installed, errors = probe(guest, 'opkg list-installed')
+    if code != 0:
+        raise SnapshotBlocked('opkg_list_unavailable')
+    state['installed'] = installed
     for package in ('mihomo', 'magitrickle'):
-        if not re.search('(?m)^' + package + r' - ', state['installed']):
-            raise RuntimeError('package ' + package + ' is not installed')
-    code, pids, errors = guest.execute('pidof mihomo; pidof magitrickled')
-    rows = pids.splitlines()
-    if code != 0 or len(rows) != 2 or not all(r.strip().isdigit() for r in rows):
-        raise RuntimeError('mihomo and magitrickled are not both running')
+        if not re.search('(?m)^' + package + r' - ', installed):
+            raise SnapshotBlocked('package_missing_before_removal')
+    # The daemons must be observed running; right after install a watchdog
+    # or init restart can briefly race the snapshot, so wait bounded (same
+    # budget shape as the installer's own service wait) — never fabricate.
+    until = time.monotonic() + 30
+    pids = ''
+    rows = []
+    while True:
+        code, pids, errors = probe(guest, 'pidof mihomo; pidof magitrickled')
+        rows = pids.splitlines()
+        if code == 0 and len(rows) == 2 and all(r.strip().isdigit() for r in rows):
+            break
+        if time.monotonic() >= until:
+            raise SnapshotBlocked('services_not_running_before_removal')
+        time.sleep(3)
     state['pids'] = rows
-    state['crontab'] = guest.command('cat /opt/etc/crontab')
-    if WATCHDOG_CRON not in state['crontab']:
-        raise RuntimeError('watchdog cron line missing before removal')
-    state['foreign_crontab'] = [line for line in state['crontab'].splitlines()
+    code, crontab, errors = probe(guest, 'cat /opt/etc/crontab')
+    if code != 0:
+        raise SnapshotBlocked('crontab_unreadable')
+    state['crontab'] = crontab
+    if WATCHDOG_CRON not in crontab:
+        raise SnapshotBlocked('watchdog_cron_missing_before_removal')
+    state['foreign_crontab'] = [line for line in crontab.splitlines()
                                 if WATCHDOG_CRON not in line and line.strip()]
-    state['init_enabled'] = {pkg: guest.command('grep -c "^ENABLED=yes$" /opt/etc/init.d/S99' + pkg)
-                             for pkg in ('mihomo', 'magitrickle')}
-    if any(value != '1' for value in state['init_enabled'].values()):
-        raise RuntimeError('service init autostart is not enabled before removal')
-    state['yaml'] = dict(line.split(None, 1)[::-1] for line in
-                         guest.command('sha256sum ' + ' '.join(YAML_PATHS)).splitlines())
-    state['foreign_packages'] = [line for line in state['installed'].splitlines()
+    state['init_enabled'] = {}
+    for pkg in ('mihomo', 'magitrickle'):
+        code, count, errors = probe(guest, 'grep -c "^ENABLED=yes$" /opt/etc/init.d/S99' + pkg)
+        state['init_enabled'][pkg] = count.strip()
+        if code != 0 or count.strip() != '1':
+            raise SnapshotBlocked('init_not_enabled_before_removal')
+    code, yaml_hashes, errors = probe(guest, digest_command(YAML_PATHS))
+    if code != 0:
+        raise SnapshotBlocked('yaml_unreadable_before_removal')
+    state['yaml'] = dict(line.split(None, 1)[::-1] for line in yaml_hashes.splitlines())
+    state['foreign_packages'] = [line for line in installed.splitlines()
                                  if any(line.startswith(p + ' - ') for p in FOREIGN_PACKAGES)]
-    if len(state['foreign_packages']) != len(FOREIGN_PACKAGES):
-        raise RuntimeError('foreign Entware package set incomplete before removal')
-    state['ext4'] = [row for row in guest.command('cat /proc/mounts').splitlines()
-                     if '/opt ext4' in row]
+    if len(state['foreign_packages']) < len(FOREIGN_PACKAGES):
+        missing = [p for p in FOREIGN_PACKAGES
+                   if not any(line.startswith(p + ' - ') for line in state['foreign_packages'])]
+        print('UNINSTALL E2E PRE: foreign packages not in OPKG at snapshot time: ' + ','.join(missing), flush=True)
+    code, mounts, errors = probe(guest, 'cat /proc/mounts')
+    state['ext4'] = [row for row in mounts.splitlines() if '/opt ext4' in row] if code == 0 else []
     if not state['ext4']:
-        raise RuntimeError('/opt is not a mounted EXT4 filesystem')
+        raise SnapshotBlocked('opt_not_ext4')
     return state
 
 
@@ -118,6 +162,10 @@ def uninstall_packages(guest, mirror, revision, evidence, context, private, phas
     phase('installed services state snapshot')
     try:
         before = snapshot_state(guest)
+    except SnapshotBlocked as blocked:
+        evidence.set('KAS_UNINSTALL_PACKAGES', 'BLOCKED', 'native_command_failed')
+        print('UNINSTALL E2E: pre-removal prerequisite unavailable: ' + blocked.label, flush=True)
+        return False
     except Exception as error:
         evidence.set('KAS_UNINSTALL_PACKAGES', 'BLOCKED', 'native_command_failed')
         print('UNINSTALL E2E: pre-removal state unavailable (%s)' % type(error).__name__, flush=True)
