@@ -27,7 +27,7 @@ jobs:
       - name: Validate immutable laboratory inputs
         env:
           EMULATOR_REF: ${{ github.sha }}
-          KNVR_REF: 07adf3c1f3b64e824d37d2a28d6be197a5dab143
+          KNVR_REF: c1dc6f5194c47908e43958385e707f4e93121a1c
         run: |
           [[ "$EMULATOR_REF" =~ ^[a-f0-9]{40}$ ]]
           [[ "$KNVR_REF" =~ ^[a-f0-9]{40}$ ]]
@@ -35,7 +35,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: saymer-alt/keenetic-nvr
-          ref: 07adf3c1f3b64e824d37d2a28d6be197a5dab143
+          ref: c1dc6f5194c47908e43958385e707f4e93121a1c
           path: knvr-source
           persist-credentials: false
       - name: Host tools and regression contracts
@@ -98,7 +98,7 @@ jobs:
             --report-dir "$RUNNER_TEMP/ported-public" \
             --stage knvr \
             --knvr-dir "$GITHUB_WORKSPACE/knvr-source" \
-            --knvr-ref "07adf3c1f3b64e824d37d2a28d6be197a5dab143" \
+            --knvr-ref "c1dc6f5194c47908e43958385e707f4e93121a1c" \
             --mediamtx "$RUNNER_TEMP/mediamtx/mediamtx"
       - name: Public fixed-label summary
         if: always()

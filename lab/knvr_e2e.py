@@ -2,6 +2,7 @@
 import base64
 import hashlib
 import json
+import re
 from pathlib import Path
 import shlex
 import subprocess
@@ -13,10 +14,14 @@ CHECKS = ('source', 'fresh_install', 'recording_3', 'watchdog', 'open_segment',
 
 
 class Results:
-    def __init__(self, directory, source_ref):
+    def __init__(self, directory, source_ref, evidence=None):
         self.directory = Path(directory)
         self.data = {'platform': 'WR3000P_PORTED_QEMU', 'knvr_commit': source_ref,
                      'hardware_acceptance': 'NOT_TESTED',
+                     'video_source': 'LOCAL_SYNTHETIC_RTSP_H264',
+                     'storage': 'SEPARATE_REAL_EXT4_USB_IMAGE',
+                     'references': dict(evidence.references) if evidence else {},
+                     'prerequisites': {n: evidence.gates[n] for n in ('BOOT_READY', 'AUTH_READY', 'ENTWARE_READY')} if evidence else {},
                      'checks': {name: 'NOT_TESTED' for name in CHECKS}}
 
     def mark(self, name, status):
@@ -91,7 +96,7 @@ def checked(guest, text, **kwargs):
 
 
 def lifecycle(guest, args, evidence, context, private, cameras):
-    results = Results(args.report_dir, args.knvr_ref)
+    results = Results(args.report_dir, args.knvr_ref, evidence)
     current = 'source'
     q = shlex.quote
     def command(text, **kwargs):
@@ -122,6 +127,8 @@ def lifecycle(guest, args, evidence, context, private, cameras):
                 if all('CAM %s: HEALTHY' % c in text for c in ('101', '201', '301')):
                     return
                 time.sleep(3)
+            results.data['camera_diagnostics'] = {camera: next((state for cid, state in re.findall(r'CAM ([0-9]+): (HEALTHY|DOWN|GRACE|STALE|PAUSED|UNKNOWN)', text) if cid == camera), 'UNRECOGNIZED') for camera in ('101', '201', '301')}
+            results.write()
             raise RuntimeError('fresh recording not observed')
         current = 'recording_3'
         healthy()

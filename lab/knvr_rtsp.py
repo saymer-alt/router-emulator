@@ -33,10 +33,10 @@ class Cameras:
     def __enter__(self):
         config = self.private / 'mediamtx.yml'
         config.write_text('logLevel: warn\nrtspAddress: 127.0.0.1:18554\nrtspTransports: [tcp]\n'
-                          'rtmp: no\nhls: no\nwebrtc: no\nsrt: no\npaths:\n  all_others:\n')
+                          'rtmp: no\nhls: no\nwebrtc: no\nsrt: no\nmoq: no\npaths:\n  all_others:\n')
         log = (self.private / 'mediamtx.log').open('wb')
         try:
-            self.server = subprocess.Popen([str(self.binary), str(config)], stdout=log, stderr=log)
+            self.server = subprocess.Popen([str(self.binary), str(config)], stdout=log, stderr=log, cwd=self.private)
             time.sleep(2)
             if self.server.poll() is not None:
                 raise RuntimeError('local RTSP server did not start')
