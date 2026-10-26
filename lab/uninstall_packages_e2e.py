@@ -75,10 +75,15 @@ def snapshot_state(guest):
     if code != 0:
         raise SnapshotBlocked('crontab_unreadable')
     state['crontab'] = crontab
-    if WATCHDOG_CRON not in crontab:
-        raise SnapshotBlocked('watchdog_cron_missing_before_removal')
     state['foreign_crontab'] = [line for line in crontab.splitlines()
                                 if WATCHDOG_CRON not in line and line.strip()]
+    # The installer registers the watchdog through a thin wrapper in
+    # /opt/etc/cron.5mins (run-parts) and may also have a direct crontab
+    # line on legacy layouts. Either is a valid pre-removal scheduler state;
+    # no mihomo_watchdog schedule at all means the removal is not exercised.
+    code, wrapper, errors = probe(guest, 'cat /opt/etc/cron.5mins/mihomo_watchdog')
+    if code != 0 and WATCHDOG_CRON not in crontab:
+        raise SnapshotBlocked('watchdog_cron_missing_before_removal')
     state['init_enabled'] = {}
     for pkg in ('mihomo', 'magitrickle'):
         code, count, errors = probe(guest, 'grep -c "^ENABLED=yes$" /opt/etc/init.d/S99' + pkg)
