@@ -204,7 +204,8 @@ def uninstall_packages(guest, mirror, revision, evidence, context, private, phas
     # 1. watchdog cron schedule is gone, wrapper removed, cron service alive
     require('cron_line_removed', check_absent(guest, "grep mihomo_watchdog /opt/etc/crontab"))
     require('cron_wrapper_removed', check_absent(guest, 'cat /opt/etc/cron.5mins/mihomo_watchdog'))
-    require('cron_service_alive', check_present(guest, 'test -x /opt/etc/init.d/S10cron'))
+    code, cron_probe, errors = probe(guest, 'test -x /opt/etc/init.d/S10cron')
+    require('cron_service_alive', code == 0)
     require('foreign_cron_preserved',
             all(line in guest.command('cat /opt/etc/crontab') for line in before['foreign_crontab']))
     # 2. no watchdog process or active watchdog run is left behind; a shell
