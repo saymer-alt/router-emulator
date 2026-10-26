@@ -239,5 +239,81 @@ accept those projects automatically.
 No schedule is enabled. No changes to real routers, networks, VPS, main/stable,
 tags, releases or automatic merges are part of this laboratory.
 
+## Foreign-profile Doctor warning: local reproduction and evidence limits
+
+The safe-remove acceptance uses a controller-executed manual prerequisite,
+without changing production KAS process attribution. Before the initial install,
+`lab_origin()` requires no daemon/package/canonical executable in the disposable
+VM and records expected executable/init SHA256 pairs from locked IPK payloads.
+All subsequent launchers are the pinned installer, its init/watchdog and the
+controller's reset. This closed-world provenance is essential: matching PID,
+inode or argv on an arbitrary router never authorizes this laboratory helper.
+
+With services running, the native `--remove` must return the ownership BLOCKED
+message, preserve the contract and PID/starttime identities, and create no
+journal/maintenance marker. Before recording identities, the controller waits
+read-only for uptime > 300 and absence of the KN init shell (bounded to 350s).
+The locked KN `S99magitrickle` starts its own background `startup_loop` below
+that uptime, checking every 5s and restarting absent MagiTrickle independently
+of KAS watchdog locks. Waiting for its natural exit avoids stopping a daemon
+while that boot launcher is still active; no init shell is signalled or changed.
+An unknown or persistent init process blocks at the deadline. The controller then revalidates both processes,
+takes the existing KAS lifecycle lock, runs the real watchdog to prove its
+maintenance skip, and addresses only those PID/starttime identities. TERM and
+bounded KILL recheck inode, payload/init hashes and argv; uncertainty blocks.
+After the real watchdog skip, the controller releases lifecycle while processes
+still run, takes the existing watchdog per-run lock, and reacquires lifecycle
+without waiting. Both identities are rechecked before the first signal. After
+absence is proved, only lifecycle is released: the SAME guest shell retains
+watchdog per-run ownership across snapshot/gate/cache and the child native
+`--remove`. The child takes its own lifecycle lock; EXIT cleanup releases the
+parent's remaining lock on success and abort. No lock ownership is transferred,
+no stale lock is stolen, and a busy acquisition blocks instead of waiting in a
+cycle. A concurrent non-watchdog process is still caught by native KAS guards.
+Completed removal also requires both lock directories and the maintenance
+marker to be absent, alongside the completed journal and preserved rollback cache.
+
+On unexpected refusal, the parent captures process identity/parent information
+before releasing its watchdog lock. Public output contains only allowlisted
+daemon, identity-change, payload-match and observed-parent categories. Parent
+argv matches are observations, not proof of the original launcher; reparented
+processes remain unattributed. No discovered process is signalled by diagnostics.
+PID/starttime/executable/parent data and cmdline hashes are saved mode 0600 in
+guest `/opt/lab/uninstall-blocked.private` and host `uninstall-processes.private`.
+Raw argv is never collected. These files follow the existing private-dir cleanup
+policy and are never uploaded plaintext to public artifacts; public categories
+are retained in the Actions log. A complete-scenario retry is never automatic.
+
+After reinstall, the real `wan_guard()` probes run before Doctor, generating only
+genuine offline-WAN history. No healthy heartbeat is fabricated. A remaining
+Doctor WARN is still BLOCKED with foreign counters retained. `KAS_MANUAL_STOP`
+records the separate laboratory prerequisite. Manual dispatch accepts an explicit
+full `kas_ref`; both source commits are checked and retained in `gates.json`.
+
+At KAS `891c336cf389c34b5c2b504a2bc67979ba8d287a`, `install.sh` touches
+`/opt/var/log/mihomo_watchdog.log`. After fresh tmpfs or before the first
+scheduled watchdog run it can be empty. The clean lifecycle invokes
+`wan_guard()` before Doctor; the foreign lifecycle does not. The production
+Doctor history section reports `Watchdog log is empty`, WARN=1, FAIL=0 and
+exit 1 for that state. A missing log similarly warns. This is a reproducible
+cause, not proof of the warning in historical run 40184425498: that run's
+private SSH log was deleted and its public artifact omitted foreign counters.
+
+Local reproduction from the KAS checkout, without guests or network:
+
+```sh
+python3 tests/maintenance-regression.py
+```
+
+`doctor_fresh_history()` executes the actual Doctor history section and summary
+on missing, empty and recent WAN-outage-only logs under dash and BusyBox ash.
+It preserves WARN for missing/empty history. A WAN-outage-only log exercises
+the existing informational path; the test does not fabricate a healthy run.
+`lab.test_lifecycle` separately verifies that post-reinstall WARN returns false,
+stays BLOCKED and never prints `Doctor passed`. `KAS_FOREIGN_DOCTOR` and
+`foreign_doctor_*` counters retain the foreign result in public gate evidence.
+No cron timing change, fabricated watchdog log or relaxed Doctor criterion is
+an acceptable way to turn this warning into PASS.
+
 References: [native password command](https://storage.googleapis.com/docs.help.keenetic.com/cli/4.3/en/cli_manual_kn-3610.pdf),
 [official Entware USB installation](https://support.keenetic.com/titan/kn-1812/en/20980-installing-the-entware-repository-on-a-usb-drive.html).

@@ -10,6 +10,11 @@ on:
         type: string
         required: true
   workflow_dispatch:
+    inputs:
+      kas_ref:
+        description: Full immutable KAS commit SHA
+        required: true
+        type: string
   pull_request:
     paths:
       - 'lab/**'
