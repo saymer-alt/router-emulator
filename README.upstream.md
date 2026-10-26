@@ -6,6 +6,7 @@
 > [README.md](README.md) (Keenetic Virtual Lab); the upstream Russian doc is
 > [README.ru.md](README.ru.md).
 
+
 **English** · [Русский](README.ru.md) · Build: [Linux](README.build.linux.md) · [Windows](README.build.windows.md)
 
 > **Board presets are a separate archive since 3.6.** The packages no longer
@@ -196,6 +197,8 @@ routers use; saving from the editor drops `;` comments).
 | Xiaomi Mi Router 4 (stock U-Boot) (**MT7621A**, MIPS) | 1G WAN (MT7530 PHY 4 muxed to GMAC1) + 2×1G LAN MT7530; Wi-Fi MT7603E + MT7612E on PCIe (radio silent) | DDR3 128 MB | **parallel NAND 128 MB** (Xiaomi layout) | – | stock Xiaomi U-Boot 1.1.3 + OpenWrt |
 | Cudy WR1300S (**MT7621A**, MIPS) | 1G WAN (MT7530 PHY 0 muxed to GMAC1) + 4×1G LAN MT7530; Wi-Fi MT7603E + MT7663E (MT7613BE) on PCIe (radio silent) | DDR3 128 MB | **SPI-NOR 16 MB** | 3.0 | stock Cudy U-Boot 1.1.3 + OpenWrt 25.12.5 (third-party build, the board is not in OpenWrt yet) |
 | Cudy M1300 v2 (**MT7621A**, MIPS) | 1G WAN (MT7530 PHY 4 muxed to GMAC1) + 1G LAN MT7530 port 3; Wi-Fi MT7603E + MT7663E (MT7613BE) on PCIe (radio silent) | DDR3 128 MB | **SPI-NOR 16 MB** | – | stock Cudy U-Boot 1.1.3 + OpenWrt; the stock Cudy firmware (LEDE, kernel 4.4) from a dump of your own router's flash |
+| Xiaomi Mi Router 4A Gigabit Edition v2 (**MT7621A**, MIPS) | 1G WAN (MT7530 port 3) + 2×1G LAN MT7530; Wi-Fi MT7603E + MT7663E (MT7613BE) on PCIe (radio silent) | DDR3 128 MB | **SPI-NOR 16 MB** (Xiaomi layout) | – | stock Xiaomi U-Boot 2018.09 + OpenWrt |
+| Xiaomi Mi Router 4A Gigabit Edition v2, 32 / 64 MB (**MT7621A**, MIPS) | 1G WAN (MT7530 port 3) + 2×1G LAN MT7530; Wi-Fi MT7603E + MT7663E (MT7613BE) on PCIe (radio silent) | DDR3 128 MB | **SPI-NOR 32 / 64 MB** (replaced chip) | – | Breed 1.1 (32 MB) / OpenWrt U-Boot built for it + OpenWrt (ImageBuilder, own DTB) |
 
 Netis boards have no bdinfo partition (FIP at 0x380000, ubi at 0x580000;
 MACs in Factory): presets set `openwrt-no-bdinfo=1`. The MT7986 boards use
@@ -362,7 +365,7 @@ boot chain is the real one: the CPU starts in the SPI-NOR mapped at
 the SPL runs MediaTek's DDR init blob in the Frame Engine SRAM, then U-Boot
 and OpenWrt; NAND boards boot through the NAND BootROM (stage1 with the DDR
 init into the locked L2, then the bootloader). Emulated: MIPS 1004Kc, 2 cores × 2 VPEs (MT ASE: 4 CPUs in Linux, chip ID
-MT7621A; `-smp 2`: one core, MT7621S; `-smp 1`), CM/GIC/CPC (cores
+MT7621A; `-smp 2`: one core, MT7621S; `-smp 1`), CM/GIC (64-bit shared counter)/CPC (cores
 powered up by the CPC, VPEs by MT ASE code; the first VPE's CP0 timer on its IP7, the
 others' via the GIC), DRAM 128/256/512 MB (above 448 MB at `0x20000000`, as on the
 SoC), SPI controller + SPI-NOR, UART, Frame Engine (QDMA/PDMA, NETSYS v1)
@@ -378,10 +381,13 @@ software test engine, so a vendor stage1 that calibrates the DDR itself
 (stock Xiaomi U-Boot) finds its pass windows; `poweroff=stop|halt`
 (Linux's `poweroff` / `halt` end the emulator, or it stays halted like the
 chip, which cannot switch itself off); the write-back L1 data cache as far
-as uncached stores go (`dcache=on`, the default: Breed overruns an
-uncached memset into a malloc header and relies on the dirty cached copy;
-on from reset until the OS runs user code, so OpenWrt runs at full
-speed). Not yet: SD card.
+as uncached stores go (`dcache=on`, the default): an uncached store into
+a dirty line reaches the DRAM, uncached loads see it, cached ones keep
+the line's data until it is written back (Breed overruns an uncached
+memset into a malloc header and relies on the dirty cached copy; the
+stock Xiaomi U-Boot 2018.09 sizes the DRAM with uncached stores into
+lines its early malloc keeps dirty); on from reset until the OS runs user
+code, so OpenWrt runs at full speed. Not yet: SD card.
 
 ```bash
 tools/prepare-nand.sh --soc mt7621 zbtlink_zbt-wg3526-16m 25.12.5   # nor-zbt-wg3526-16m
@@ -453,6 +459,54 @@ it the stock U-Boot scans the used flash for bad block marks, takes data
 for marks and skips the kernel): when no dump holds those blocks, the
 emulator puts an all-good table there.
 Any dump `X` may come with an `X.oob` (its spare area, 64 bytes a page).
+
+**Xiaomi Mi Router 4A Gigabit Edition v2** (SPI-NOR, stock Xiaomi U-Boot
+2018.09, preset `xiaomi-mi-router-4a-gigabit-v2`, folder
+`nor-mi-router-4a-gigabit-v2`): OpenWrt has no bootloader for it, the
+folder takes the router's `u-boot` and `factory` (Wi-Fi calibration; the
+four MACs are replaced: LAN 80:af:ca:11:22:33, WAN …:34, Wi-Fi …:35 /
+…:36) and OpenWrt's sysupgrade.bin in `firmware` ("System 1"); every
+other partition stays erased. `Config` (the stock U-Boot's environment)
+and `Bdata` hold the router's serial number, Wi-Fi and admin passwords:
+leave them out, the U-Boot boots without them. The preset's
+`openwrt-parts` is Xiaomi's layout:
+
+```bash
+# DIR: *mtd0*.bin or *u-boot*.bin, *factory*.bin
+tools/prepare-nand.sh --soc mt7621 --nor --stock DIR --parts u-boot:0x30000,u-boot-env:0x10000,Bdata:0x10000,factory:0x10000,crash:0x10000,cfg_bak:0x10000,overlay:0x100000,firmware:0xe70000,Config:0x10000 xiaomi_mi-router-4a-gigabit-v2 25.12.5 nor-mi-router-4a-gigabit-v2
+./emulator.sh -P xiaomi-mi-router-4a-gigabit-v2
+```
+
+**4A Gigabit v2 with a bigger flash** (the 16 MB chip replaced by a 32 or
+64 MB one): OpenWrt has no image for it, `prepare-nand.sh --nor-mb 32|64`
+builds one, [`tools/ib-flash-size.py`](tools/ib-flash-size.py): the release's
+official ImageBuilder (downloaded into `work/ib/`, sha256 checked) with the
+kernel's device tree changed only, `firmware` from 0x180000 to the end of
+the flash, `Config` dropped (about 23 / 55 MB for settings and packages).
+Neither the stock U-Boot nor Breed 1.1 knows a 64 MB chip (W25Q512JV), so
+there are two presets:
+
+- `xiaomi-mi-router-4a-gigabit-v2-breed` (folder
+  `nor-mi-router-4a-gigabit-v2-breed`, W25Q256JV 32 MB): Breed 1.1 as the
+  bootloader; DIR also holds Breed's settings as `*u-boot-env*.bin`
+  (written to `u-boot-env` as it is: `ENV\0` + `autoboot.command=boot flash
+  0x00180000`, without them Breed does not boot the firmware);
+- `xiaomi-mi-router-4a-gigabit-v2-64m-uboot` (folder
+  `nor-mi-router-4a-gigabit-v2-64m-uboot`, W25Q512JV 64 MB): OpenWrt's U-Boot
+  2026.07 built for the board, sources and `build.sh` in
+  [`tools/uboot-mi-router-4a-gigabit-v2`](tools/uboot-mi-router-4a-gigabit-v2)
+  (not built by CI: take the one on your router). One binary for 16, 32
+  and 64 MB: Xiaomi's layout with `firmware` cut to the chip, chips over
+  16 MB through the bank register (the chip stays in 3-byte mode, which
+  the boot ROM reads after a reboot), boot menu with TFTP recovery, the
+  MAC from `factory`.
+
+```bash
+# DIR: the bootloader (*mtd0*.bin or *u-boot*.bin), *factory*.bin
+# (+ Breed's *u-boot-env*.bin); PARTS: the preset's openwrt-parts
+tools/prepare-nand.sh --soc mt7621 --nor --nor-mb 64 --stock DIR --parts PARTS xiaomi_mi-router-4a-gigabit-v2 25.12.5 nor-mi-router-4a-gigabit-v2-64m-uboot
+./emulator.sh -P xiaomi-mi-router-4a-gigabit-v2-64m-uboot    # 32 MB: -P xiaomi-mi-router-4a-gigabit-v2-breed (--nor-mb 32)
+```
 
 ## What is emulated
 
@@ -589,6 +643,9 @@ tools/                    prepare-nand.sh, mknand.py, host-bridge.sh,
                           gen_dramc_table.py (DRAMC status defaults)
 tools/uboot-rutc50/       U-Boot of the Teltonika RUTC50 preset (sources,
                           build.sh, the built FIP)
+tools/uboot-mi-router-4a-gigabit-v2/  U-Boot of the 4A Gigabit v2 with a
+                          32 / 64 MB flash (sources, build.sh)
+tools/ib-flash-size.py    OpenWrt image for a bigger SPI-NOR (ImageBuilder)
 windows/                  launcher, preset editor, terminal (C#),
                           README.txt for the package
 languages/                launcher texts (en.ini, ru.ini)
