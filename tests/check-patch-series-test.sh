@@ -12,19 +12,23 @@ trap 'rm -rf "$tmp"' EXIT
 make_patch() {  # name file
     printf 'From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001\nSubject: [PATCH] %s\n\nbody\n---\n a | 1 +\n 1 file changed, 1 insertion(+)\n' "$1" > "$tmp/patches/$2"
 }
+make_patch_folded() {  # name file — a Subject folded onto a whitespace-continued
+                       # line, as git format-patch emits for long subjects
+    printf 'From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001\nSubject: [PATCH] %s\n %s\n\nbody\n---\n a | 1 +\n 1 file changed, 1 insertion(+)\n' "$1" "$3" > "$tmp/patches/$2"
+}
 mkcommit() { git -c user.name=t -c user.email=t@t commit -q --allow-empty -m "$1"; }
 
 mkdir -p "$tmp/patches" && cd "$tmp" && git init -q repo && cd repo
 git -c user.name=t -c user.email=t@t commit -q --allow-empty -m base && git tag v10.1.0
 make_patch "alpha one" 0010-alpha.patch
-make_patch "beta two" 0011-beta.patch
+make_patch_folded "beta two (with a long)" 0011-beta.patch "suffix like upstream 0003"
 make_patch "gamma three" 0012-gamma.patch
 
 # 1) applied series matches the files: pass
 mkcommit "alpha one"
-mkcommit "beta two"
+mkcommit "beta two (with a long) suffix like upstream 0003"
 "$tool" "$tmp/patches" 2
-echo "case 1 (matching series) passed"
+echo "case 1 (matching series, incl. folded subject) passed"
 
 # 2) own commit appended after the full series: pass (upstream's documented case;
 #    build.sh resumes nothing and passes N = min(have, count))
