@@ -26,3 +26,15 @@ class KNVRStorageTests(unittest.TestCase):
             (root / 'link.img').symlink_to(root / 'real.img')
             with self.assertRaises(ValueError):
                 storage_args(root / 'link.img', root, 'labarchive')
+
+
+class KNVRAssertionTests(unittest.TestCase):
+    def test_first_failed_guest_assertion_cannot_be_hidden(self):
+        import subprocess
+        from lab.knvr_e2e import checked
+        class ShellGuest:
+            def command(self, text, **kwargs):
+                return subprocess.run(['sh', '-c', text], check=True, capture_output=True)
+        with self.assertRaises(subprocess.CalledProcessError):
+            checked(ShellGuest(), 'false; true')
+        checked(ShellGuest(), 'true; true')

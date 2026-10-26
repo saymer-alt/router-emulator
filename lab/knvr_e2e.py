@@ -9,7 +9,7 @@ import time
 
 CHECKS = ('source', 'fresh_install', 'recording_3', 'watchdog', 'open_segment',
           'time', 'circular', 'hybrid', 'read_only', 'unmount', 'recovery',
-          'reboot', 'uninstall', 'repeat', 'removed_reboot', 'reinstall')
+          'reboot', 'busy_guard', 'uninstall', 'repeat', 'removed_reboot', 'reinstall')
 
 
 class Results:
@@ -86,29 +86,35 @@ def wizard(guest, command, answers):
         channel.close()
 
 
+def checked(guest, text, **kwargs):
+    return guest.command('set -e; ' + text, **kwargs)
+
+
 def lifecycle(guest, args, evidence, context, private, cameras):
     results = Results(args.report_dir, args.knvr_ref)
     current = 'source'
     q = shlex.quote
+    def command(text, **kwargs):
+        return checked(guest, text, **kwargs)
     try:
         upload(guest, args.knvr_dir, args.knvr_ref)
-        guest.command('opkg update && opkg install ffmpeg ffprobe cron curl jq coreutils-stat', timeout=240)
-        guest.command('date -s ' + q(time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())))
-        mount = guest.command("awk '$3==\"ext4\" && $2 ~ /^\\/tmp\\/mnt\\// && $1 !~ /sda/ {print $2; exit}' /proc/mounts")
+        command('opkg update && opkg install ffmpeg ffprobe cron curl jq coreutils-stat', timeout=240)
+        command('date -s ' + q(time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())))
+        mount = command("awk '$3==\"ext4\" && $2 ~ /^\\/tmp\\/mnt\\// && $1 !~ /sda/ {print $2; exit}' /proc/mounts")
         if not mount:
             # Never manufacture a mount record. Require actual native disk automount.
             raise RuntimeError('separate real EXT4 archive was not mounted')
         base = mount + '/cctv'
         results.mark(current, 'PASS')
         current = 'fresh_install'
-        guest.command("printf '%s\\n' '11 4 * * * echo KNVR_FOREIGN_KEEP' | crontab -")
+        command('crontab -', input_data='11 4 * * * echo KNVR_FOREIGN_KEEP\n')
         wizard(guest, 'sh /tmp/knvr-source/NVR/v2/fresh-install.sh install-fresh', [
             ('Choose mount', mount), ('RTSP IP/hostname', '192.168.1.100'),
             ('RTSP username:', 'synthetic'), ('RTSP password', 'synthetic-only'),
             ('RTSP channel IDs', ''), ('Choose storage mode', '1'),
             ('how many hours', '72'), ('Configure notifications', 'n')])
         results.mark(current, 'PASS')
-        run = lambda cmd: guest.command('sh /opt/etc/nvr-v2.sh ' + cmd, timeout=90)
+        run = lambda cmd: command('sh /opt/etc/nvr-v2.sh ' + cmd, timeout=90)
         def healthy(timeout=90):
             until = time.monotonic() + timeout
             while time.monotonic() < until:
@@ -119,74 +125,101 @@ def lifecycle(guest, args, evidence, context, private, cameras):
             raise RuntimeError('fresh recording not observed')
         current = 'recording_3'
         healthy()
-        guest.command('for f in ' + q(base) + '/cam*/*.mkv; do test -s "$f" || exit 1; done')
+        command('for f in ' + q(base) + '/cam*/*.mkv; do test -s "$f" || exit 1; done')
         results.mark(current, 'PASS')
         current = 'watchdog'
-        old_pid = guest.command('cat /tmp/nvr-v2/cam101.pid')
-        guest.command('kill -KILL ' + old_pid)
+        old_pid = command('cat /tmp/nvr-v2/cam101.pid')
+        command('kill -KILL ' + old_pid)
         run('check')
         healthy()
-        guest.command('test "$(cat /tmp/nvr-v2/cam101.pid)" != ' + old_pid)
+        command('test "$(cat /tmp/nvr-v2/cam101.pid)" != ' + old_pid)
         results.mark(current, 'PASS')
         current = 'open_segment'
         # Open MKV cannot be removed even if its mtime is beyond the time horizon.
-        active = guest.command('ls ' + q(base) + '/cam101/*.mkv | head -1')
-        active_pid = guest.command('cat /tmp/nvr-v2/cam101.pid')
-        guest.command('kill -STOP ' + active_pid + '; touch -t 202001010000 ' + q(active))
-        run('cleanup')
-        guest.command('test -s ' + q(active) + '; kill -CONT ' + active_pid)
+        active_pid = command('cat /tmp/nvr-v2/cam101.pid')
+        active = command('for fd in /proc/' + active_pid + '/fd/*; do readlink "$fd"; done | grep -E "/cam101/.*[.]mkv$" | head -1')
+        if not active.startswith(base + '/cam101/'):
+            raise RuntimeError('actual open segment unavailable')
+        command('kill -STOP ' + active_pid + '; touch -t 202001010000 ' + q(active))
+        try:
+            run('cleanup')
+            command('test -s ' + q(active))
+        finally:
+            command('kill -CONT ' + active_pid)
         results.mark(current, 'PASS')
         run('stop')
         # Closed synthetic segments are test data, never production video.
         for mode in ('time', 'circular', 'hybrid'):
             current = mode
-            guest.command("sed -i '/^NVR_STORAGE_MODE=/d; /^NVR_DISK_FREE_MIN_MB=/d' /opt/etc/nvr-v2.conf; "
-                          "printf '\\nNVR_STORAGE_MODE=%s\\nNVR_DISK_FREE_MIN_MB=0\\n' " + mode + ' >> /opt/etc/nvr-v2.conf')
-            guest.command('mkdir -p ' + q(base + '/cam999'))
-            guest.command("sed -i \"s/^NVR_CAMERAS=.*/NVR_CAMERAS='101 201 301 999'/\" /opt/etc/nvr-v2.conf")
-            old, young = base + '/cam999/cam999_old.mkv', base + '/cam999/cam999_young.mkv'
-            guest.command('dd if=/dev/zero of=' + q(old) + ' bs=1048576 count=40 2>/dev/null; '
-                          'touch -t 202001010000 ' + q(old) + '; echo young > ' + q(young))
-            before = guest.command('sha256sum ' + q(old) + ' ' + q(young))
+            command("sed -i '/^NVR_STORAGE_MODE=/d; /^NVR_DISK_FREE_MIN_MB=/d' /opt/etc/nvr-v2.conf")
+            command('cat >> /opt/etc/nvr-v2.conf', input_data=
+                          "\nNVR_STORAGE_MODE='%s'\nNVR_DISK_FREE_MIN_MB=0\n" % mode)
+            command('mkdir -p ' + q(base + '/cam999'))
+            command('sed -i ' + q("s/^NVR_CAMERAS=.*/NVR_CAMERAS='101 201 301 999'/") + ' /opt/etc/nvr-v2.conf')
+            old = base + '/cam201/cam201_lab_old.mkv'
+            middle = base + '/cam101/cam101_lab_middle.mkv'
+            young = base + '/cam999/cam999_lab_young.mkv'
+            for path, mb, hours in ((old, 5, 80 if mode != 'circular' else 50),
+                                    (middle, 40, 20), (young, 1, 2)):
+                stamp = time.strftime('%Y%m%d%H%M.%S', time.gmtime(time.time() - hours * 3600))
+                command('dd if=/dev/zero of=' + q(path) + ' bs=1048576 count=' + str(mb) +
+                              ' 2>/dev/null && touch -t ' + stamp + ' ' + q(path))
+            before = command('sha256sum ' + ' '.join(map(q, (old, middle, young))))
             run('cleanup --dry-run')
-            assert guest.command('sha256sum ' + q(old) + ' ' + q(young)) == before
+            assert command('sha256sum ' + ' '.join(map(q, (old, middle, young)))) == before
             if mode in ('circular', 'hybrid'):
-                # Fill real filesystem to below 10% reserve without touching /opt.
-                guest.command('dd if=/dev/zero of=' + q(mount + '/pressure') + ' bs=1048576 count=190 2>/dev/null; sync')
+                # Derive pressure from the real filesystem, leaving 8 MiB free.
+                # Expiring 5 MiB alone is insufficient; capacity must evict 40 MiB
+                # too, globally by mtime, and stop before the 2-hour young file.
+                free_kb = int(command('df -Pk ' + q(mount) + " | awk 'NR==2{print $4}'"))
+                pressure_mb = free_kb // 1024 - 8
+                if pressure_mb <= 0:
+                    raise RuntimeError('archive unexpectedly full before pressure fixture')
+                command('dd if=/dev/zero of=' + q(mount + '/pressure') +
+                              ' bs=1048576 count=' + str(pressure_mb) + ' 2>/dev/null; sync')
+                # Preview under actual pressure must also leave bytes unchanged.
+                run('cleanup --dry-run')
+                assert command('sha256sum ' + ' '.join(map(q, (old, middle, young)))) == before
             run('cleanup')
-            guest.command('test ! -e ' + q(old) + '; test -s ' + q(young))
-            if mode != 'time':
-                guest.command('rm -f ' + q(mount + '/pressure'))
-            guest.command('rm -f ' + q(young))
+            command('test ! -e ' + q(old) + ' && test -s ' + q(young))
+            if mode == 'time':
+                command('test -s ' + q(middle))
+            else:
+                command('test ! -e ' + q(middle))
+                command('rm -f ' + q(mount + '/pressure'))
+                available = int(command('df -Pk ' + q(mount) + " | awk 'NR==2{print $4}'"))
+                if available <= 8 * 1024:
+                    raise RuntimeError('real filesystem space was not reclaimed')
+            command('rm -f ' + q(young) + ' ' + q(middle))
             results.mark(current, 'PASS')
         current = 'read_only'
-        guest.command('sync; mount -o remount,ro ' + q(mount))
+        command('sync; mount -o remount,ro ' + q(mount))
         code, _, _ = guest.execute('sh /opt/etc/nvr-v2.sh cleanup')
         if code == 0:
             raise RuntimeError('read-only cleanup did not refuse')
         results.mark(current, 'PASS')
-        guest.command('mount -o remount,rw ' + q(mount))
+        command('mount -o remount,rw ' + q(mount))
         current = 'unmount'
-        dev = guest.command("awk -v m=" + q(mount) + " '$2==m{print $1}' /proc/mounts")
-        guest.command('umount ' + q(mount))
+        dev = command("awk -v m=" + q(mount) + " '$2==m{print $1}' /proc/mounts")
+        command('umount ' + q(mount))
         code, _, _ = guest.execute('sh /opt/etc/nvr-v2.sh cleanup')
         if code == 0:
             raise RuntimeError('unmounted cleanup did not refuse')
-        guest.command('test ! -d ' + q(base + '/.nvr-v2'))
+        command('test ! -d ' + q(base + '/.nvr-v2'))
         results.mark(current, 'PASS')
-        guest.command('mount -t ext4 ' + q(dev) + ' ' + q(mount))
+        command('mount -t ext4 ' + q(dev) + ' ' + q(mount))
         current = 'recovery'
-        guest.command("sed -i \"s/^NVR_CAMERAS=.*/NVR_CAMERAS='101 201 301'/\" /opt/etc/nvr-v2.conf")
+        command('sed -i ' + q("s/^NVR_CAMERAS=.*/NVR_CAMERAS='101 201 301'/") + ' /opt/etc/nvr-v2.conf')
         run('start'); healthy()
         results.mark(current, 'PASS')
         def reboot():
-            guest.command('/bin/ndmc -c "system configuration save"; sync')
+            command('/bin/ndmc -c "system configuration save"; sync')
             guest.close()
             from lab.run import send_monitor
             send_monitor(context['monitor'], 'system_reset')
             time.sleep(5)
             guest.connect(300)
-            guest.command('date -s ' + q(time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())))
+            command('date -s ' + q(time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())))
         current = 'reboot'
         reboot()
         # A real cron tick, not a manual restart, must restore recording.
@@ -194,34 +227,45 @@ def lifecycle(guest, args, evidence, context, private, cameras):
         # Cron check is every five minutes; allow the bounded native tick.
         healthy(360)
         results.mark(current, 'PASS')
+        current = 'busy_guard'
+        upload(guest, args.knvr_dir, args.knvr_ref)
+        # Real production lock refusal, held by the native shell invoking removal.
+        code, _, _ = guest.execute('mkdir /tmp/nvr-v2/.lock && echo $$ > /tmp/nvr-v2/.lock/pid; '
+                                   'sh /tmp/knvr-source/uninstall.sh --yes', timeout=90)
+        if code == 0:
+            raise RuntimeError('busy recorder removal falsely succeeded')
+        command('test -f /opt/etc/nvr-v2.sh; rm -f /tmp/nvr-v2/.lock/pid; rmdir /tmp/nvr-v2/.lock')
+        results.mark(current, 'PASS')
         current = 'uninstall'
         upload(guest, args.knvr_dir, args.knvr_ref)
-        config_hash = guest.command('sha256sum /opt/etc/nvr-v2.conf')
-        files = guest.command('find ' + q(base) + " -name '*.mkv' | sort")
-        packages = guest.command('opkg list-installed')
-        guest.command('sh /tmp/knvr-source/uninstall.sh --yes', timeout=120)
-        guest.command('test ! -e /opt/etc/nvr-v2.sh; test -z "$(pidof ffmpeg)"; crontab -l | grep -q KNVR_FOREIGN_KEEP')
-        assert guest.command('sha256sum /opt/etc/nvr-v2.conf') == config_hash
-        assert guest.command('find ' + q(base) + " -name '*.mkv' | sort") == files
-        assert guest.command('opkg list-installed') == packages
+        config_hash = command('sha256sum /opt/etc/nvr-v2.conf')
+        files = command('find ' + q(base) + " -name '*.mkv' | sort")
+        packages = command('opkg list-installed')
+        command('sh /tmp/knvr-source/uninstall.sh --yes', timeout=120)
+        command('test ! -e /opt/etc/nvr-v2.sh; test -z "$(pidof ffmpeg)"; crontab -l | grep -q KNVR_FOREIGN_KEEP')
+        assert command('sha256sum /opt/etc/nvr-v2.conf') == config_hash
+        assert command('find ' + q(base) + " -name '*.mkv' | sort") == files
+        assert command('opkg list-installed') == packages
         results.mark(current, 'PASS')
         current = 'repeat'
-        guest.command('sh /tmp/knvr-source/uninstall.sh --yes')
+        command('sh /tmp/knvr-source/uninstall.sh --yes')
         results.mark(current, 'PASS')
         current = 'removed_reboot'
         reboot()
-        guest.command('test ! -e /opt/etc/nvr-v2.sh; test -z "$(pidof ffmpeg)"; crontab -l | grep -q KNVR_FOREIGN_KEEP')
+        command('test ! -e /opt/etc/nvr-v2.sh; test -z "$(pidof ffmpeg)"; crontab -l | grep -q KNVR_FOREIGN_KEEP')
         results.mark(current, 'PASS')
         current = 'reinstall'
         upload(guest, args.knvr_dir, args.knvr_ref)
-        guest.command('sh /tmp/knvr-source/NVR/v2/fresh-install.sh install-fresh', timeout=120)
+        command('sh /tmp/knvr-source/NVR/v2/fresh-install.sh install-fresh', timeout=120)
         healthy()
         # Flush real MKV trailers then ffprobe confirms actual H264, not a dummy file.
         run('stop')
-        guest.command('f=$(ls -t ' + q(base) + '/cam101/*.mkv | head -1); /opt/bin/ffprobe -v error -show_entries stream=codec_name -of csv=p=0 "$f" | grep -qx h264')
+        command('f=$(ls -t ' + q(base) + '/cam101/*.mkv | head -1); /opt/bin/ffprobe -v error -show_entries stream=codec_name -of csv=p=0 "$f" | grep -qx h264')
         results.mark(current, 'PASS')
         return True
-    except Exception:
+    except Exception as error:
+        (Path(private) / 'knvr-error-private.txt').write_text(type(error).__name__ + ": " + str(error))
+        print('KNVR failure class: ' + type(error).__name__, flush=True)
         results.mark(current, 'FAIL')
         return False
     finally:
