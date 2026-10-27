@@ -91,6 +91,13 @@ def wizard(guest, command, answers):
         channel.close()
 
 
+def recording_files_command(base):
+    return ('B=' + shlex.quote(str(base)) + '; '
+            'for id in 101 201 301; do '
+            'f=$(ls -t "$B/cam$id"/cam${id}_*.mkv 2>/dev/null | head -n 1); '
+            'test -s "$f" || exit 1; done')
+
+
 def checked(guest, text, **kwargs):
     return guest.command('set -e; ' + text, **kwargs)
 
@@ -137,7 +144,9 @@ def lifecycle(guest, args, evidence, context, private, cameras):
             while time.monotonic() < until:
                 text = run('status')
                 if all('CAM %s: HEALTHY' % c in text for c in ('101', '201', '301')):
-                    return
+                    code, _, _ = guest.execute(recording_files_command(base))
+                    if code == 0:
+                        return
                 time.sleep(3)
             results.data['camera_diagnostics'] = {camera: next((state for cid, state in re.findall(r'CAM ([0-9]+): (HEALTHY|DOWN|GRACE|STALE|PAUSED|UNKNOWN)', text) if cid == camera), 'UNRECOGNIZED') for camera in ('101', '201', '301')}
             results.write()
@@ -145,7 +154,6 @@ def lifecycle(guest, args, evidence, context, private, cameras):
         current = 'recording_3'
         healthy()
         print('KNVR recording status: HEALTHY 3/3', flush=True)
-        command('for f in ' + q(base) + '/cam*/*.mkv; do test -s "$f" || exit 1; done')
         results.mark(current, 'PASS')
         current = 'watchdog'
         old_pid = command('cat /tmp/nvr-v2/cam101.pid')

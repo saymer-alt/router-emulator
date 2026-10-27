@@ -27,7 +27,7 @@ jobs:
       - name: Validate immutable laboratory inputs
         env:
           EMULATOR_REF: ${{ github.sha }}
-          KNVR_REF: c1dc6f5194c47908e43958385e707f4e93121a1c
+          KNVR_REF: 1b8667c8462c6600100626db967d4e33350f88d2
         run: |
           [[ "$EMULATOR_REF" =~ ^[a-f0-9]{40}$ ]]
           [[ "$KNVR_REF" =~ ^[a-f0-9]{40}$ ]]
@@ -35,12 +35,19 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: saymer-alt/keenetic-nvr
-          ref: c1dc6f5194c47908e43958385e707f4e93121a1c
+          ref: 1b8667c8462c6600100626db967d4e33350f88d2
           path: knvr-source
           persist-credentials: false
       - name: Host tools and regression contracts
         run: |
-          sudo apt-get update
+          # The Azure mirror downloaded 64 MB in 33 minutes in the prior run.
+          # Keep Ubuntu's signed repository and use its ordinary archive mirror.
+          for source in /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources; do
+            if [ -f "$source" ]; then
+              sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|http://archive.ubuntu.com/ubuntu|g' "$source"
+            fi
+          done
+          sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 update
           sudo apt-get install -y --no-install-recommends mtd-utils unzip socat curl wget python3 python3-paramiko e2fsprogs openssl build-essential ninja-build meson pkg-config libglib2.0-dev libpixman-1-dev zlib1g-dev libslirp-dev libfdt-dev python3-venv ffmpeg
           python3 -m unittest discover -s lab -p 'test*.py' -v
       - name: Cache the changed AArch64 target by exact patch series
@@ -98,7 +105,7 @@ jobs:
             --report-dir "$RUNNER_TEMP/ported-public" \
             --stage knvr \
             --knvr-dir "$GITHUB_WORKSPACE/knvr-source" \
-            --knvr-ref "c1dc6f5194c47908e43958385e707f4e93121a1c" \
+            --knvr-ref "1b8667c8462c6600100626db967d4e33350f88d2" \
             --mediamtx "$RUNNER_TEMP/mediamtx/mediamtx"
       - name: Public fixed-label summary
         if: always()

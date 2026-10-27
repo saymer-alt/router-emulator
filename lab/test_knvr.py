@@ -38,3 +38,18 @@ class KNVRAssertionTests(unittest.TestCase):
         with self.assertRaises(subprocess.CalledProcessError):
             checked(ShellGuest(), 'false; true')
         checked(ShellGuest(), 'true; true')
+
+
+class RecordingFileTests(unittest.TestCase):
+    def test_all_three_current_segments_must_contain_data(self):
+        import subprocess
+        from lab.knvr_e2e import recording_files_command
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            for cam in ('101', '201', '301'):
+                (root / ('cam' + cam)).mkdir()
+                (root / ('cam' + cam) / ('cam' + cam + '_current.mkv')).write_bytes(b'frame')
+            command = recording_files_command(root)
+            self.assertEqual(subprocess.run(['sh', '-c', command], capture_output=True).returncode, 0)
+            (root / 'cam201/cam201_current.mkv').write_bytes(b'')
+            self.assertNotEqual(subprocess.run(['sh', '-c', command], capture_output=True).returncode, 0)
