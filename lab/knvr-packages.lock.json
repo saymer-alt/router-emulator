@@ -424,6 +424,25 @@
       "Description": " Full version of standard GNU stat utility.",
       "feed": "entware",
       "url": "https://bin.entware.net/aarch64-k3.10/coreutils-stat_9.9-2_aarch64-3.10.ipk"
+    },
+    {
+      "Package": "coreutils-touch",
+      "Version": "9.9-2",
+      "Depends": "libc, libssp, librt, libpthread, coreutils",
+      "Provides": "coreutils-touch-any",
+      "Alternatives": "300:/opt/bin/touch:/opt/libexec/touch-coreutils",
+      "License": "GPL-3.0-or-later",
+      "Section": "utils",
+      "URL": "https://www.gnu.org/software/coreutils/",
+      "CPE-ID": "cpe:/a:gnu:coreutils",
+      "Architecture": "aarch64-3.10",
+      "Installed-Size": "81920",
+      "Filename": "coreutils-touch_9.9-2_aarch64-3.10.ipk",
+      "Size": "38907",
+      "SHA256sum": "c486a3ab3f748d66a4465f72a20fc00338c5cec077b16677dcdb870b37b402f0",
+      "Description": " Full version of standard GNU touch utility.",
+      "feed": "entware",
+      "url": "https://bin.entware.net/aarch64-k3.10/coreutils-touch_9.9-2_aarch64-3.10.ipk"
     }
   ]
 }

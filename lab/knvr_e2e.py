@@ -125,8 +125,10 @@ def lifecycle(guest, args, evidence, context, private, cameras):
         return data
     try:
         upload(guest, args.knvr_dir, args.knvr_ref)
-        command('opkg update && opkg install ffmpeg ffprobe cron curl jq coreutils-stat', timeout=240)
+        command('opkg update && opkg install ffmpeg ffprobe cron curl jq coreutils-stat coreutils-touch', timeout=240)
         command('date -s ' + q(time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())))
+        command('TZ=UTC0 /opt/libexec/touch-coreutils -t 202001010000 /tmp/knvr-touch-probe; '
+                'test "$(stat -c %Y /tmp/knvr-touch-probe)" = 1577836800; rm /tmp/knvr-touch-probe')
         mount = command("awk '$3==\"ext4\" && $2 ~ /^\\/tmp\\/mnt\\// && $1 !~ /sda/ {print $2; exit}' /proc/mounts")
         if not mount:
             # Never manufacture a mount record. Require actual native disk automount.
@@ -246,7 +248,7 @@ def lifecycle(guest, args, evidence, context, private, cameras):
         results.write()
         command('kill -STOP ' + active_pid)
         try:
-            command('/opt/bin/busybox touch -t 202001010000 ' + q(active))
+            command('TZ=UTC0 /opt/libexec/touch-coreutils -t 202001010000 ' + q(active))
             code, _, _ = guest.execute('sh /opt/etc/nvr-v2.sh cleanup', timeout=90)
             retained, _, _ = guest.execute('test -s ' + q(active))
             probe.update(cleanup_exit=code, retained=retained == 0)
@@ -278,7 +280,7 @@ def lifecycle(guest, args, evidence, context, private, cameras):
                                     (middle, 40, 20), (young, 1, 2)):
                 stamp = time.strftime('%Y%m%d%H%M.%S', time.gmtime(time.time() - hours * 3600))
                 command('dd if=/dev/zero of=' + q(path) + ' bs=1048576 count=' + str(mb) +
-                              ' 2>/dev/null && /opt/bin/busybox touch -t ' + stamp + ' ' + q(path))
+                              ' 2>/dev/null && TZ=UTC0 /opt/libexec/touch-coreutils -t ' + stamp + ' ' + q(path))
             before = command('sha256sum ' + ' '.join(map(q, (old, middle, young))))
             run('cleanup --dry-run')
             assert command('sha256sum ' + ' '.join(map(q, (old, middle, young)))) == before
