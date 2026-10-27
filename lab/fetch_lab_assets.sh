@@ -22,7 +22,7 @@ SUMS
 tar xzf emulator.tar.gz
 unzip -q presets.zip
 cd Router-Emulator
-tools/prepare-nand.sh cudy_wr3000p-v1 25.12.5
+tools/prepare-nand.sh --flash-type nand --flash-id c8017f7f7f --flash-mb 128 cudy_wr3000p-v1 25.12.5
 
 # This pinned v4.1 release is only an asset/flash seed. The QEMU binary from
 # the active patch series is installed by the caller, so use the wrapper and
