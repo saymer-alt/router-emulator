@@ -31,7 +31,7 @@ on:
   pull_request:
     paths:
       - 'lab/**'
-      - 'qemu-patches/0063-hw-arm-filogic-preserve-Keenetic-4.9-FE-receive-IRQ.patch'
+      - 'qemu-patches/0064-hw-arm-filogic-preserve-Keenetic-4.9-FE-receive-IRQ.patch'
       - '.github/workflows/ported-entware-kas.yml'
 
 permissions:

@@ -6,7 +6,7 @@ cd "$(dirname "$(readlink -f "$0")")/.."
 export QEMU_BIN=${1:-$PWD/src/qemu/build/qemu-system-aarch64}
 P=${2:-cudy-wr3000p-v1}
 D=work/bench-nand; rm -rf $D
-N=$(awk -F= '$1=="nand-dir"{print $2}' presets/$P.ini)
+N=$(awk -F= '$1=="dump-dir"{print $2}' presets/$P.ini)
 cp -r "work/winpkg/Router-Emulator/$N" $D 2>/dev/null || cp -r "$N" $D
 WIN=
 case "$QEMU_BIN" in *.exe) WIN=--win; export QEXE=$QEMU_BIN WINEPREFIX=${WINEPREFIX:-$PWD/work/wineprefix} ;; esac

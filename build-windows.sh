@@ -102,7 +102,7 @@ for f in presets/*.ini; do
     *) continue ;;
     esac
     get() { awk -F= -v k="$1" '$1 == k { sub(/^[^=]*=/, ""); sub(/\r$/, ""); print; exit }' "$f"; }
-    prof=$(get openwrt); dir=$(get nand-dir); stock=$(get openwrt-stock); local=$(get openwrt-local)
+    prof=$(get openwrt); dir=$(get dump-dir); stock=$(get openwrt-stock); local=$(get openwrt-local)
     ver=$(get openwrt-version); ver=${ver:-$VERSION}
     [ -n "$prof" ] && [ -n "$dir" ] || continue
     if [ -n "$stock" ]; then
@@ -124,10 +124,13 @@ for f in presets/*.ini; do
     [ "$(get openwrt-ubi-fip)" = 1 ] && set -- "$@" --ubi-fip
     [ -n "$(get openwrt-ubi-factory)" ] && set -- "$@" --ubi-factory "$(get openwrt-ubi-factory)"
     [ -n "$(get openwrt-parts)" ] && set -- "$@" --parts "$(get openwrt-parts)"
-    [ "$(get openwrt-nor)" = 1 ] && set -- "$@" --nor --nor-mb "$(get nor)"
+    [ "$(get openwrt-nor)" = 1 ] && set -- "$@" --nor
+    for k in flash-type flash-id flash-mb flash2-id flash2-mb; do
+        [ -n "$(get $k)" ] && set -- "$@" --$k "$(get $k)"
+    done
     [ -n "$(get openwrt-nor-nand)" ] && set -- "$@" --nor-nand "$(get openwrt-nor-nand)"
     # a board without images for this version must not break the package
-    tools/prepare-nand.sh "$@" --flash-mb "$(get nand)" "$prof" "$ver" "$PKG/$dir" ||
+    tools/prepare-nand.sh "$@" "$prof" "$ver" "$PKG/$dir" ||
         { echo "skip $f: no NAND image"; rm -rf "${PKG:?}/$dir"; }
 done
 # profile-guided optimisation of QEMU (PGO=0 to skip): ~5-17 % faster

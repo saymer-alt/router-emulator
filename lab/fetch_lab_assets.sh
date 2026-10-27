@@ -2,6 +2,7 @@
 # Fixed public evaluation inputs. Keep all outputs in the private runner folder.
 set -euo pipefail
 base_dir=${1:?private output directory required}
+repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 mkdir -m 700 -p "$base_dir"
 base_dir=$(cd "$base_dir" && pwd)
 umask 077
@@ -22,3 +23,12 @@ tar xzf emulator.tar.gz
 unzip -q presets.zip
 cd Router-Emulator
 tools/prepare-nand.sh cudy_wr3000p-v1 25.12.5
+
+# This pinned v3.8 release is only an asset/flash seed. The QEMU binary from
+# the active patch series is installed by the caller, so the wrapper and the
+# preset must also come from this same checkout (v4.1 uses dump-dir and
+# flash-type/flash-id; v3.8's nand-dir silently breaks the QEMU -M launch).
+install -m 755 "$repo/emulator.sh" "$base_dir/downloads/Router-Emulator/emulator.sh"
+install -m 644 "$repo/presets/cudy-wr3000p-v1.ini" \
+  "$base_dir/downloads/Router-Emulator/presets/cudy-wr3000p-v1.ini"
+install -m 644 "$repo/VERSION" "$base_dir/downloads/Router-Emulator/VERSION"

@@ -120,7 +120,7 @@ tools/prepare-nand.sh --stock wr3000 --nor cudy_wr3000-v1 25.12.5
 ```
 
 PROFILE is the OpenWrt device profile. The output folder is `nand-NAME`
-(profile without vendor prefix and `-v1`), as used by the presets' `nand-dir`.
+(profile without vendor prefix and `-v1`), as used by the presets' `dump-dir`.
 
 Put the board's own `*Factory*.bin` (Wi-Fi calibration) and `*bdinfo*.bin`
 (MAC address) into `factory/` before; without them Wi-Fi uses defaults and a

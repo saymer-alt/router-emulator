@@ -22,7 +22,7 @@ else:
         env["LLVM_PROFILE_FILE"] = sys.argv[3]
     cmd = [exe]
 q = subprocess.Popen(cmd + ["-M",
-    "mt7981-router,nand-dir=" + host(nand) +
+    "mt7981-router,dump-dir=" + host(nand) +
     ",gmac0=mt7531,ports=lan4:lan3:lan2:lan1:-,gmac1=rtl8221b,ddr=ddr4,usb-port=2",
     "-m", "512M", "-display", "none",
     "-serial", "tcp:127.0.0.1:45881,server=on,wait=on",

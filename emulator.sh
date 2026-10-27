@@ -12,9 +12,9 @@
 #   -o OPTS        override/add machine options, e.g. "usb-port=3,ddr=ddr3"
 #                  ("-o ram=1024" changes the RAM size, "-o lan-ip=10.0.0.1,
 #                  lan-forwards=8080:80;8022:22" the "-l user" access)
-#   -n DIR         NAND directory with partition dumps (*mtdN*, e.g.
+#   -n DIR         dump directory with the partition dumps (*mtdN*, e.g.
 #                  mt7981.mtd0.BL2.bin), concatenated in mtd order
-#                  (default: the preset's nand-dir)
+#                  (default: the preset's dump-dir)
 #   -w MODE        WAN: bridge (tap wr-wan on br0, default), user (NAT via
 #                  QEMU, router WAN gets 10.0.2.15), offline (same, but
 #                  restrict=on: DHCP works, nothing leaves the PC - for
@@ -65,7 +65,7 @@ QEMU=${QEMU_BIN:-$ROOT/src/qemu/build/qemu-system-aarch64}
 [ -n "$QEMU_BIN" ] || [ -x "$QEMU" ] || QEMU=$ROOT/qemu/qemu-system-aarch64
 PRESET=cudy-wr3000p-v1
 OVERRIDE=
-NAND=
+DUMP=
 WAN=bridge
 LAN=isolated
 PORTS="1"
@@ -82,7 +82,7 @@ while getopts "P:o:n:w:l:p:u:L:m:S:gRdVh" o; do
     case $o in
     P) PRESET=$OPTARG ;;
     o) OVERRIDE=$OPTARG ;;
-    n) NAND=$(readlink -f "$OPTARG") ;;
+    n) DUMP=$(readlink -f "$OPTARG") ;;
     w) WAN=$OPTARG ;;
     l) LAN=$OPTARG ;;
     p) PORTS=$OPTARG ;;
@@ -140,7 +140,7 @@ SOC=mt7981
 RAM=512
 LANIP=192.168.1.1
 LANFWD=8080:80,8443:443,8022:22
-PNAND=
+PDUMP=
 while IFS= read -r line; do
     line=${line%$'\r'}
     case $line in ''|\;*|\#*|\[*) continue ;; esac
@@ -151,7 +151,7 @@ while IFS= read -r line; do
     lan-forwards) LANFWD=$v ;;
     ram) RAM=$v ;;
     soc) SOC=$v ;;
-    nand-dir) PNAND=$v ;;
+    dump-dir) PDUMP=$v ;;
     *) MOPTS="$MOPTS,$k=$v" ;;
     esac
 done < "$PF"
@@ -165,7 +165,7 @@ for kv in "${ov[@]}"; do
     ?*) MOPTS="$MOPTS,$kv" ;;      # later options win in QEMU -M
     esac
 done
-[ -n "$NAND" ] || NAND=$(readlink -f "$ROOT/${PNAND:-nand}")
+[ -n "$DUMP" ] || DUMP=$(readlink -f "$ROOT/${PDUMP:-nand}")
 # MT7621 boards (MIPS): the second QEMU binary next to the first one
 if [ "$SOC" = mt7621 ]; then
     QEMU=$(dirname "$QEMU")/qemu-system-mipsel
@@ -278,7 +278,7 @@ for UH in ${UHS//;/ }; do
 done
 
 rm -f "$MON"
-"${QRUN[@]}" -M "$SOC-router,nand-dir=${NAND//,/,,}$MOPTS$GPIO" -m "${RAM}M" \
+"${QRUN[@]}" -M "$SOC-router,dump-dir=${DUMP//,/,,}$MOPTS$GPIO" -m "${RAM}M" \
     $([ -n "$CONSOCK" ] && echo "-display none" || echo -nographic) \
     "${CON[@]}" \
     "${NET[@]}" "${USB[@]}" "${DEBUG[@]}" "${EXTRA[@]}"
