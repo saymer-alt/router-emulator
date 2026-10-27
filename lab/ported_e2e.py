@@ -80,6 +80,9 @@ def run_entware(args, private, credentials, coldboot, evidence):
     def probes(**context):
         guest = Guest(credentials, private, deadline=context['deadline'])
         try:
+            if args.stage == 'knvr':
+                # Callback runs only after all native coldboot/install waits.
+                evidence.set('BOOT_READY', 'PASS', 'boot_stages_observed')
             guest.connect(120)
             marker = guest.entware()
             print('ENTWARE: native shell, real EXT4 and pinned opkg database verified', flush=True)
@@ -187,6 +190,11 @@ def main():
         shutil.copytree(args.nand_dir, nand)
         credentials = provision(nand, private / 'credentials')
         coldboot = json.loads(Path(__file__).with_name('scenarios').joinpath('ported-wr3000p-firstboot.json').read_text())['steps']
+        if args.stage == 'knvr':
+            # Consumer tests authenticate real Entware SSH and reset it below.
+            # The independent platform workflow owns the extra NDM CLI cycle;
+            # do not claim AUTH_READY for a console protocol we did not run.
+            return run_entware(args, private, credentials, coldboot, evidence)
         steps = coldboot + login_steps()
         steps += [send('system configuration save'), wait(r'\(config\)>', 60), {'action': 'reset'}]
         steps += coldboot + login_steps()

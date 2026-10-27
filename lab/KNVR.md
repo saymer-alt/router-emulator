@@ -35,6 +35,12 @@ python3 -m lab.ported_e2e \
 The KNVR checkout HEAD must equal that full SHA. `git archive` sends committed
 source to the guest. Host worktree changes cannot silently affect the run.
 
+The KNVR consumer boots and installs real Entware, authenticates its SSH with
+fresh credentials, verifies opkg/EXT4 and resets the guest before KNVR. It skips
+the additional two NDM console-login boots owned by the independent platform
+workflow. BOOT_READY comes from actual coldboot waits; AUTH_READY (NDM CLI) stays
+NOT_TESTED in this consumer, never a fabricated PASS. All KNVR checks still run.
+
 ## Checks and evidence
 
 - Real `fresh-install.sh install-fresh`, including its unmodified SSH TTY wizard.

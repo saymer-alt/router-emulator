@@ -156,6 +156,10 @@ def lifecycle(guest, args, evidence, context, private, cameras):
         print('KNVR recording status: HEALTHY 3/3', flush=True)
         results.mark(current, 'PASS')
         current = 'watchdog'
+        # First observe a healthy tick: initial start attempts retain a bounded
+        # retry backoff until check confirms real footage. Do not erase it.
+        run('check')
+        command('for id in 101 201 301; do test \"$(cat /tmp/nvr-v2/cam$id.failures)\" = 0 || exit 1; done')
         old_pid = command('cat /tmp/nvr-v2/cam101.pid')
         command('kill -KILL ' + old_pid)
         run('check')
