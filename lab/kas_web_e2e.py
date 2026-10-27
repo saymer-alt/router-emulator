@@ -65,10 +65,19 @@ def put_large_binary(guest, path, content):
     # SSH command timeout is NOT a valid transfer budget for emulated CPU.
     # Destination is fixed by the caller and never influenced by HTTP clients.
     check(path == '/opt/lab/kas-web', 'unsafe_binary_destination')
-    guest.command('umask 077; cat > /opt/lab/kas-web; chmod 700 /opt/lab/kas-web',
-                  timeout=180, input_data=content)
-    remote_sha = guest.command('sha256sum /opt/lab/kas-web', timeout=30).split()[0]
+    # Paramiko's single SSH channel can stall on an 8-MiB stdin window in
+    # emulated Ported. Bound each write to 256 KiB, then verify the whole
+    # executable before a same-directory atomic rename.
+    guest.command('umask 077; : > /opt/lab/.kas-web.new; '
+                  'chmod 600 /opt/lab/.kas-web.new', timeout=30)
+    for offset in range(0, len(content), 256 * 1024):
+        chunk = content[offset:offset + 256 * 1024]
+        guest.command('cat >> /opt/lab/.kas-web.new',
+                      timeout=45, input_data=chunk)
+    remote_sha = guest.command('sha256sum /opt/lab/.kas-web.new', timeout=30).split()[0]
     check(remote_sha == hashlib.sha256(content).hexdigest(), 'web_binary_integrity_error')
+    guest.command('mv /opt/lab/.kas-web.new /opt/lab/kas-web; '
+                  'chmod 700 /opt/lab/kas-web', timeout=30)
 
 
 def test_opt_in_service(guest, mirror, evidence):
