@@ -99,8 +99,20 @@ def lifecycle(guest, args, evidence, context, private, cameras):
     results = Results(args.report_dir, args.knvr_ref, evidence)
     current = 'source'
     q = shlex.quote
+    probe_number = 0
     def command(text, **kwargs):
-        return checked(guest, text, **kwargs)
+        nonlocal probe_number
+        probe_number += 1
+        code, data, error = guest.execute('set -e; ' + text, **kwargs)
+        if code != 0:
+            results.data['failed_probe'] = {'index': probe_number, 'exit_code': code,
+                'command_sha256': hashlib.sha256(text.encode()).hexdigest(),
+                'syntax_error': 'syntax error' in error.lower(),
+                'not_found': 'not found' in error.lower()}
+            results.write()
+            print('KNVR probe failed: index=%d exit=%d' % (probe_number, code), flush=True)
+            raise RuntimeError('native probe failed')
+        return data
     try:
         upload(guest, args.knvr_dir, args.knvr_ref)
         command('opkg update && opkg install ffmpeg ffprobe cron curl jq coreutils-stat', timeout=240)
@@ -132,6 +144,7 @@ def lifecycle(guest, args, evidence, context, private, cameras):
             raise RuntimeError('fresh recording not observed')
         current = 'recording_3'
         healthy()
+        print('KNVR recording status: HEALTHY 3/3', flush=True)
         command('for f in ' + q(base) + '/cam*/*.mkv; do test -s "$f" || exit 1; done')
         results.mark(current, 'PASS')
         current = 'watchdog'
