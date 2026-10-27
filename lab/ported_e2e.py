@@ -116,15 +116,34 @@ def run_entware(args, private, credentials, coldboot, evidence):
                     from lab.kas_web_e2e import lifecycle
                     def reboot_web():
                         # Native KeeneticOS reboot, real Entware startup and
-                        # authenticated SSH reconnection. Keep tested configs
-                        # pinned; do not disclose guest output to public logs.
-                        guest.command('/bin/ndmc -c "system configuration save"; sync',
-                                      timeout=30)
-                        guest.close()
-                        send_monitor(context['monitor'], 'system_reset')
-                        time.sleep(5)
-                        guest.connect(300)
-                        guest.entware(marker)
+                        # authenticated SSH reconnect. Print only fixed phase
+                        # identifiers and exception classes, NEVER guest text.
+                        reboot_phase = 'SAVE_CONFIG'
+                        try:
+                            guest.command('/bin/ndmc -c "system configuration save"; sync',
+                                          timeout=30)
+                            reboot_phase = 'CLOSE_SSH'
+                            guest.close()
+                            reboot_phase = 'SEND_RESET'
+                            send_monitor(context['monitor'], 'system_reset')
+                            reboot_phase = 'WAIT_RESET'
+                            time.sleep(5)
+                            reboot_phase = 'CONNECT_SSH'
+                            guest.connect(300)
+                            reboot_phase = 'CHECK_ENTWARE'
+                            guest.entware(marker)
+                            print('KAS WEB REBOOT: guest SSH and EXT4 persistence PASS',
+                                  flush=True)
+                        except Exception as error:
+                            # An explicit stage separates a VM/controller reset
+                            # problem from an actual Web autostart regression.
+                            error_type = (
+                                'TIMEOUT' if isinstance(error, TimeoutError)
+                                else 'PROBE_ERROR' if isinstance(error, RuntimeError)
+                                else 'CONTROLLER_ERROR')
+                            print('KAS WEB REBOOT: FAIL at %s (%s)' %
+                                  (reboot_phase, error_type), flush=True)
+                            raise
                     completed['ok'] = lifecycle(
                         guest, tls, args.kas_ref, evidence, args.web_bin,
                         reboot=reboot_web)
