@@ -115,7 +115,10 @@ def lifecycle(guest, args, evidence, context, private, cameras):
             results.data['failed_probe'] = {'index': probe_number, 'exit_code': code,
                 'command_sha256': hashlib.sha256(text.encode()).hexdigest(),
                 'syntax_error': 'syntax error' in error.lower(),
-                'not_found': 'not found' in error.lower()}
+                'not_found': 'not found' in error.lower(),
+                'operation': text.split()[0],
+                'unsupported_option': any(word in error.lower() for word in ('invalid option', 'unrecognized option', 'illegal option')),
+                'missing_path': 'no such file' in error.lower()}
             results.write()
             print('KNVR probe failed: index=%d exit=%d' % (probe_number, code), flush=True)
             raise RuntimeError('native probe failed')
@@ -239,8 +242,11 @@ def lifecycle(guest, args, evidence, context, private, cameras):
         probe = {'fd_path_open_exit': open_exit(active),
                  'logical_path_open_exit': open_exit(logical),
                  'same_path': active == logical}
-        command('kill -STOP ' + active_pid + '; touch -t 202001010000 ' + q(active))
+        results.data['open_segment_diagnostics'] = probe
+        results.write()
+        command('kill -STOP ' + active_pid)
         try:
+            command('/opt/bin/busybox touch -t 202001010000 ' + q(active))
             code, _, _ = guest.execute('sh /opt/etc/nvr-v2.sh cleanup', timeout=90)
             retained, _, _ = guest.execute('test -s ' + q(active))
             probe.update(cleanup_exit=code, retained=retained == 0)
@@ -272,7 +278,7 @@ def lifecycle(guest, args, evidence, context, private, cameras):
                                     (middle, 40, 20), (young, 1, 2)):
                 stamp = time.strftime('%Y%m%d%H%M.%S', time.gmtime(time.time() - hours * 3600))
                 command('dd if=/dev/zero of=' + q(path) + ' bs=1048576 count=' + str(mb) +
-                              ' 2>/dev/null && touch -t ' + stamp + ' ' + q(path))
+                              ' 2>/dev/null && /opt/bin/busybox touch -t ' + stamp + ' ' + q(path))
             before = command('sha256sum ' + ' '.join(map(q, (old, middle, young))))
             run('cleanup --dry-run')
             assert command('sha256sum ' + ' '.join(map(q, (old, middle, young)))) == before
