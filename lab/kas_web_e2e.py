@@ -9,7 +9,7 @@ from pathlib import Path
 import shlex
 import time
 
-from lab.kas_lifecycle import install
+from lab.kas_lifecycle import install, prepare
 from lab.kas_lifecycle import put
 
 
@@ -62,6 +62,14 @@ def post(guest, source):
 
 def lifecycle(guest, mirror, revision, evidence, web_binary):
     evidence.check('KAS_WEB_IMPORT', 'NOT_TESTED', 'unattempted')
+    # Match the proven normal KAS lifecycle: trusted pinned sources and
+    # guest TLS mapping must be prepared BEFORE any real installer invocation.
+    try:
+        prepare(guest, mirror, revision)
+    except Exception:
+        evidence.set('KAS_INSTALL', 'BLOCKED', 'verified_tls_source_failed')
+        evidence.check('KAS_WEB_IMPORT', 'BLOCKED', 'prerequisite_blocked')
+        return False
     if not install(guest, mirror, revision, evidence):
         evidence.check('KAS_WEB_IMPORT', 'BLOCKED', 'prerequisite_blocked')
         return False
