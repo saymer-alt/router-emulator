@@ -233,12 +233,28 @@ def lifecycle(guest, args, evidence, context, private, cameras):
             time.sleep(1)
         if not active:
             raise RuntimeError('actual nonempty open segment unavailable')
+        logical = base + '/cam101/' + active.rsplit('/', 1)[-1]
+        def open_exit(path):
+            return guest.execute('NVR_LIB_ONLY=1; export NVR_LIB_ONLY; . /opt/etc/nvr-v2.sh; segment_open ' + q(path) + ' 101')[0]
+        probe = {'fd_path_open_exit': open_exit(active),
+                 'logical_path_open_exit': open_exit(logical),
+                 'same_path': active == logical}
         command('kill -STOP ' + active_pid + '; touch -t 202001010000 ' + q(active))
         try:
-            run('cleanup')
-            command('test -s ' + q(active))
+            code, _, _ = guest.execute('sh /opt/etc/nvr-v2.sh cleanup', timeout=90)
+            retained, _, _ = guest.execute('test -s ' + q(active))
+            probe.update(cleanup_exit=code, retained=retained == 0)
+            results.data['open_segment_diagnostics'] = probe
+            results.write()
+            print('KNVR open segment probe: ' + json.dumps(probe, sort_keys=True), flush=True)
+            if retained != 0:
+                raise RuntimeError('open segment was removed')
+            if code != 0:
+                raise RuntimeError('open-segment cleanup returned nonzero')
         finally:
-            command('kill -CONT ' + active_pid)
+            continued, _, _ = guest.execute('kill -CONT ' + active_pid)
+            if continued != 0:
+                raise RuntimeError('recorder did not resume after open-segment probe')
         results.mark(current, 'PASS')
         run('stop')
         # Closed synthetic segments are test data, never production video.
