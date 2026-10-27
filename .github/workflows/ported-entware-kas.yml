@@ -38,7 +38,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ported-lab-${{ github.ref }}
+  group: ported-lab-${{ github.ref }}-${{ inputs.stage || 'kas' }}
   cancel-in-progress: true
 
 jobs:
