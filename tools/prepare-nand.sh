@@ -2,7 +2,7 @@
 # Download official OpenWrt images for an MT7981 or MT7986 device and build a
 # NAND folder for the emulator.
 #
-#   tools/prepare-nand.sh [--stock DIR] [--flash-mb 128|256|512] PROFILE [VERSION] [OUTDIR]
+#   tools/prepare-nand.sh [--stock DIR] [--flash-type T --flash-id ID] PROFILE [VERSION] [OUTDIR]
 #
 #     PROFILE  OpenWrt device profile, e.g. cudy_wr3000p-v1, netis_nx31
 #              (see the target's profiles.json).  The OpenWrt BL2 + U-Boot
@@ -20,8 +20,14 @@
 #     --stock DIR     keep the vendor bootloader: DIR holds dumps of the
 #                     vendor BL2 (*mtd0*.bin) and FIP (*FIP*.bin or *mtd4*.bin), and may
 #                     hold the OpenWrt *sysupgrade.bin to use
-#     --flash-mb N    flash size (default 128; 256 for W25N02KV boards, 512
-#                     for W25N04KV)
+#     --flash-type T  (nand, nor, parallel-nand, emmc; default nand)
+#     --flash-id ID --flash-mb N --flash2-id ID --flash2-mb N
+#                     the flash chips as in the preset: their sizes come
+#                     from QEMU's chip table (hw/arm/filogic/flash_chips.h:
+#                     src/qemu, else its patch in qemu-patches/), --flash-mb
+#                     (the size of the --flash-type chip, e.g. 256 for a
+#                     W25N02KV SPI-NAND) for an ID that is not in it; the
+#                     second chip is of the other type
 #     --no-bdinfo     layout without bdinfo (FIP 0x380000, ubi 0x580000;
 #                     MACs in Factory), e.g. netis boards
 #     --local DIR     use the images in DIR (own builds, same names as
@@ -38,11 +44,12 @@
 #                     factory (MAC at 0xe000), firmware = sysupgrade.bin;
 #                     with --stock DIR: Xiaomi-layout parallel NAND board
 #                     (e.g. xiaomi_mi-router-3g / -4, machine option
-#                     flash=nand): DIR holds the bootloader (*mtd0*.bin or
-#                     *Bootloader*.bin: stock U-Boot or Breed) and may hold
-#                     a factory dump (*factory*.bin, Wi-Fi calibration; its
-#                     MACs are replaced); OpenWrt squashfs-kernel1.bin and
-#                     squashfs-rootfs0.bin go to "kernel" / "ubi"
+#                     flash-type=parallel-nand): DIR holds the bootloader
+#                     (*mtd0*.bin or *Bootloader*.bin: stock U-Boot or
+#                     Breed) and may hold a factory dump (*factory*.bin,
+#                     Wi-Fi calibration; its MACs are replaced); OpenWrt
+#                     squashfs-kernel1.bin and squashfs-rootfs0.bin go to
+#                     "kernel" / "ubi"
 #                     with --stock DIR --nor: NOR board with its vendor
 #                     U-Boot (e.g. cudy_wr1300s): DIR holds u-boot
 #                     (*mtd0*.bin or *u-boot*.bin), factory and may hold
@@ -63,7 +70,7 @@
 #                     BL2 at 0, UBI from 0x200000 with the FIP as volume "fip"
 #     --ubi-factory N Factory as UBI volume "factory" of N bytes (e.g. Asus
 #                     ZenWiFi BT8: the MACs and Wi-Fi EEPROM are read from it)
-#     --emmc          eMMC board (machine option flash=emmc, e.g.
+#     --emmc          eMMC board (machine option flash-type=emmc, e.g.
 #                     glinet_gl-mt6000): OUTDIR (default emmc-NAME) gets
 #                     one image SOC.emmc.img built by tools/mkemmc.py from
 #                     preloader.bin, bl31-uboot.fip, squashfs-factory.bin
@@ -72,7 +79,7 @@
 #                     (*fip*.bin) and, if there, Factory and boot1 dumps
 #     --emmc-layout L eMMC GPT layout of tools/mkemmc.py (default
 #                     gl-mt6000; wh3000-pro: Huasifei WH3000 Pro eMMC)
-#     --nor-nand B    SPI-NOR + SPI-NAND board (machine option nor-nand=on):
+#     --nor-nand B    SPI-NOR + SPI-NAND board (machine option flash2-id):
 #                     OUTDIR (default nor-NAME) gets the NOR partition files,
 #                     OUTDIR/nand the NAND ones.  B = rutc50: Teltonika
 #                     layout, OpenWrt MT7981 RFB SPI-NOR BL2 + the U-Boot of
@@ -92,10 +99,11 @@ set -e
 cd "$(dirname "$(readlink -f "$0")")/.."
 STOCK=
 LOCAL=
-MB=128
+MB=
 LAYOUT=
 NOR=
-NORMB=16
+NORMB=
+CTYPE=nand; CID=; CMB=; C2ID=; C2MB=
 SOC=mt7981
 EMMC=
 UBIFIP=
@@ -105,11 +113,15 @@ NORNAND=
 while [ $# -gt 0 ]; do
     case $1 in
     --stock) STOCK=$2; shift 2 ;;
-    --flash-mb) MB=$2; shift 2 ;;
     --local) LOCAL=$2; shift 2 ;;
     --no-bdinfo) LAYOUT=--no-bdinfo; shift ;;
     --nor) NOR=1; shift ;;
-    --nor-mb) NORMB=${2:-16}; shift 2 ;;    # empty: preset without nor=
+    --nor-mb) NORMB=$2; shift 2 ;;
+    --flash-type) CTYPE=$2; shift 2 ;;
+    --flash-id) CID=$2; shift 2 ;;
+    --flash-mb) CMB=$2; shift 2 ;;
+    --flash2-id) C2ID=$2; shift 2 ;;
+    --flash2-mb) C2MB=$2; shift 2 ;;
     --soc) SOC=$2; shift 2 ;;
     --emmc) EMMC=1; shift ;;
     --emmc-layout) ELAYOUT=$2; shift 2 ;;
@@ -118,11 +130,37 @@ while [ $# -gt 0 ]; do
     --ubi-fip) LAYOUT="--parts BL2:0x200000,ubi:-"; UBIFIP=--fip-in-ubi; shift ;;
     --ubi-factory) UBIFAC="--factory-volume $2"; shift 2 ;;
     --parts) LAYOUT="--parts $2"; shift 2 ;;
-    -h|--help) sed -n '2,90p' "$0"; exit 0 ;;
+    -h|--help) awk 'NR > 1 && !/^#/ { exit } NR > 1' "$0"; exit 0 ;;
     *) break ;;
     esac
 done
-P=${1:?usage: tools/prepare-nand.sh [--stock DIR] [--flash-mb N] PROFILE [VERSION] [OUTDIR]}
+P=${1:?usage: tools/prepare-nand.sh [--stock DIR] [--flash-type T --flash-id ID] PROFILE [VERSION] [OUTDIR]}
+
+# size of a chip in QEMU's table: TYPE (nor/nand/parallel-nand) [ID] ->
+# MB, without an ID the default (first) chip of the type; empty: not listed
+chip_mb() {
+    local src=src/qemu/hw/arm/filogic/flash_chips.h e
+    [ -f "$src" ] || src=$(grep -l '^+++ b/hw/arm/filogic/flash_chips.h' qemu-patches/*.patch | head -1)
+    case $1 in nor) e=CHIP_NOR ;; nand) e=CHIP_NAND ;; parallel-nand) e=CHIP_PARALLEL_NAND ;; esac
+    awk -v e="$e," -v id="\"${2,,}\"," '{ sub(/^\+/, "") }
+        $1 == "{" && $2 == e && (id == "\"\"," || $3 == id) { sub(/ .*/, "", $4); print $4 + 0; exit }' "$src"
+}
+# the sizes of the preset's chips: SPI-NAND -> MB, SPI-NOR -> NORMB
+if [ "$CTYPE" != emmc ]; then
+    for c in 1 2; do
+        if [ $c = 1 ]; then t=$CTYPE id=$CID mb=$CMB
+        else [ -n "$C2ID$C2MB" ] || break
+             t=$([ "$CTYPE" = nor ] && echo nand || echo nor) id=$C2ID mb=$C2MB; fi
+        [ -n "$mb" ] || mb=$(chip_mb "$t" "$id")
+        [ -n "$mb" ] || { echo "flash $t $id is not in QEMU's table: give --flash${c#1}-mb" >&2; exit 1; }
+        case $t in
+        nor) NORMB=${NORMB:-$mb} ;;
+        nand) MB=${MB:-$mb} ;;
+        esac
+    done
+fi
+MB=${MB:-128}
+NORMB=${NORMB:-16}
 V=${2:-snapshot}
 NAME=${P#*_}; NAME=${NAME%-v1}
 OUT=${3:-$([ -n "$NOR$NORNAND" ] || { [ "$SOC" = mt7621 ] && [ -z "$STOCK" ]; } && echo nor || { [ -n "$EMMC" ] && echo emmc; } || echo nand)-$NAME}

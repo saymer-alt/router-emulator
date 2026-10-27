@@ -6,7 +6,7 @@ console strings in order, optionally send input, always clean up.
            [--qemu "ARGS"] STEP...
 
 -P takes the board hardware from presets/PRESET.ini (default
-cudy-wr3000p-v1) and -n the NAND folder (default: the preset's nand-dir);
+cudy-wr3000p-v1) and -n the dump folder (default: the preset's dump-dir);
 -M replaces both with a complete machine option string; -o k=v,... adds or
 overrides machine options of the preset.
 
@@ -20,7 +20,7 @@ ap = argparse.ArgumentParser()
 ap.add_argument("--win", action="store_true", help="Windows build under Wine")
 ap.add_argument("--limit", type=int, default=300, help="hard limit, seconds")
 ap.add_argument("-P", default="cudy-wr3000p-v1", help="board preset")
-ap.add_argument("-n", help="NAND folder (default: the preset's nand-dir)")
+ap.add_argument("-n", help="dump folder (default: the preset's dump-dir)")
 ap.add_argument("-M", help="complete -M string (overrides -P/-n)")
 ap.add_argument("-o", default="", help="machine options on top of the preset, k=v,k=v")
 ap.add_argument("--log", default=ROOT + "/work/quick.log")
@@ -43,7 +43,7 @@ def preset_args(name, nand):
             ram = v
         elif k == "soc":
             soc = v
-        elif k == "nand-dir":
+        elif k == "dump-dir":
             ndir = v
         else:
             opts.append(f"{k}={v}")
@@ -53,7 +53,7 @@ def preset_args(name, nand):
     nand = nand or os.path.join(ROOT, ndir)
     if a.win:
         nand = "Z:" + os.path.abspath(nand).replace("/", "\\")
-    return ["-M", ",".join([soc + "-router", "nand-dir=" + nand.replace(",", ",,")] + opts),
+    return ["-M", ",".join([soc + "-router", "dump-dir=" + nand.replace(",", ",,")] + opts),
             "-m", ram + "M"]
 
 port = 46000 + os.getpid() % 1000

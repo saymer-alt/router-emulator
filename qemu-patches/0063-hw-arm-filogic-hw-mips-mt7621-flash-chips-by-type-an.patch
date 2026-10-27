@@ -1,0 +1,988 @@
+From 59dbef0cdbd73ed29e12d5072fda9963a44ae899 Mon Sep 17 00:00:00 2001
+From: Dmitry Mostovoy <stavultras@gmail.com>
+Date: Tue, 27 Oct 2026 07:33:39 -0400
+Subject: [PATCH] hw/arm/filogic, hw/mips/mt7621: flash chips by type and ID
+
+The flash options become flash-type (nand, nor, emmc; MT7621: nor,
+parallel-nand), flash-id, flash-mb, flash-uid and, for SPI-NOR +
+SPI-NAND boards, flash2-id / flash2-mb / flash2-uid (the other type);
+dump-dir replaces nand-dir.  nand, nor, flash, nand-id, nor-id,
+nand-uid, nor-uid and nor-nand are gone.
+
+One table (flash_chips.h) gives the size of a known chip from its type
+and ID; an ID that is not listed needs flash-mb, a size that differs
+from the listed one is an error.  The type is never taken from the ID.
+Without flash-id the first chip of the type is used (W25N01GV,
+W25Q128JV, K9F1G08U0D), as before.  The flash-id help is built from the
+table.  flash-uid of a SPI-NOR is taken as Cudy firmware shows it (the
+bytes reversed) on both machines.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_012GbUcwR34gg9RgGTEtNN6J
+---
+ hw/arm/filogic/filogic_router.c | 278 +++++++++++++++-----------------
+ hw/arm/filogic/flash_chips.h    | 135 ++++++++++++++++
+ hw/mips/mt7621.c                | 224 +++++++++++--------------
+ 3 files changed, 365 insertions(+), 272 deletions(-)
+ create mode 100644 hw/arm/filogic/flash_chips.h
+
+diff --git a/hw/arm/filogic/filogic_router.c b/hw/arm/filogic/filogic_router.c
+index f47b4f0..c221f49 100644
+--- a/hw/arm/filogic/filogic_router.c
++++ b/hw/arm/filogic/filogic_router.c
+@@ -43,6 +43,7 @@
+ #include "net/net.h"
+ #include "filogic.h"
+ #include "filogic_leds.h"
++#include "flash_chips.h"
+ 
+ #define MAX_CPUS        4
+ #define MAX_LEDS        32
+@@ -246,7 +247,7 @@ struct RouterState {
+     SpiNandState *nand;
+     SpiNorState *nor;
+     DeviceState *eth;
+-    char *nand_dir;
++    char *dump_dir;             /* dump-dir: the partition dumps */
+     char *efuse_file, *efuse_uid;
+     char *nand_uid;
+     char *nand_id;              /* SPI-NAND JEDEC ID override (hex) */
+@@ -272,12 +273,16 @@ struct RouterState {
+     uint32_t nand_spi;          /* SPI controller of the SPI-NAND (0) */
+     int32_t switch_irq_pin;     /* EINT of the MT7531 interrupt, -1 = SoC's */
+     bool flash_nor;             /* boot flash: SPI-NOR on SPI2 */
+-    bool nor_nand;              /* SPI-NOR and SPI-NAND (nand-dir/nand) */
++    bool nor_nand;              /* SPI-NOR and SPI-NAND (dump-dir/nand) */
+     bool flash_emmc;            /* boot flash: eMMC on MSDC0 */
+     uint32_t emmc_boot_mb;      /* size of each eMMC boot partition */
+     BlockBackend *emmc;         /* eMMC image: boot0, boot1, user area */
+     uint32_t nor_mb;            /* NOR size */
+     char *nor_id;               /* JEDEC ID, 6 hex digits */
++    char *nor_uid;              /* unique ID, as Cudy firmware shows it */
++    /* flash-type / flash-* / flash2-* as given (router_flash_config) */
++    char *flash_type, *flash_id, *flash_uid, *flash2_id, *flash2_uid;
++    uint32_t flash_mb, flash2_mb;
+     uint32_t ddr;               /* 3 or 4 */
+     uint32_t usb;               /* 0 = none, 2 = USB 2.0, 3 = USB 3.0 */
+     char *usb_host;             /* passed through host devices VID:PID;... */
+@@ -301,16 +306,6 @@ static void router_set_reset_ah(Object *obj, bool v, Error **errp)
+     ROUTER_MACHINE(obj)->reset_active_high = v;
+ }
+ 
+-static bool router_get_nor_nand(Object *obj, Error **errp)
+-{
+-    return ROUTER_MACHINE(obj)->nor_nand;
+-}
+-
+-static void router_set_nor_nand(Object *obj, bool v, Error **errp)
+-{
+-    ROUTER_MACHINE(obj)->nor_nand = v;
+-}
+-
+ static bool router_get_wps_ah(Object *obj, Error **errp)
+ {
+     return ROUTER_MACHINE(obj)->wps_active_high;
+@@ -393,30 +388,6 @@ static void router_set_pcie_wifi(Object *obj, const char *value, Error **errp)
+     b->pcie_wifi = g_strdup(value);
+ }
+ 
+-static char *router_get_nand_uid(Object *obj, Error **errp)
+-{
+-    return g_strdup(ROUTER_MACHINE(obj)->nand_uid);
+-}
+-
+-static void router_set_nand_uid(Object *obj, const char *value, Error **errp)
+-{
+-    RouterState *b = ROUTER_MACHINE(obj);
+-    g_free(b->nand_uid);
+-    b->nand_uid = g_strdup(value);
+-}
+-
+-static char *router_get_nand_id(Object *obj, Error **errp)
+-{
+-    return g_strdup(ROUTER_MACHINE(obj)->nand_id);
+-}
+-
+-static void router_set_nand_id(Object *obj, const char *value, Error **errp)
+-{
+-    RouterState *b = ROUTER_MACHINE(obj);
+-    g_free(b->nand_id);
+-    b->nand_id = g_strdup(value);
+-}
+-
+ static char *router_get_efuse(Object *obj, Error **errp)
+ {
+     return g_strdup(ROUTER_MACHINE(obj)->efuse_file);
+@@ -441,18 +412,6 @@ static void router_set_efuse_uid(Object *obj, const char *value, Error **errp)
+     b->efuse_uid = g_strdup(value);
+ }
+ 
+-static char *router_get_nand_dir(Object *obj, Error **errp)
+-{
+-    return g_strdup(ROUTER_MACHINE(obj)->nand_dir);
+-}
+-
+-static void router_set_nand_dir(Object *obj, const char *value, Error **errp)
+-{
+-    RouterState *b = ROUTER_MACHINE(obj);
+-    g_free(b->nand_dir);
+-    b->nand_dir = g_strdup(value);
+-}
+-
+ static RouterState *the_board;
+ 
+ static qemu_irq spi_irq(RouterState *b, int spi)
+@@ -760,19 +719,19 @@ static void create_emmc(RouterState *b)
+ 
+     if (dinfo) {
+         b->emmc = blk_by_legacy_dinfo(dinfo);
+-    } else if (b->nand_dir) {
+-        g_autoptr(GDir) dir = g_dir_open(b->nand_dir, 0, NULL);
++    } else if (b->dump_dir) {
++        g_autoptr(GDir) dir = g_dir_open(b->dump_dir, 0, NULL);
+         const char *name;
+         g_autofree char *path = NULL;
+ 
+         while (dir && (name = g_dir_read_name(dir))) {
+             if (g_str_has_suffix(name, ".img")) {
+-                path = g_build_filename(b->nand_dir, name, NULL);
++                path = g_build_filename(b->dump_dir, name, NULL);
+                 break;
+             }
+         }
+         if (!path) {
+-            error_report("flash=emmc: no *.img eMMC image in %s", b->nand_dir);
++            error_report("flash-type=emmc: no *.img eMMC image in %s", b->dump_dir);
+             exit(1);
+         }
+         QDict *opts = qdict_new();
+@@ -784,7 +743,7 @@ static void create_emmc(RouterState *b)
+         }
+         info_report("eMMC: %s (boot partitions %u MB)", path, b->emmc_boot_mb);
+     } else {
+-        error_report("flash=emmc needs an image (-M ...,nand-dir=DIR with "
++        error_report("flash-type=emmc needs an image (-M ...,dump-dir=DIR with "
+                      "DIR/*.img, or -drive if=sd,format=raw,file=IMG)");
+         exit(1);
+     }
+@@ -932,6 +891,50 @@ static void create_eth(RouterState *b, DeviceState *pinctrl)
+     b->eth = dev;
+ }
+ 
++/*
++ * The flash chips: flash-type (default nand) with flash-id / flash-mb /
++ * flash-uid, and with any flash2-* option the second chip of SPI-NOR +
++ * SPI-NAND boards, of the other type
++ */
++static void router_flash_config(RouterState *b)
++{
++    int type = b->flash_type ? flash_chip_type(b->flash_type) : CHIP_NAND;
++
++    if (type != CHIP_NOR && type != CHIP_NAND && type != CHIP_EMMC) {
++        error_report("flash-type must be nand, nor or emmc");
++        exit(1);
++    }
++    if (type == CHIP_EMMC) {
++        if (b->flash_id || b->flash_mb || b->flash_uid ||
++            b->flash2_id || b->flash2_mb || b->flash2_uid) {
++            error_report("flash-type=emmc takes no flash-* / flash2-* options");
++            exit(1);
++        }
++        b->flash_emmc = true;
++        return;
++    }
++    b->flash_nor = type == CHIP_NOR;
++    b->nor_nand = b->flash2_id || b->flash2_mb || b->flash2_uid;
++    for (int second = 0; second <= b->nor_nand; second++) {
++        bool nor = b->flash_nor != second;
++        char **id = second ? &b->flash2_id : &b->flash_id;
++        uint32_t *mb = second ? &b->flash2_mb : &b->flash_mb;
++        char *uid = second ? b->flash2_uid : b->flash_uid;
++
++        flash_chip_resolve(second ? "flash2" : "flash",
++                           nor ? CHIP_NOR : CHIP_NAND, id, mb);
++        if (nor) {
++            b->nor_id = *id;
++            b->nor_mb = *mb;
++            b->nor_uid = uid;
++        } else {
++            b->nand_id = *id;
++            b->nand_mb = *mb;
++            b->nand_uid = uid;
++        }
++    }
++}
++
+ static void router_init(MachineState *machine)
+ {
+     RouterState *b = ROUTER_MACHINE(machine);
+@@ -951,8 +954,10 @@ static void router_init(MachineState *machine)
+         error_report("RAM size must be 128M, 256M, 512M, 1G or 2G");
+         exit(1);
+     }
+-    if (b->nand_mb != 128 && b->nand_mb != 256 && b->nand_mb != 512) {
+-        error_report("nand must be 128, 256 or 512 (MB)");
++    router_flash_config(b);
++    if ((!b->flash_nor || b->nor_nand) && !b->flash_emmc &&
++        b->nand_mb != 128 && b->nand_mb != 256 && b->nand_mb != 512) {
++        error_report("a SPI-NAND has 128, 256 or 512 MB (flash-mb)");
+         exit(1);
+     }
+ 
+@@ -1074,23 +1079,19 @@ static void router_init(MachineState *machine)
+          */
+         dev = qdev_new(TYPE_MTK_SPINOR);
+         qdev_prop_set_uint32(dev, "size-mb", b->nor_mb);
+-        if (b->nor_id) {
+-            unsigned long id = strtoul(b->nor_id, NULL, 16);
+-            if (strlen(b->nor_id) != 6 || !id) {
+-                error_report("nor-id must be 6 hex digits, e.g. 204018");
+-                exit(1);
+-            }
+-            qdev_prop_set_uint8(dev, "id0", id >> 16);
+-            qdev_prop_set_uint8(dev, "id1", id >> 8);
+-            qdev_prop_set_uint8(dev, "id2", id);
++        qdev_prop_set_string(dev, "id", b->nor_id);
++        if (b->nor_uid) {
++            g_autofree char *uid = flash_chip_nor_uid(b->nor_uid);
++
++            qdev_prop_set_string(dev, "uid", uid);
+         }
+-        if (b->nand_dir) {
+-            qdev_prop_set_string(dev, "dir", b->nand_dir);
++        if (b->dump_dir) {
++            qdev_prop_set_string(dev, "dir", b->dump_dir);
+         } else if (dinfo && b->flash_nor) {
+             qdev_prop_set_drive_err(dev, "drive", blk_by_legacy_dinfo(dinfo),
+                                     &error_fatal);
+         } else {
+-            warn_report("no flash given (-M <board>,nand-dir=DIR or "
++            warn_report("no flash given (-M <board>,dump-dir=DIR or "
+                         "-drive if=mtd,format=raw,file=NOR_IMAGE), "
+                         "using an erased flash");
+         }
+@@ -1104,7 +1105,7 @@ static void router_init(MachineState *machine)
+             goto flash_done;
+         }
+         if (b->nand_spi == b->soc->nor_spi) {
+-            error_report("nor-nand: the SPI-NOR is on SPI%d, set nand-spi",
++            error_report("flash2-*: the SPI-NOR is on SPI%d, set nand-spi",
+                          b->nand_spi);
+             exit(1);
+         }
+@@ -1138,7 +1139,7 @@ static void router_init(MachineState *machine)
+ 
+         if (n < 4 || n > 16 || n % 2 ||
+             strspn(b->nand_id, "0123456789abcdefABCDEF") != n) {
+-            error_report("nand-id must be 2 to 8 bytes in hex, e.g. "
++            error_report("flash-id of a SPI-NAND: 2 to 8 bytes in hex, e.g. "
+                          "c8017f7f7f");
+             exit(1);
+         }
+@@ -1151,17 +1152,17 @@ static void router_init(MachineState *machine)
+         }
+         qdev_prop_set_uint32(dev, "id-len", n);
+     }
+-    if (b->nand_dir && b->nor_nand) {
++    if (b->dump_dir && b->nor_nand) {
+         /* the SPI-NAND next to a SPI-NOR */
+-        g_autofree char *d = g_build_filename(b->nand_dir, "nand", NULL);
++        g_autofree char *d = g_build_filename(b->dump_dir, "nand", NULL);
+         qdev_prop_set_string(dev, "dir", d);
+-    } else if (b->nand_dir) {
+-        qdev_prop_set_string(dev, "dir", b->nand_dir);
++    } else if (b->dump_dir) {
++        qdev_prop_set_string(dev, "dir", b->dump_dir);
+     } else if (dinfo && !b->nor_nand) {
+         qdev_prop_set_drive_err(dev, "drive", blk_by_legacy_dinfo(dinfo),
+                                 &error_fatal);
+     } else {
+-        warn_report("no NAND given (-M <board>,nand-dir=DIR or "
++        warn_report("no NAND given (-M <board>,dump-dir=DIR or "
+                     "-drive if=mtd,format=raw,file=RAW_WITH_OOB), "
+                     "using an erased flash");
+     }
+@@ -1351,6 +1352,27 @@ static void router_set_u32(Object *obj, Visitor *v, const char *name,
+                       errp);
+ }
+ 
++static void router_get_str(Object *obj, Visitor *v, const char *name,
++                           void *opaque, Error **errp)
++{
++    char **field = (char **)((char *)obj + (uintptr_t)opaque);
++    g_autofree char *value = g_strdup(*field ? *field : "");
++
++    visit_type_str(v, name, &value, errp);
++}
++
++static void router_set_str(Object *obj, Visitor *v, const char *name,
++                           void *opaque, Error **errp)
++{
++    char **field = (char **)((char *)obj + (uintptr_t)opaque);
++    char *value;
++
++    if (visit_type_str(v, name, &value, errp)) {
++        g_free(*field);
++        *field = value;
++    }
++}
++
+ static void router_get_i32(Object *obj, Visitor *v, const char *name,
+                            void *opaque, Error **errp)
+ {
+@@ -1465,39 +1487,6 @@ static void router_set_usb(Object *obj, const char *value, Error **errp)
+     }
+ }
+ 
+-static char *router_get_flash(Object *obj, Error **errp)
+-{
+-    RouterState *b = ROUTER_MACHINE(obj);
+-
+-    return g_strdup(b->flash_emmc ? "emmc" : b->flash_nor ? "nor" : "nand");
+-}
+-
+-static void router_set_flash(Object *obj, const char *value, Error **errp)
+-{
+-    RouterState *b = ROUTER_MACHINE(obj);
+-
+-    b->flash_nor = b->flash_emmc = false;
+-    if (!strcmp(value, "nor")) {
+-        b->flash_nor = true;
+-    } else if (!strcmp(value, "emmc")) {
+-        b->flash_emmc = true;
+-    } else if (strcmp(value, "nand")) {
+-        error_setg(errp, "flash must be nand, nor or emmc");
+-    }
+-}
+-
+-static char *router_get_nor_id(Object *obj, Error **errp)
+-{
+-    return g_strdup(ROUTER_MACHINE(obj)->nor_id);
+-}
+-
+-static void router_set_nor_id(Object *obj, const char *value, Error **errp)
+-{
+-    RouterState *b = ROUTER_MACHINE(obj);
+-    g_free(b->nor_id);
+-    b->nor_id = g_strdup(value);
+-}
+-
+ static char *router_get_poweroff(Object *obj, Error **errp)
+ {
+     return g_strdup(ROUTER_MACHINE(obj)->poweroff_reboot ? "reboot" : "stop");
+@@ -1556,8 +1545,6 @@ static void router_instance_init(Object *obj)
+     b->port5_reset_gpio = -1;
+     b->ports = g_strdup("lan1:lan2:lan3:lan4");
+     b->pan = true;
+-    b->nand_mb = 128;
+-    b->nor_mb = 16;
+     b->emmc_boot_mb = 4;
+     b->switch_irq_pin = -1;
+     b->ddr = 4;
+@@ -1571,6 +1558,11 @@ static void router_instance_init(Object *obj)
+             router_set_u32, NULL, (void *)offsetof(RouterState, field)); \
+         object_class_property_set_description(oc, name, desc); \
+     } while (0)
++#define ADD_STR(name, field, desc) do { \
++        object_class_property_add(oc, name, "str", router_get_str, \
++            router_set_str, NULL, (void *)offsetof(RouterState, field)); \
++        object_class_property_set_description(oc, name, desc); \
++    } while (0)
+ 
+ static void router_class_init(ObjectClass *oc, const void *data)
+ {
+@@ -1615,17 +1607,6 @@ static void router_class_init(ObjectClass *oc, const void *data)
+             "card in the PCIe slot of MT7987 boards: none (default) or "
+             "mt7992 (Wi-Fi 7, driver kmod-mt7996e, firmware "
+             "kmod-mt7992-firmware)");
+-    object_class_property_add_str(oc, "nand-uid", router_get_nand_uid,
+-                                  router_set_nand_uid);
+-    object_class_property_set_description(oc, "nand-uid",
+-            "32 hex digits: SPI-NAND unique ID (OTP page 0; default derived "
+-            "from the flash folder)");
+-    object_class_property_add_str(oc, "nand-id", router_get_nand_id,
+-                                  router_set_nand_id);
+-    object_class_property_set_description(oc, "nand-id",
+-            "SPI-NAND READ ID bytes in hex, 2 to 8 (default efaa21, Winbond "
+-            "W25N01GV), e.g. c8017f7f7f = ESMT F50L1G41LB: the chip of the "
+-            "real board, for vendor firmware that checks it");
+     object_class_property_add_str(oc, "efuse", router_get_efuse,
+                                   router_set_efuse);
+     object_class_property_set_description(oc, "efuse",
+@@ -1635,11 +1616,6 @@ static void router_class_init(ObjectClass *oc, const void *data)
+     object_class_property_set_description(oc, "efuse-uid",
+             "32 hex digits: the per-chip eFuse block, so several "
+             "emulated boards are not identical");
+-    object_class_property_add_str(oc, "nand-dir", router_get_nand_dir,
+-                                  router_set_nand_dir);
+-    object_class_property_set_description(oc, "nand-dir",
+-        "Directory with NAND partition dumps (*-mtd0.*.bin, *-mtd1.*.bin, "
+-        "...) concatenated in mtd order to form the flash");
+     object_class_property_add_bool(oc, "gpio-log", router_get_gpio_log,
+                                    router_set_gpio_log);
+     object_class_property_set_description(oc, "gpio-log",
+@@ -1707,28 +1683,46 @@ static void router_class_init(ObjectClass *oc, const void *data)
+     object_class_property_set_description(oc, "ports",
+         "netdev ids of MT7531 ports 0..4 and 5 (with port5=...), "
+         "':' separated, '-' = unused (e.g. wan:lan1:lan2:lan3:lan4)");
+-    ADD_U32("nand", nand_mb, "SPI-NAND size in MB: 128 (W25N01GV), 256 "
+-            "(W25N02KV) or 512 (W25N04KV)");
+     object_class_property_add_str(oc, "poweroff", router_get_poweroff,
+                                   router_set_poweroff);
+     object_class_property_set_description(oc, "poweroff",
+         "stop (default): the emulator ends when Linux powers off; reboot: "
+         "like a real MT7981, whose firmware cannot power down and resets");
+-    object_class_property_add_str(oc, "flash", router_get_flash,
+-                                  router_set_flash);
+-    object_class_property_set_description(oc, "flash",
+-        "Boot flash: nand (SPI-NAND on SPI0, default), nor (SPI-NOR on "
+-        "SPI2, MT7986: SPI0) or emmc (eMMC on MSDC0); nand-dir / -drive "
+-        "if=mtd (if=sd for eMMC) give its contents");
++    ADD_STR("dump-dir", dump_dir,
++        "Directory with the partition dumps (*-mtd0.*.bin, *-mtd1.*.bin, "
++        "...) concatenated in mtd order to form the flash; SPI-NOR + "
++        "SPI-NAND: the NOR ones, its folder \"nand\" the NAND ones; eMMC: "
++        "the *.img image");
++    ADD_STR("flash-type", flash_type,
++        "Boot flash: nand (SPI-NAND on SPI0, default), nor (SPI-NOR on SPI2, "
++        "MT7986: SPI0) or emmc (eMMC on MSDC0); dump-dir / -drive if=mtd "
++        "(if=sd for eMMC) give its contents");
++    {
++        g_autofree char *nand = flash_chip_list(CHIP_NAND);
++        g_autofree char *nor = flash_chip_list(CHIP_NOR);
++        g_autofree char *desc = g_strdup_printf(
++            "READ ID bytes of the boot flash chip, hex (default: the first "
++            "of its type); listed, with their size: SPI-NAND %s; SPI-NOR "
++            "%s; other IDs need flash-mb", nand, nor);
++
++        ADD_STR("flash-id", flash_id, desc);
++    }
++    ADD_U32("flash-mb", flash_mb,
++        "Size of the boot flash chip in MB, for a flash-id that is not "
++        "listed (SPI-NAND: 128, 256 or 512)");
++    ADD_STR("flash-uid", flash_uid,
++        "Unique ID of the boot flash chip, hex: SPI-NAND 32 digits (OTP "
++        "page 0; default derived from the dump folder), SPI-NOR 16 digits "
++        "as Cudy firmware shows it (after the '-' of "
++        "/proc/sys/dev/flash_uuid)");
++    ADD_STR("flash2-id", flash2_id,
++        "A second chip of the other type (SPI-NOR + SPI-NAND, e.g. "
++        "Teltonika RUTC50, OpenWrt One): its READ ID, as flash-id");
++    ADD_U32("flash2-mb", flash2_mb, "Size of the second chip, as flash-mb");
++    ADD_STR("flash2-uid", flash2_uid, "Unique ID of the second chip, as flash-uid");
+     ADD_U32("emmc-boot", emmc_boot_mb,
+             "eMMC boot partition size in MB (default 4), image = boot0 + "
+             "boot1 + user area");
+-    ADD_U32("nor", nor_mb, "SPI-NOR size in MB (default 16)");
+-    object_class_property_add_str(oc, "nor-id", router_get_nor_id,
+-                                  router_set_nor_id);
+-    object_class_property_set_description(oc, "nor-id",
+-        "SPI-NOR JEDEC ID, 6 hex digits (default ef4018 = Winbond "
+-        "W25Q128JV; 204018 = XMC XM25QH128C, c84018 = GigaDevice GD25Q128)");
+     object_class_property_add_str(oc, "ddr", router_get_ddr, router_set_ddr);
+     object_class_property_set_description(oc, "ddr",
+         "DRAM type: ddr3 or ddr4 (must match the preloader); size is -m");
+@@ -1751,12 +1745,6 @@ static void router_class_init(ObjectClass *oc, const void *data)
+         "GPIO/EINT the MT7531 interrupt is wired to (default: 38 on MT7981, "
+         "66 on MT7986, 41 on MT7987 boards)");
+     ADD_U32("wps-gpio", wps_gpio, "GPIO of the WPS (or mesh) button");
+-    object_class_property_add_bool(oc, "nor-nand", router_get_nor_nand,
+-                                   router_set_nor_nand);
+-    object_class_property_set_description(oc, "nor-nand",
+-        "SPI-NOR and SPI-NAND (e.g. Teltonika RUTC50, OpenWrt One): "
+-        "nand-dir holds the NOR partition files, its folder \"nand\" the "
+-        "NAND ones; flash=nor or nand selects the boot flash");
+     object_class_property_add_bool(oc, "reset-active-high", router_get_reset_ah,
+                                    router_set_reset_ah);
+     object_class_property_set_description(oc, "reset-active-high",
+diff --git a/hw/arm/filogic/flash_chips.h b/hw/arm/filogic/flash_chips.h
+new file mode 100644
+index 0000000..e28d35b
+--- /dev/null
++++ b/hw/arm/filogic/flash_chips.h
+@@ -0,0 +1,135 @@
++/*
++ * Flash chips of the router machines: flash-type + flash-id name the chip,
++ * a listed chip has its size here, an ID that is not listed needs flash-mb.
++ * The type is never taken from the ID: an ID is just the bytes the chip
++ * answers with, and a user may set any.  The first chip of a type is the
++ * default one (no flash-id).
++ *
++ * SPDX-License-Identifier: GPL-2.0-or-later
++ */
++
++#ifndef HW_FILOGIC_FLASH_CHIPS_H
++#define HW_FILOGIC_FLASH_CHIPS_H
++
++#include "qemu/error-report.h"
++
++typedef enum FlashChipType {
++    CHIP_NOR,                   /* SPI-NOR */
++    CHIP_NAND,                  /* SPI-NAND */
++    CHIP_PARALLEL_NAND,         /* MT7621 NFI */
++    CHIP_EMMC,
++} FlashChipType;
++
++static const char *const flash_chip_type_names[] = {
++    [CHIP_NOR] = "nor",
++    [CHIP_NAND] = "nand",
++    [CHIP_PARALLEL_NAND] = "parallel-nand",
++    [CHIP_EMMC] = "emmc",
++};
++
++static const struct FlashChip {
++    FlashChipType type;
++    const char *id;             /* READ ID / RDID bytes, hex, lower case */
++    uint32_t mb;
++} flash_chips[] = {
++    { CHIP_NOR, "ef4018", 16 },                 /* Winbond W25Q128JV */
++    { CHIP_NOR, "204018", 16 },                 /* XMC XM25QH128C/D */
++    { CHIP_NOR, "c84018", 16 },                 /* GigaDevice GD25Q128 */
++    { CHIP_NOR, "ef4019", 32 },                 /* Winbond W25Q256JV */
++    { CHIP_NOR, "ef4020", 64 },                 /* Winbond W25Q512JV */
++    { CHIP_NAND, "efaa21", 128 },               /* Winbond W25N01GV */
++    { CHIP_NAND, "c8017f7f7f", 128 },           /* ESMT F50L1G41LB */
++    { CHIP_NAND, "efaa22", 256 },               /* Winbond W25N02KV */
++    { CHIP_NAND, "efaa23", 512 },               /* Winbond W25N04KV */
++    { CHIP_PARALLEL_NAND, "ecf1009540", 128 },  /* Samsung K9F1G08U0D */
++    { CHIP_PARALLEL_NAND, "c2f18095", 128 },    /* Macronix MX30LF1G18AC */
++};
++
++/* "nor", "nand", "parallel-nand", "emmc" -> the type; -1: none of them */
++static inline int flash_chip_type(const char *s)
++{
++    for (int i = 0; i < ARRAY_SIZE(flash_chip_type_names); i++) {
++        if (!strcmp(s, flash_chip_type_names[i])) {
++            return i;
++        }
++    }
++    return -1;
++}
++
++/* the listed chips of a type for option help: "ef4018 (16 MB), ..." */
++static inline char *flash_chip_list(FlashChipType type)
++{
++    GString *g = g_string_new(NULL);
++
++    for (int i = 0; i < ARRAY_SIZE(flash_chips); i++) {
++        if (flash_chips[i].type == type) {
++            g_string_append_printf(g, "%s%s (%u MB)", g->len ? ", " : "",
++                                   flash_chips[i].id, flash_chips[i].mb);
++        }
++    }
++    return g_string_free(g, false);
++}
++
++/*
++ * The chip of the options <opt>-id / <opt>-mb (opt "flash" or "flash2"):
++ * without an ID the default chip of the type, without a size the listed
++ * one.  Exits on an unlisted ID without a size and on a size that is not
++ * the listed chip's.
++ */
++static inline void flash_chip_resolve(const char *opt, FlashChipType type,
++                                      char **id, uint32_t *mb)
++{
++    const struct FlashChip *c = NULL;
++
++    if (*id) {
++        char *low = g_ascii_strdown(*id, -1);
++
++        g_free(*id);
++        *id = low;
++    }
++    for (int i = 0; i < ARRAY_SIZE(flash_chips); i++) {
++        if (flash_chips[i].type == type &&
++            (!*id || !strcmp(*id, flash_chips[i].id))) {
++            c = &flash_chips[i];
++            break;
++        }
++    }
++    if (!*id) {
++        *id = g_strdup(c->id);
++    }
++    if (c && *mb && *mb != c->mb) {
++        error_report("%s-mb=%u: %s-id=%s is a %u MB %s chip", opt, *mb, opt,
++                     *id, c->mb, flash_chip_type_names[type]);
++        exit(1);
++    }
++    if (c) {
++        *mb = c->mb;
++    } else if (!*mb) {
++        error_report("%s-id=%s is not a known %s chip: give its size, "
++                     "%s-mb=MB", opt, *id, flash_chip_type_names[type], opt);
++        exit(1);
++    }
++}
++
++/*
++ * A SPI-NOR unique ID (command 4b) given as Cudy firmware shows it in
++ * /proc/sys/dev/flash_uuid: its kernel prints the bytes last first, the
++ * chip sends them in its own order.  Returns the "uid" of the SPI-NOR.
++ */
++static inline char *flash_chip_nor_uid(const char *shown)
++{
++    size_t n = strlen(shown);
++    char *uid = g_malloc0(n + 1);
++
++    if (n % 2) {
++        memcpy(uid, shown, n);
++        return uid;
++    }
++    for (size_t i = 0; i + 1 < n; i += 2) {
++        uid[n - i - 2] = shown[i];
++        uid[n - i - 1] = shown[i + 1];
++    }
++    return uid;
++}
++
++#endif
+diff --git a/hw/mips/mt7621.c b/hw/mips/mt7621.c
+index 9cd753c..b2a5128 100644
+--- a/hw/mips/mt7621.c
++++ b/hw/mips/mt7621.c
+@@ -33,6 +33,7 @@
+ #include "system/blockdev.h"
+ #include "../arm/filogic/filogic.h"
+ #include "../arm/filogic/filogic_leds.h"
++#include "../arm/filogic/flash_chips.h"
+ #include "mt7621_nand.h"
+ #include "mt7621_pcie.h"
+ #include "hw/mips/cps.h"
+@@ -305,11 +306,15 @@ typedef struct MT7621Board {
+ 
+     /* properties */
+     char *flash_dir;
+-    bool flash_nand;            /* flash=nand: boot from parallel NAND */
++    bool flash_nand;            /* flash-type=parallel-nand */
+     char *nand_id;              /* its READ ID bytes (hex) */
+     uint32_t nor_mb;            /* SPI-NOR size: 16, 32 or 64 MB */
+     char *nor_id;               /* SPI-NOR RDID bytes (hex) */
+     char *nor_uid;              /* SPI-NOR unique ID (hex) */
++    uint32_t nand_mb;           /* parallel NAND size */
++    /* flash-type / flash-* as given (mt7621_flash_config) */
++    char *flash_type, *flash_id, *flash_uid;
++    uint32_t flash_mb;
+     char *ports;                /* MT7530 port 0..4 netdev ids, ':' separated */
+     char *pcie_card[3];         /* device type in PCIe slot 0..2 */
+     uint32_t usb;               /* 0 = none, 2 = USB 2.0, 3 = USB 3.0 port */
+@@ -897,7 +902,8 @@ static void mt7621_reset(void *opaque)
+ 
+ /*
+  * Boot flash: SPI-NOR on SPI CS0 (a folder of partition dumps or a
+- * drive), or with flash=nand a parallel NAND on the NFI (partition dumps)
++ * drive), or with flash-type=parallel-nand a parallel NAND on the NFI
++ * (partition dumps)
+  */
+ static void mt7621_create_flash(MT7621Board *b)
+ {
+@@ -912,14 +918,13 @@ static void mt7621_create_flash(MT7621Board *b)
+ 
+     if (b->flash_nand) {
+         dev = qdev_new(TYPE_MT7621_NAND);
+-        if (b->nand_id) {
+-            qdev_prop_set_string(dev, "id", b->nand_id);
+-        }
++        qdev_prop_set_string(dev, "id", b->nand_id);
++        qdev_prop_set_uint32(dev, "size-mb", b->nand_mb);
+         if (b->flash_dir) {
+             qdev_prop_set_string(dev, "dir", b->flash_dir);
+         } else {
+-            warn_report("no flash given (-M mt7621-router,flash=nand,"
+-                        "nand-dir=DIR), using an erased NAND");
++            warn_report("no flash given (-M mt7621-router,flash-type="
++                        "parallel-nand,dump-dir=DIR), using an erased NAND");
+         }
+         sysbus_realize_and_unref(SYS_BUS_DEVICE(dev), &error_fatal);
+         sysbus_mmio_map(SYS_BUS_DEVICE(dev), 0, MT7621_NFI_BASE);
+@@ -939,28 +944,16 @@ static void mt7621_create_flash(MT7621Board *b)
+     }
+ 
+     if (b->nor_mb != 16 && b->nor_mb != 32 && b->nor_mb != 64) {
+-        error_report("nor must be 16, 32 or 64 (MB)");
++        error_report("the SPI-NOR has 16, 32 or 64 MB (flash-mb)");
+         exit(1);
+     }
+     dev = qdev_new(TYPE_MTK_SPINOR);
+     qdev_prop_set_uint32(dev, "size-mb", b->nor_mb);
+-    /* default: the Winbond chip of that size (W25Q128JV/256JV/512JV) */
+-    qdev_prop_set_string(dev, "id", b->nor_id ? b->nor_id
+-                         : b->nor_mb == 64 ? "ef4020"
+-                         : b->nor_mb == 32 ? "ef4019" : "ef4018");
++    qdev_prop_set_string(dev, "id", b->nor_id);
+     if (b->nor_uid) {
+-        /*
+-         * as Cudy's flash_uuid shows it: the stock kernel prints the bytes
+-         * of the unique ID last first, the chip sends them in reverse
+-         */
+-        size_t n = strlen(b->nor_uid);
+-        g_autofree char *uid = g_malloc0(n + 1);
++        g_autofree char *uid = flash_chip_nor_uid(b->nor_uid);
+ 
+-        for (size_t i = 0; i + 1 < n; i += 2) {
+-            uid[n - i - 2] = b->nor_uid[i];
+-            uid[n - i - 1] = b->nor_uid[i + 1];
+-        }
+-        qdev_prop_set_string(dev, "uid", n % 2 ? b->nor_uid : uid);
++        qdev_prop_set_string(dev, "uid", uid);
+     }
+     if (b->flash_dir) {
+         qdev_prop_set_string(dev, "dir", b->flash_dir);
+@@ -968,7 +961,7 @@ static void mt7621_create_flash(MT7621Board *b)
+         qdev_prop_set_drive_err(dev, "drive", blk_by_legacy_dinfo(dinfo),
+                                 &error_fatal);
+     } else {
+-        warn_report("no flash given (-M mt7621-router,nand-dir=DIR or "
++        warn_report("no flash given (-M mt7621-router,dump-dir=DIR or "
+                     "-drive if=mtd,format=raw,file=NOR_IMAGE), "
+                     "using an erased flash");
+     }
+@@ -1139,6 +1132,32 @@ static void mt7621_create_pcie(MT7621Board *b)
+     }
+ }
+ 
++/* the boot flash: flash-type (default nor) with flash-id / flash-mb / flash-uid */
++static void mt7621_flash_config(MT7621Board *b)
++{
++    int type = b->flash_type ? flash_chip_type(b->flash_type) : CHIP_NOR;
++
++    if (type != CHIP_NOR && type != CHIP_PARALLEL_NAND) {
++        error_report("flash-type: the MT7621 boots from a SPI-NOR (nor) or "
++                     "a parallel NAND (parallel-nand)");
++        exit(1);
++    }
++    flash_chip_resolve("flash", type, &b->flash_id, &b->flash_mb);
++    b->flash_nand = type == CHIP_PARALLEL_NAND;
++    if (b->flash_nand) {
++        if (b->flash_uid) {
++            error_report("flash-uid: the parallel NAND has no unique ID");
++            exit(1);
++        }
++        b->nand_id = b->flash_id;
++        b->nand_mb = b->flash_mb;
++    } else {
++        b->nor_id = b->flash_id;
++        b->nor_mb = b->flash_mb;
++        b->nor_uid = b->flash_uid;
++    }
++}
++
+ static void mt7621_init(MachineState *machine)
+ {
+     MT7621MachineState *ms = MT7621_MACHINE(machine);
+@@ -1156,6 +1175,7 @@ static void mt7621_init(MachineState *machine)
+         error_report("RAM size must be 128M, 256M or 512M");
+         exit(1);
+     }
++    mt7621_flash_config(b);
+ 
+     /* CPU cores, CM GCR, CPC, GIC */
+     b->cpuclk = clock_new(OBJECT(machine), "cpu-refclk");
+@@ -1253,37 +1273,6 @@ static void mt7621_init(MachineState *machine)
+                    serial_hd(0), DEVICE_LITTLE_ENDIAN);
+ }
+ 
+-static char *mt7621_get_flash_dir(Object *obj, Error **errp)
+-{
+-    return g_strdup(MT7621_MACHINE(obj)->b.flash_dir);
+-}
+-
+-static void mt7621_set_flash_dir(Object *obj, const char *v, Error **errp)
+-{
+-    MT7621MachineState *ms = MT7621_MACHINE(obj);
+-
+-    g_free(ms->b.flash_dir);
+-    ms->b.flash_dir = g_strdup(v);
+-}
+-
+-static char *mt7621_get_flash(Object *obj, Error **errp)
+-{
+-    return g_strdup(MT7621_MACHINE(obj)->b.flash_nand ? "nand" : "nor");
+-}
+-
+-static void mt7621_set_flash(Object *obj, const char *v, Error **errp)
+-{
+-    MT7621MachineState *ms = MT7621_MACHINE(obj);
+-
+-    if (!strcmp(v, "nand")) {
+-        ms->b.flash_nand = true;
+-    } else if (!strcmp(v, "nor")) {
+-        ms->b.flash_nand = false;
+-    } else {
+-        error_setg(errp, "flash must be nor or nand");
+-    }
+-}
+-
+ static char *mt7621_get_poweroff(Object *obj, Error **errp)
+ {
+     return g_strdup(MT7621_MACHINE(obj)->b.poweroff_halt ? "halt" : "stop");
+@@ -1312,45 +1301,6 @@ static void mt7621_set_dcache(Object *obj, bool v, Error **errp)
+     MT7621_MACHINE(obj)->b.dcache_model = v;
+ }
+ 
+-static char *mt7621_get_nand_id(Object *obj, Error **errp)
+-{
+-    return g_strdup(MT7621_MACHINE(obj)->b.nand_id);
+-}
+-
+-static void mt7621_set_nand_id(Object *obj, const char *v, Error **errp)
+-{
+-    MT7621MachineState *ms = MT7621_MACHINE(obj);
+-
+-    g_free(ms->b.nand_id);
+-    ms->b.nand_id = g_strdup(v);
+-}
+-
+-static char *mt7621_get_nor_id(Object *obj, Error **errp)
+-{
+-    return g_strdup(MT7621_MACHINE(obj)->b.nor_id);
+-}
+-
+-static void mt7621_set_nor_id(Object *obj, const char *v, Error **errp)
+-{
+-    MT7621MachineState *ms = MT7621_MACHINE(obj);
+-
+-    g_free(ms->b.nor_id);
+-    ms->b.nor_id = g_strdup(v);
+-}
+-
+-static char *mt7621_get_nor_uid(Object *obj, Error **errp)
+-{
+-    return g_strdup(MT7621_MACHINE(obj)->b.nor_uid);
+-}
+-
+-static void mt7621_set_nor_uid(Object *obj, const char *v, Error **errp)
+-{
+-    MT7621MachineState *ms = MT7621_MACHINE(obj);
+-
+-    g_free(ms->b.nor_uid);
+-    ms->b.nor_uid = g_strdup(v);
+-}
+-
+ static char *mt7621_get_ddr(Object *obj, Error **errp)
+ {
+     return g_strdup(MT7621_MACHINE(obj)->b.ddr == 2 ? "ddr2" : "ddr3");
+@@ -1451,6 +1401,29 @@ static void mt7621_set_u32(Object *obj, Visitor *v, const char *name,
+                                             (uintptr_t)opaque), errp);
+ }
+ 
++static void mt7621_get_str(Object *obj, Visitor *v, const char *name,
++                           void *opaque, Error **errp)
++{
++    char **field = (char **)((char *)&MT7621_MACHINE(obj)->b +
++                             (uintptr_t)opaque);
++    g_autofree char *value = g_strdup(*field ? *field : "");
++
++    visit_type_str(v, name, &value, errp);
++}
++
++static void mt7621_set_str(Object *obj, Visitor *v, const char *name,
++                           void *opaque, Error **errp)
++{
++    char **field = (char **)((char *)&MT7621_MACHINE(obj)->b +
++                             (uintptr_t)opaque);
++    char *value;
++
++    if (visit_type_str(v, name, &value, errp)) {
++        g_free(*field);
++        *field = value;
++    }
++}
++
+ static bool mt7621_get_reset_high(Object *obj, Error **errp)
+ {
+     return MT7621_MACHINE(obj)->b.reset_high;
+@@ -1498,7 +1471,6 @@ static char *mt7621_get_led_state(Object *obj, Error **errp)
+     return router_leds_state(MT7621_MACHINE(obj)->b.leds);
+ }
+ 
+-
+ static void mt7621_set_pcie(Object *obj, Visitor *v, const char *name,
+                             void *opaque, Error **errp)
+ {
+@@ -1526,7 +1498,6 @@ static void mt7621_instance_init(Object *obj)
+     MT7621_MACHINE(obj)->b.reset_gpio = 18;
+     MT7621_MACHINE(obj)->b.wps_gpio = 95;     /* none: an unused pin */
+     MT7621_MACHINE(obj)->b.ddr = 3;
+-    MT7621_MACHINE(obj)->b.nor_mb = 16;
+     MT7621_MACHINE(obj)->b.usb = 3;
+     MT7621_MACHINE(obj)->b.dcache_model = true;
+ }
+@@ -1543,15 +1514,37 @@ static void mt7621_machine_class_init(ObjectClass *oc, const void *data)
+     mc->max_cpus = 4;
+     mc->default_cpus = 4;       /* MT7621A: 2 cores x 2 VPEs */
+ 
+-    object_class_property_add_str(oc, "nand-dir", mt7621_get_flash_dir,
+-                                  mt7621_set_flash_dir);
+-    object_class_property_set_description(oc, "nand-dir",
++#define MT7621_STR(name, field, desc) do { \
++        object_class_property_add(oc, name, "str", mt7621_get_str, \
++            mt7621_set_str, NULL, (void *)offsetof(MT7621Board, field)); \
++        object_class_property_set_description(oc, name, desc); \
++    } while (0)
++    MT7621_STR("dump-dir", flash_dir,
+         "Flash: folder of partition dumps (files named *mtdN*)");
+-    object_class_property_add_str(oc, "flash", mt7621_get_flash,
+-                                  mt7621_set_flash);
+-    object_class_property_set_description(oc, "flash",
+-        "Boot flash: nor (SPI-NOR, default) or nand (parallel NAND on the "
+-        "NFI, 128 MB)");
++    MT7621_STR("flash-type", flash_type,
++        "Boot flash: nor (SPI-NOR, default) or parallel-nand (parallel NAND "
++        "on the NFI)");
++    {
++        g_autofree char *nor = flash_chip_list(CHIP_NOR);
++        g_autofree char *nand = flash_chip_list(CHIP_PARALLEL_NAND);
++        g_autofree char *desc = g_strdup_printf(
++            "READ ID bytes of the boot flash chip, hex (default: the first "
++            "of its type); listed, with their size: SPI-NOR %s (over 16 MB "
++            "the chip uses 4-byte addresses); parallel NAND %s; other IDs "
++            "need flash-mb", nor, nand);
++
++        MT7621_STR("flash-id", flash_id, desc);
++    }
++    object_class_property_add(oc, "flash-mb", "uint32", mt7621_get_u32,
++                              mt7621_set_u32, NULL,
++                              (void *)offsetof(MT7621Board, flash_mb));
++    object_class_property_set_description(oc, "flash-mb",
++        "Size of the boot flash chip in MB, for a flash-id that is not "
++        "listed (SPI-NOR: 16, 32 or 64)");
++    MT7621_STR("flash-uid", flash_uid,
++        "Unique ID of the SPI-NOR (command 4b), hex, as Cudy firmware shows "
++        "it: the 16 digits after the '-' of /proc/sys/dev/flash_uuid (the "
++        "bytes in reverse of the chip's order)");
+     object_class_property_add_str(oc, "poweroff", mt7621_get_poweroff,
+                                   mt7621_set_poweroff);
+     object_class_property_set_description(oc, "poweroff",
+@@ -1562,29 +1555,6 @@ static void mt7621_machine_class_init(ObjectClass *oc, const void *data)
+     object_class_property_set_description(oc, "dcache",
+         "Model the write-back L1 data cache against uncached stores "
+         "(default on; Breed needs it)");
+-    object_class_property_add_str(oc, "nand-id", mt7621_get_nand_id,
+-                                  mt7621_set_nand_id);
+-    object_class_property_set_description(oc, "nand-id",
+-        "READ ID bytes of the parallel NAND, hex (default ecf1009540, "
+-        "Samsung K9F1G08U0D)");
+-    object_class_property_add(oc, "nor", "uint32", mt7621_get_u32,
+-                              mt7621_set_u32, NULL,
+-                              (void *)offsetof(MT7621Board, nor_mb));
+-    object_class_property_set_description(oc, "nor",
+-        "SPI-NOR size in MB: 16 (default), 32 or 64; over 16 MB the chip "
+-        "uses 4-byte addresses");
+-    object_class_property_add_str(oc, "nor-id", mt7621_get_nor_id,
+-                                  mt7621_set_nor_id);
+-    object_class_property_set_description(oc, "nor-id",
+-        "RDID bytes of the SPI-NOR, hex, 3 to 6 (default by the size: "
+-        "ef4018 / ef4019 / ef4020, Winbond W25Q128JV / W25Q256JV / "
+-        "W25Q512JV; 204018: XMC XM25QH128C/D)");
+-    object_class_property_add_str(oc, "nor-uid", mt7621_get_nor_uid,
+-                                  mt7621_set_nor_uid);
+-    object_class_property_set_description(oc, "nor-uid",
+-        "unique ID of the SPI-NOR (command 4b), hex, as Cudy firmware shows "
+-        "it: the 16 digits after the '-' of /proc/sys/dev/flash_uuid (the "
+-        "bytes in reverse of the chip's order)");
+     for (int i = 0; i < 3; i++) {
+         g_autofree char *name = g_strdup_printf("pcie%d", i);
+         object_class_property_add(oc, name, "str", mt7621_get_pcie_v,
+-- 
+2.47.3
+

@@ -313,7 +313,7 @@ def uboot_env(lines, size):
 
 def nor_nand(args, env):
     """'nand' subfolder: the SPI-NAND next to the NOR (machine option
-    nor-nand=on), one file per partition of --nand-parts.  --nand-file puts
+    flash2-id), one file per partition of --nand-parts.  --nand-file puts
     files at partition (or flash) offsets; --nand-sysupgrade builds a UBI image of the
     sysupgrade tar's kernel and root (volumes kernel, rootfs, rootfs_data;
     with --env-ubi also ubootenv / ubootenv2 holding the environment)."""
@@ -488,8 +488,8 @@ BBT_BLOCKS = 4
 
 
 def cmd_mt7621_nand(args):
-    """MT7621 parallel NAND folder (machine option flash=nand): one data
-    file per partition, the bootloader in the first, the OpenWrt kernel
+    """MT7621 parallel NAND folder (machine option flash-type=parallel-nand):
+    one data file per partition, the bootloader in the first, the OpenWrt kernel
     (kernel1.bin) and UBI (rootfs0.bin) in "kernel" / "ubi", everything
     else erased.  (The MediaTek U-Boot's factory bad block table in the
     last blocks, outside all partitions, is put there by the emulator.)
@@ -739,7 +739,7 @@ def main():
                         "CONFIG_ENV_IS_IN_UBI), not in 'u-boot-env'")
     n.add_argument("--nand-mb", type=int, default=512,
                    help="SPI-NAND next to the NOR (machine option "
-                        "nor-nand=on), subfolder 'nand': size")
+                        "flash2-id), subfolder 'nand': size")
     n.add_argument("--nand-parts", default="ubi:-",
                    help="NAND layout, label:size,... ('-' = rest)")
     n.add_argument("--nand-file", action="append", metavar="[LABEL]@OFF=FILE",

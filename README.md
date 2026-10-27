@@ -74,7 +74,7 @@ Amlogic S905 box (4x Cortex-A53, 1 GB) boots the WR3000S to LuCI in about
 
 ## Board hardware (machine options)
 
-`-M mt7981-router,nand-dir=DIR,<options>` (or `mt7986-router`) and
+`-M mt7981-router,dump-dir=DIR,<options>` (or `mt7986-router`) and
 `-m <RAM size>` (128M, 256M, 512M, 1G or 2G; 128 MB is untested: there is
 no BL2 for it to try, reports welcome):
 
@@ -87,15 +87,14 @@ no BL2 for it to try, reports welcome):
 | `gmac1` | `rtl8221b` · `yt8821` · `gpy211` · `en8811h` · `gphy` · `i2p5ge` · `mt7531-p5` · `none` | GMAC1 (mac@1); `gphy` = MT7981 built-in 1G PHY; `i2p5ge` = MT7987 / MT7988 internal 2.5G PHY; `gpy211` = MaxLinear GPY211C; `mt7531-p5` = SGMII link to MT7531 port 5 (MediaTek reference design, e.g. SNR-CPE-AX2: its vendor firmware takes WAN through it; needs `gmac0=mt7531` and no `port5` PHY) |
 | `gmac0-reset-gpio`, `gmac1-reset-gpio` | GPIO, `-1` (default) | hardware reset line of a 2.5G PHY; not wired by default (a missing line is harmless, a wrong one could hold the PHY in reset) |
 | `gmac0-phy-addr`, `gmac1-phy-addr` | MDIO address | address of that PHY (default 1 on gmac0, 6 on gmac1) |
-| `flash` | `nand` · `nor` · `emmc` | boot flash: SPI-NAND on SPI0 (default), SPI-NOR on SPI2 (MT7986: SPI0) or eMMC (see below) |
-| `nor-nand` | `on` | a SPI-NOR **and** a SPI-NAND (Teltonika RUTC50, OpenWrt One): the flash folder holds the NOR partition files, its subfolder `nand` the NAND ones; `flash=nor` / `flash=nand` picks the boot flash (see [SPI-NOR + SPI-NAND](#spi-nor--spi-nand-teltonika-rutc50-openwrt-one)) |
-| `nand` | `128` · `256` · `512` | W25N01GV / W25N02KV / W25N04KV SPI-NAND |
-| `nand-id` | 2 to 8 bytes in hex | the bytes the SPI-NAND answers to READ ID, repeating after that (default the Winbond ID, e.g. `efaa21`); `c8017f7f7f` = ESMT F50L1G41LB, the chip of e.g. the Cudy WR3000P / WR3000E. The chip still works as the emulated one; vendor firmware may check the ID (MT7621: the parallel NAND's READ ID, see below) |
+| `flash-type` | `nand` · `nor` · `emmc` | boot flash: SPI-NAND on SPI0 (default), SPI-NOR on SPI2 (MT7986: SPI0) or eMMC (see below); the MT7621 boots from `nor` (default) or `parallel-nand` |
+| `flash-id` | hex bytes | the chip: the bytes it answers to READ ID (SPI-NAND: repeating after that). A listed chip brings its size: SPI-NAND `efaa21` / `efaa22` / `efaa23` (Winbond W25N01GV / W25N02KV / W25N04KV, 128 / 256 / 512 MB) and `c8017f7f7f` (ESMT F50L1G41LB, 128 MB, e.g. Cudy WR3000P / WR3000E); SPI-NOR `ef4018` (Winbond W25Q128JV), `204018` (XMC XM25QH128C/D), `c84018` (GD25Q128), 16 MB, `ef4019` (W25Q256JV, 32 MB), `ef4020` (W25Q512JV, 64 MB; over 16 MB 4-byte addressing); parallel NAND `ecf1009540` (Samsung K9F1G08U0D) and `c2f18095` (Macronix MX30LF1G18AC), 128 MB (`-M mt7981-router,help` lists them). Default: the first chip of the type. The type comes from `flash-type`, never from the ID. The chip works as the emulated one; vendor firmware may check the ID |
+| `flash-mb` | MB | size of a chip whose `flash-id` is not listed (SPI-NAND 128 / 256 / 512, SPI-NOR 16 / 32 / 64); a listed chip has its own size |
+| `flash-uid` | hex digits | unique ID of the chip. SPI-NAND: 32 hex digits (default: derived from the flash folder name); stock Cudy firmware checks chip ID + unique ID (`/proc/sys/dev/flash_uuid`) against `fuuid` in bdinfo (`C801-` + the unique ID + its complement), without a match login is disabled ("Invalid board info!"): set `flash-id=c8017f7f7f` and `flash-uid=` the 32 hex digits after `C801-`. SPI-NOR: 16 hex digits (command 4b, default none), as stock Cudy firmware of NOR boards (M1300 v2) shows it in `/proc/sys/dev/flash_uuid` (e.g. `2040182040-` + 16 digits); without a match no admin password can be set or checked: set `flash-id` to the chip's ID and `flash-uid=` the 16 digits after the `-` |
+| `flash2-id`, `flash2-mb`, `flash2-uid` | as `flash-id`, `flash-mb`, `flash-uid` | a second chip, of the other type: a SPI-NOR **and** a SPI-NAND (Teltonika RUTC50, OpenWrt One); the flash folder holds the NOR partition files, its subfolder `nand` the NAND ones, `flash-type` picks the boot flash (see [SPI-NOR + SPI-NAND](#spi-nor--spi-nand-teltonika-rutc50-openwrt-one)) |
 | `nand-spi` | `0` (default) · `1` · `2` | SPI controller of the SPI-NAND (BPI-R4 Lite: 2) |
 | `switch-irq-gpio` | GPIO | EINT of the MT7531 interrupt (default 38 / 66 / 41 for MT7981 / MT7986 / MT7987) |
-| `flash=emmc`, `emmc-boot` | MB (4) | eMMC on MSDC0 instead: one image (the first `*.img` of the flash folder, or `-drive if=sd`) = boot0 + boot1 (`emmc-boot` MB each) + user area, size a power of 2 |
-| `nor`, `nor-id` | MB (16), JEDEC ID (`ef4018`) | SPI-NOR size and ID, e.g. `204018` = XMC XM25QH128C/D, `c84018` = GD25Q128; `nor=32,nor-id=ef4019` = Winbond W25Q256JV, `nor=64,nor-id=ef4020` = Winbond W25Q512JV (over 16 MB: 4-byte addressing; e.g. a WR3000 with a bigger chip). MT7621: 16, 32 or 64 MB, and without `nor-id` the Winbond chip of that size |
-| `nor-uid` | 16 hex digits | MT7621 only: SPI-NOR unique ID (command 4b, default none); stock Cudy firmware of NOR boards (M1300 v2) checks chip ID + unique ID (`/proc/sys/dev/flash_uuid`, e.g. `2040182040-` + 16 digits) against bdinfo, without a match no admin password can be set or checked: set `nor-id` to the chip's ID and `nor-uid=` the 16 digits after the `-` |
+| `flash-type=emmc`, `emmc-boot` | MB (4) | eMMC on MSDC0 instead: one image (the first `*.img` of the flash folder, or `-drive if=sd`) = boot0 + boot1 (`emmc-boot` MB each) + user area, size a power of 2 |
 | `ddr` | `ddr3` · `ddr4` | soldered DRAM type: a BL2 built for the other type stops the machine, as DRAM init fails on a real board |
 | `usb-port` | `none` · `2` · `3` | USB connector (USB 3.0: devices attach at SuperSpeed) |
 | `usb-host` | `VID:PID[;VID:PID…]` | pass USB devices of this PC through to the router (USB 2.0 root ports 2, 3, …, also on boards without a connector), e.g. a Wi-Fi dongle, an LTE modem, a USB Ethernet adapter; see "USB Wi-Fi dongle" |
@@ -109,7 +108,6 @@ no BL2 for it to try, reports welcome):
 | `led1` … `led32` | `NAME: COLOUR SOURCE [+ COLOUR SOURCE…]` | front panel LEDs (see below); `led-state` (QOM `/machine`) returns their states |
 | `efuse` | file | load the eFuse contents from a dump of a real board (up to 4 KiB, as read from `/sys/bus/nvmem/devices/nvmem0/nvmem`), so calibration and chip data match that board |
 | `efuse-uid` | 32 hex digits | set the per-chip unique block, so several emulated boards are not identical |
-| `nand-uid` | 32 hex digits | SPI-NAND unique ID (default: derived from the flash folder name); stock Cudy firmware checks chip ID + unique ID (`/proc/sys/dev/flash_uuid`) against `fuuid` in bdinfo (`C801-` + the unique ID + its complement), without a match login is disabled ("Invalid board info!"): set `nand-id=c8017f7f7f` and `nand-uid=` the 32 hex digits after `C801-` |
 
 Front panel LEDs: `led1=Status: red gpio:11:low + white gpio:10:low` is
 one lamp with two colours, each on its own GPIO (`:low` = GPIO_ACTIVE_LOW).
@@ -140,15 +138,33 @@ dnsmasq does not serve DHCP on br-lan while another server answers.
 ## Board presets
 
 A preset is an INI file: `name`, `description`, `soc` (`mt7981` default,
-`mt7986`), `ram` (MB), `nand-dir`,
+`mt7986`), `ram` (MB), `dump-dir` (the flash folder),
 build-only keys (`openwrt=` OpenWrt profile, `openwrt-local=` own build,
 `openwrt-stock=` vendor bootloader dumps) and machine options. Both
 launchers use them; the Windows launcher has an editor for them (Ethernet,
 switch port labels, RAM type/size, boot flash and a second flash
-(SPI-NOR + SPI-NAND, `nor-nand`), USB, LEDs (GPIO, PHY, WS2812B, 74HC595,
+(SPI-NOR + SPI-NAND, `flash2-id`), USB, LEDs (GPIO, PHY, WS2812B, 74HC595,
 PWM), button GPIOs with an
 "active high" tick — unticked = active low, the default and what most
 routers use; saving from the editor drops `;` comments).
+
+**Since 4.1** the flash options are `dump-dir`, `flash-type`, `flash-id`,
+`flash-mb`, `flash-uid` and `flash2-id` / `flash2-mb` / `flash2-uid`. The old
+ones are no longer accepted: presets you saved yourself before 4.1 (your own
+`.ini` files) have to be corrected by hand:
+
+| Before 4.1 | Since 4.1 |
+|---|---|
+| `nand-dir=DIR` | `dump-dir=DIR` |
+| `flash=nand` · `flash=nor` · `flash=emmc` | `flash-type=nand` · `nor` · `emmc` (MT7621 `flash=nand`: `flash-type=parallel-nand`) |
+| `nand=128` / `256` / `512` | `flash-id=efaa21` / `efaa22` / `efaa23` (or the chip's `flash-id` with `flash-mb`) |
+| `nor=16` / `32` / `64` | `flash-id=ef4018` / `ef4019` / `ef4020` |
+| `nand-id=ID`, `nor-id=ID` | `flash-id=ID` |
+| `nand-uid=UID`, `nor-uid=UID` | `flash-uid=UID` |
+| `nor-nand=on` | `flash2-id=` the second chip (`efaa23`, `ef4018`, …) |
+
+The Windows launcher also keeps its last flash folder under the new name:
+choose it once more after updating.
 
 | Preset | Ethernet | RAM | NAND | USB | Bootloader |
 |---|---|---|---|---|---|
@@ -252,7 +268,7 @@ tools/prepare-nand.sh --soc mt7987 --flash-mb 256 --ubi-fip bananapi_bpi-r4-lite
 ./emulator.sh -P bananapi-bpi-r4-lite
 ```
 
-eMMC boards (GL.iNet GL-MT6000) use `flash=emmc`: the MSDC host model
+eMMC boards (GL.iNet GL-MT6000) use `flash-type=emmc`: the MSDC host model
 serves TF-A and U-Boot (PIO) and Linux (descriptor DMA); BL2 boots from
 eMMC boot partition 0 ("EMMC_BOOT"), the FIP, kernel and rootfs are GPT
 partitions. `tools/prepare-nand.sh --soc mt7986 --emmc glinet_gl-mt6000
@@ -310,11 +326,12 @@ has `openwrt-version=snapshot` (snapshot images have no LuCI; SSH works).
 
 ## SPI-NOR + SPI-NAND (Teltonika RUTC50, OpenWrt One)
 
-With `nor-nand=on` a board has both flashes: the SPI-NOR on SPI2 and the
-SPI-NAND on SPI0 (`nand-spi`). The flash folder holds the NOR partition
-files and its subfolder `nand` the NAND ones (same `*mtdN*` naming, each
-flash on its own); `flash=nor` or `flash=nand` says which one the BootROM
-boots from — the boot switch of the OpenWrt One.
+With `flash2-id` (or another `flash2-*` option) a board has both flashes:
+the SPI-NOR on SPI2 and the SPI-NAND on SPI0 (`nand-spi`). The flash folder
+holds the NOR partition files and its subfolder `nand` the NAND ones (same
+`*mtdN*` naming, each flash on its own); `flash-type` says which one the
+BootROM boots from, the `flash2-*` chip is the other one — the boot switch
+of the OpenWrt One.
 
 ```
 nor-rutc50/mt7981.mtd0.BL2.bin … mt7981.mtd8.recovery.bin    SPI-NOR 16 MB
@@ -336,7 +353,8 @@ nor-rutc50/nand/mt7981.mtd0.rutos-a.bin, mt7981.mtd1.rutos-b.bin   SPI-NAND 512 
 - **OpenWrt One**: the official `snand-factory.bin` (BL2 + UBI with FIP,
   ubootenv, recovery, production) and `nor-factory.bin` (recovery BL2,
   Factory with the Wi-Fi EEPROM, FIP and the recovery system). The preset
-  boots the NAND; `-o flash=nor` is the boot switch at NOR (recovery
+  boots the NAND; `-o flash-type=nor,flash-id=ef4018,flash2-id=efaa22` is
+  the boot switch at NOR (recovery
   U-Boot and system). The 2.5G WAN PHY is an Airoha EN8811H
   (`gmac0=en8811h`): Linux loads its MCU firmware over MDIO, then the link
   comes up at 2.5 Gbit/s.
@@ -345,7 +363,8 @@ nor-rutc50/nand/mt7981.mtd0.rutos-a.bin, mt7981.mtd1.rutos-b.bin   SPI-NAND 512 
 tools/prepare-nand.sh --nor-nand rutc50 teltonika_rutc50 25.12.5
 ./emulator.sh -P teltonika-rutc50
 tools/prepare-nand.sh --nor-nand openwrt-one openwrt_one 25.12.5
-./emulator.sh -P openwrt-one            # -o flash=nor: recovery from the NOR
+./emulator.sh -P openwrt-one            # recovery from the NOR:
+#   -o flash-type=nor,flash-id=ef4018,flash2-id=efaa22
 ```
 
 ## MT7621 (MIPS)
@@ -369,7 +388,7 @@ silent" Wi-Fi cards for the unmodified mt76 drivers: `mt7603e` (MT7603E,
 5 GHz, driver mt7615e: ROM patch and N9 firmware) load their firmware, hostapd
 runs, nothing goes on the air; a card without an EEPROM in flash gets a
 minimal one from its eFuse with the MAC 80:af:ca:11:22:35 + slot; the
-parallel NAND (NFI + ECC, PIO, `flash=nand`, `nand-id=`); the DRAMC's
+parallel NAND (NFI + ECC, PIO, `flash-type=parallel-nand`, `flash-id=`); the DRAMC's
 software test engine, so a vendor stage1 that calibrates the DDR itself
 (stock Xiaomi U-Boot) finds its pass windows; `poweroff=stop|halt`
 (Linux's `poweroff` / `halt` end the emulator, or it stays halted like the
@@ -435,11 +454,11 @@ whole 16 MB flash at 0x30000 / 0x40000 / 0x50000 / 0xff0000 into
 `mt7621.mtd0.u-boot.bin` ... `mt7621.mtd4.bdinfo.bin` of a folder and pass
 it with `-n`. Its LAN address is 192.168.10.1 (`-o lan-ip=192.168.10.1`
 with `-l user`), and its console has no shell. The preset has the board's
-NOR chip (`nor-id=204018`, XMC XM25QH128D). The stock firmware compares the
+NOR chip (`flash-id=204018`, XMC XM25QH128D). The stock firmware compares the
 chip's unique ID with `bdinfo`: without your router's ID no admin password
-can be created or checked ("Invalid password!"). Give it as `nor-uid`, the
+can be created or checked ("Invalid password!"). Give it as `flash-uid`, the
 16 digits after the `-` of `cat /proc/sys/dev/flash_uuid` on the router:
-`-o lan-ip=192.168.10.1,nor-uid=0123456789ABCDEF`.
+`-o lan-ip=192.168.10.1,flash-uid=0123456789ABCDEF`.
 
 The folder (`tools/mknand.py mt7621-nand`) holds the stock partitions,
 OpenWrt's `kernel1.bin` in `kernel` (0x600000, "System 2") and
@@ -519,7 +538,7 @@ All device models live in `hw/arm/filogic/` of the QEMU tree
 | SPI (IPM) | `mtk_spim.c` | FIFO + DMA, half-duplex spi-mem mode used by TF-A/U-Boot/Linux |
 | SPI-NAND | `spinand.c` | W25N01GV (2048+64) / W25N02KV (2048+128) / W25N04KV (512 MB, 2048+128, two planes), on-die ECC, ONFI parameter page, unique ID page; backing store = folder of partition dumps (see below) or one raw image with OOB |
 | eMMC | `mtk_msdc.c` + QEMU eMMC | MSDC host: commands, auto CMD23/CMD12, PIO FIFO (TF-A, U-Boot), GPD/BD DMA (Linux); card with boot0/boot1 and user area; BootROM boots `EMMC_BOOT` images from boot0 |
-| SPI-NOR | `spinor.c` | 3-byte addressing (up to 16 MB), selectable JEDEC ID, reads 1-1-1/1-1-2/1-1-4/1-2-2/1-4-4, page program, 4K/32K/64K/chip erase, status registers with QE; BootROM boots `SF_BOOT` images from it; same folder backing store; with `nor-nand=on` next to a SPI-NAND |
+| SPI-NOR | `spinor.c` | 3-byte addressing (up to 16 MB), selectable JEDEC ID, reads 1-1-1/1-1-2/1-1-4/1-2-2/1-4-4, page program, 4K/32K/64K/chip erase, status registers with QE; BootROM boots `SF_BOOT` images from it; same folder backing store; with `flash2-id` next to a SPI-NAND |
 | Ethernet | `mtk_eth.c` | frame engine: QDMA TX (Linux), PDMA RX, PDMA v2 (U-Boot); TSO + checksum offload; LynxI SGMII PCS ×2; any combination of switch / PHYs on the two GMACs; interrupt routing of mainline Linux and of MediaTek's SDK driver (vendor firmware: `FE_INT_GRP` groups, PDMA RX on the pdma lines, GIC 189..192) |
 | Switch | `mtk_eth.c` | MT7531: paged MDIO access, internal PHY indirect access, MTK special tag (DSA), learning FDB, port matrix, VLAN table (MediaTek's SDK switch driver), port 5 to a PHY or to GMAC1, link IRQ → EINT 38. Airoha AN8855: 32-bit register bus over MDIO page 4, internal PHYs at MDIO 1..5, its registers translated into the MT7531 model (CPU port 5). MT7988 built-in switch: the MT7531 model memory mapped at 0x15020000, SoC GbE PHYs (MT7988 IDs, eFuse calibration) |
 | PHYs | `mtk_eth.c` | MT7531 GPHY ×5; RTL8221B-VB-CG (C45, temperature sensor); Motorcomm YT8821 (extended registers, UTP/SerDes spaces, 2.5G status); MaxLinear GPY211C (C45, firmware version, mailbox, temperature sensor); Airoha EN8811H (buckpbus window on MDIO page 4, MCU firmware download, 2.5G status, LED registers); MT7981 built-in GbE PHY (calibration handshake); a PHY on MT7531 port 5; optional hardware reset GPIOs |
@@ -546,18 +565,18 @@ mtd1, … into the full flash, e.g. `mt7981.mtd0.BL2.bin`,
 
 Everything the router writes (settings, sysupgrade, U-Boot env) is written
 back into these files. Dumps from a real router (`cat /dev/mtdN >
-name.mtdN.label.bin`) can be used directly. With `flash=nor` the folder is
-the SPI-NOR contents (e.g. BL2, u-boot-env, Factory, bdinfo, FIP,
-firmware); with `nor-nand=on` the NAND files are in its
-subfolder `nand`. Files smaller than the flash (a 128 MB dump started with
-`nand=256`, say) are completed on the first start: the last file grows
+name.mtdN.label.bin`) can be used directly. With `flash-type=nor` the
+folder is the SPI-NOR contents (e.g. BL2, u-boot-env, Factory, bdinfo, FIP,
+firmware); with `flash2-id` the NAND files are in its subfolder `nand`.
+Files smaller than the flash (a 128 MB dump started with
+`flash-id=efaa22`, say) are completed on the first start: the last file grows
 with erased bytes (`0xff`) to the flash size, so what the router writes
 there is kept.
 
-- [`tools/prepare-nand.sh`](tools/prepare-nand.sh) `[--stock DIR [--nor] | --local DIR] [--flash-mb N] [--no-bdinfo] PROFILE [VERSION] [OUTDIR]` — builds a NAND folder for an OpenWrt device profile: downloads the official OpenWrt U-Boot images (`PROFILE-ubootmod-*` or `PROFILE-*`, sha256 verified), or uses own builds (`--local`), or keeps a vendor BL2/FIP (`--stock`) with the OpenWrt `sysupgrade.bin` in the vendor layout; `--no-bdinfo` for boards without a bdinfo partition, `--nor` for SPI-NOR boards (vendor BL2/FIP + the OpenWrt `sysupgrade.bin` in the `firmware` partition), `--soc mt7986` for MT7986 boards (partition files `mt7986.mtdN.*`, minimal Wi-Fi EEPROM in an empty Factory: chip ID, MAC, 4 paths, 20 dBm target TX power), `--ubi-fip` for "spim-nand-ubi" BL2s (BL2 at 0, UBI from 0x200000 with the FIP as volume `fip`), `--ubi-factory SIZE` (Factory as UBI volume `factory`, Asus BT8), `--emmc [--emmc-layout L]` (eMMC image, see [MT7988](#mt7988-filogic-880--860)), `--nor-nand rutc50|openwrt-one` (SPI-NOR + SPI-NAND folder, see [above](#spi-nor--spi-nand-teltonika-rutc50-openwrt-one)). Factory/bdinfo come from `factory/`.
+- [`tools/prepare-nand.sh`](tools/prepare-nand.sh) `[--stock DIR [--nor] | --local DIR] [--flash-type T --flash-id ID] [--no-bdinfo] PROFILE [VERSION] [OUTDIR]` — builds a NAND folder for an OpenWrt device profile (`--flash-type`, `--flash-id`, `--flash-mb`, `--flash2-id`, `--flash2-mb`: the chips as in the preset, their sizes from QEMU's chip table): downloads the official OpenWrt U-Boot images (`PROFILE-ubootmod-*` or `PROFILE-*`, sha256 verified), or uses own builds (`--local`), or keeps a vendor BL2/FIP (`--stock`) with the OpenWrt `sysupgrade.bin` in the vendor layout; `--no-bdinfo` for boards without a bdinfo partition, `--nor` for SPI-NOR boards (vendor BL2/FIP + the OpenWrt `sysupgrade.bin` in the `firmware` partition), `--soc mt7986` for MT7986 boards (partition files `mt7986.mtdN.*`, minimal Wi-Fi EEPROM in an empty Factory: chip ID, MAC, 4 paths, 20 dBm target TX power), `--ubi-fip` for "spim-nand-ubi" BL2s (BL2 at 0, UBI from 0x200000 with the FIP as volume `fip`), `--ubi-factory SIZE` (Factory as UBI volume `factory`, Asus BT8), `--emmc [--emmc-layout L]` (eMMC image, see [MT7988](#mt7988-filogic-880--860)), `--nor-nand rutc50|openwrt-one` (SPI-NOR + SPI-NAND folder, see [above](#spi-nor--spi-nand-teltonika-rutc50-openwrt-one)). Factory/bdinfo come from `factory/`.
 - [`tools/mknand.py`](tools/mknand.py) — create / edit images: `create` (BL2, FIP, Factory, bdinfo, UBI from `.itb` or a `sysupgrade.bin`), `write --part fip`, `read`, `split`, `join`, `--flash-mb 256`, `--no-bdinfo`, `nor` (SPI-NOR folder: `--parts` layout, `--raw` whole-chip image, `--mac-part`, `--env` U-Boot environment; with `--nand-parts`, `--nand-file`, `--nand-sysupgrade` also the `nand` subfolder).
 - [`tools/kernel-dts.sh`](tools/kernel-dts.sh) — the kernel's MediaTek DTS with the DTS parts of OpenWrt's patches (`work/kdts`), for boards whose DTS is in the kernel tree (BPi-R4); [`tools/dts-leds.py`](tools/dts-leds.py) reads them there.
-- [`tools/mkemmc.py`](tools/mkemmc.py) — eMMC image (`flash=emmc`): BL2 in boot0, GPT user area with u-boot-env, factory, fip, kernel, rootfs (GL-MT6000 layout, `--layout wh3000-pro`, or `--layout bpi-r4` with `--fit` / `--recovery` (FIT into production / recovery)), OpenWrt `squashfs-factory.bin` in kernel + rootfs or `--sysupgrade` (sysupgrade tar), `--boot-env` (OpenWrt U-Boot environment that boots the `kernel` partition).
+- [`tools/mkemmc.py`](tools/mkemmc.py) — eMMC image (`flash-type=emmc`): BL2 in boot0, GPT user area with u-boot-env, factory, fip, kernel, rootfs (GL-MT6000 layout, `--layout wh3000-pro`, or `--layout bpi-r4` with `--fit` / `--recovery` (FIT into production / recovery)), OpenWrt `squashfs-factory.bin` in kernel + rootfs or `--sysupgrade` (sysupgrade tar), `--boot-env` (OpenWrt U-Boot environment that boots the `kernel` partition).
 
 ## Running
 

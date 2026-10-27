@@ -58,9 +58,9 @@ env:
   #   asus-zenwifi-bt8 MT7988D (Filogic 860), built-in switch, NAND with
   #                    the FIP and Factory in UBI
   #   bananapi-bpi-r4  MT7988A (Filogic 880), built-in switch, eMMC
-  #   teltonika-rutc50 SPI-NOR boot + SPI-NAND (nor-nand), own U-Boot
+  #   teltonika-rutc50 SPI-NOR boot + SPI-NAND (flash2-id), own U-Boot
   #                    (tools/uboot-rutc50), 74HC595 LEDs on SPI1
-  #   openwrt-one      SPI-NAND boot + SPI-NOR recovery (nor-nand)
+  #   openwrt-one      SPI-NAND boot + SPI-NOR recovery (flash2-id)
   #   zbtlink-zbt-wg3526-16m  MT7621A (MIPS, qemu-system-mipsel), SPI-NOR,
   #                    OpenWrt U-Boot (TPL/SPL, DDR init blob), MT7530
   TEST_PRESETS: >-
@@ -241,7 +241,10 @@ jobs:
           for p in $TEST_PRESETS; do
             f=presets/$p.ini
             get() { awk -F= -v k="$1" '$1 == k { sub(/^[^=]*=/, ""); print; exit }' "$f"; }
-            set -- --flash-mb "$(get nand)"
+            set --
+            for k in flash-type flash-id flash-mb flash2-id flash2-mb; do
+              [ -n "$(get $k)" ] && set -- "$@" --$k "$(get $k)"
+            done
             [ "$(get openwrt-no-bdinfo)" = 1 ] && set -- "$@" --no-bdinfo
             [ -n "$(get soc)" ] && set -- "$@" --soc "$(get soc)"
             [ "$(get openwrt-emmc)" = 1 ] && set -- "$@" --emmc
@@ -252,7 +255,7 @@ jobs:
             [ -n "$(get openwrt-parts)" ] && set -- "$@" --parts "$(get openwrt-parts)"
             [ -n "$(get openwrt-nor-nand)" ] && set -- "$@" --nor-nand "$(get openwrt-nor-nand)"
             ver=$(get openwrt-version)
-            tools/prepare-nand.sh "$@" "$(get openwrt)" "${ver:-$OPENWRT}" "work/flash/$(get nand-dir)"
+            tools/prepare-nand.sh "$@" "$(get openwrt)" "${ver:-$OPENWRT}" "work/flash/$(get dump-dir)"
           done
           (cd work/flash && zip -qr1 "$GITHUB_WORKSPACE/ci-flash.zip" .)
       - uses: actions/upload-artifact@v7
@@ -383,7 +386,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force work | Out-Null
           $env:QEMU_BIN = (Resolve-Path pkg/Router-Emulator/qemu/${{ matrix.qemu || 'qemu-system-aarch64' }}.exe).Path
-          $dir = (Select-String -Path presets/${{ matrix.preset }}.ini -Pattern '^nand-dir=(.*)$').Matches[0].Groups[1].Value
+          $dir = (Select-String -Path presets/${{ matrix.preset }}.ini -Pattern '^dump-dir=(.*)$').Matches[0].Groups[1].Value
           python tests/quick.py --limit 1200 -P ${{ matrix.preset }} `
             -n "pkg/Router-Emulator/$dir" `
             --qemu="-netdev user,id=wan,restrict=on" `

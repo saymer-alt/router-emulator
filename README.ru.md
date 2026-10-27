@@ -77,7 +77,7 @@ aarch64: пакет работает и с 32-битным userland (`uname -m` 
 
 ## Железо платы (параметры машины)
 
-`-M mt7981-router,nand-dir=ПАПКА,<параметры>` (или `mt7986-router`) и
+`-M mt7981-router,dump-dir=ПАПКА,<параметры>` (или `mt7986-router`) и
 `-m <размер RAM>` (128M, 256M, 512M, 1G или 2G; 128 МБ не проверены: нет
 BL2, на котором попробовать, — будем рады отзывам):
 
@@ -90,15 +90,14 @@ BL2, на котором попробовать, — будем рады отз�
 | `gmac1` | `rtl8221b` · `yt8821` · `gpy211` · `en8811h` · `gphy` · `i2p5ge` · `mt7531-p5` · `none` | GMAC1 (mac@1); `gphy` — встроенный 1G PHY MT7981; `i2p5ge` — внутренний 2.5G PHY MT7987 / MT7988; `gpy211` — MaxLinear GPY211C; `mt7531-p5` — SGMII-связь с портом 5 MT7531 (референсная схема MediaTek, например SNR-CPE-AX2: заводская прошивка ведёт через неё WAN; нужны `gmac0=mt7531` и порт 5 без PHY) |
 | `gmac0-reset-gpio`, `gmac1-reset-gpio` | GPIO, `-1` (по умолчанию) | линия аппаратного сброса 2.5G PHY; по умолчанию не подключена (отсутствие линии безвредно, неверная могла бы держать PHY в сбросе) |
 | `gmac0-phy-addr`, `gmac1-phy-addr` | адрес MDIO | адрес этого PHY (по умолчанию 1 на gmac0, 6 на gmac1) |
-| `flash` | `nand` · `nor` · `emmc` | загрузочный флеш: SPI-NAND на SPI0 (по умолчанию), SPI-NOR на SPI2 (MT7986: SPI0) или eMMC (см. ниже) |
-| `nor-nand` | `on` | SPI-NOR **и** SPI-NAND (Teltonika RUTC50, OpenWrt One): в папке флеша файлы разделов NOR, в её подпапке `nand` — файлы NAND; `flash=nor` / `flash=nand` выбирает загрузочный флеш (см. [SPI-NOR + SPI-NAND](#spi-nor--spi-nand-teltonika-rutc50-openwrt-one)) |
-| `nand` | `128` · `256` · `512` | SPI-NAND W25N01GV / W25N02KV / W25N04KV |
-| `nand-id` | от 2 до 8 байт в hex | байты, которыми SPI-NAND отвечает на READ ID, дальше они повторяются (по умолчанию ID Winbond, например `efaa21`); `c8017f7f7f` — ESMT F50L1G41LB, микросхема, например, Cudy WR3000P / WR3000E. Работает микросхема как эмулируемая; заводская прошивка может проверять ID (MT7621: READ ID параллельной NAND, см. ниже) |
+| `flash-type` | `nand` · `nor` · `emmc` | загрузочный флеш: SPI-NAND на SPI0 (по умолчанию), SPI-NOR на SPI2 (MT7986: SPI0) или eMMC (см. ниже); MT7621 грузится с `nor` (по умолчанию) или `parallel-nand` |
+| `flash-id` | байты в hex | микросхема: байты, которыми она отвечает на READ ID (SPI-NAND: дальше они повторяются). У известных микросхем размер берётся вместе с ID: SPI-NAND `efaa21` / `efaa22` / `efaa23` (Winbond W25N01GV / W25N02KV / W25N04KV, 128 / 256 / 512 МБ) и `c8017f7f7f` (ESMT F50L1G41LB, 128 МБ, например Cudy WR3000P / WR3000E); SPI-NOR `ef4018` (Winbond W25Q128JV), `204018` (XMC XM25QH128C/D), `c84018` (GD25Q128) — 16 МБ, `ef4019` (W25Q256JV, 32 МБ), `ef4020` (W25Q512JV, 64 МБ; больше 16 МБ — 4-байтовая адресация); параллельный NAND `ecf1009540` (Samsung K9F1G08U0D) и `c2f18095` (Macronix MX30LF1G18AC), 128 МБ (список — в `-M mt7981-router,help`). По умолчанию — первая микросхема этого типа. Тип задаёт `flash-type`, из ID он не выводится. Микросхема работает как эмулируемая; вендорская прошивка может проверять ID |
+| `flash-mb` | МБ | размер микросхемы, чьего `flash-id` нет в списке (SPI-NAND 128 / 256 / 512, SPI-NOR 16 / 32 / 64); у известной микросхемы свой размер |
+| `flash-uid` | hex-цифры | уникальный ID микросхемы. SPI-NAND: 32 hex-цифры (по умолчанию выводится из имени папки флеша); стоковая прошивка Cudy сверяет ID микросхемы и уникальный ID (`/proc/sys/dev/flash_uuid`) с `fuuid` из bdinfo (`C801-` + уникальный ID + его дополнение), без совпадения вход закрыт («Invalid board info!»): задайте `flash-id=c8017f7f7f` и в `flash-uid=` 32 hex-цифры после `C801-`. SPI-NOR: 16 hex-цифр (команда 4b, по умолчанию нет) в том виде, в каком их показывает стоковая прошивка Cudy на NOR-платах (M1300 v2) в `/proc/sys/dev/flash_uuid` (например, `2040182040-` + 16 цифр); без совпадения пароль администратора нельзя ни задать, ни проверить: задайте в `flash-id` ID микросхемы, а в `flash-uid=` — 16 цифр после `-` |
+| `flash2-id`, `flash2-mb`, `flash2-uid` | как `flash-id`, `flash-mb`, `flash-uid` | вторая микросхема другого типа: SPI-NOR **и** SPI-NAND (Teltonika RUTC50, OpenWrt One); в папке флеша файлы разделов NOR, в её подпапке `nand` — файлы NAND, `flash-type` выбирает загрузочный флеш (см. [SPI-NOR + SPI-NAND](#spi-nor--spi-nand-teltonika-rutc50-openwrt-one)) |
 | `nand-spi` | `0` (по умолчанию) · `1` · `2` | контроллер SPI, на котором SPI-NAND (BPI-R4 Lite: 2) |
 | `switch-irq-gpio` | GPIO | EINT прерывания MT7531 (по умолчанию 38 / 66 / 41 для MT7981 / MT7986 / MT7987) |
-| `flash=emmc`, `emmc-boot` | МБ (4) | вместо этого eMMC на MSDC0: один образ (первый `*.img` в папке флеша или `-drive if=sd`) = boot0 + boot1 (по `emmc-boot` МБ) + пользовательская область, размер — степень двойки |
-| `nor`, `nor-id` | МБ (16), JEDEC ID (`ef4018`) | размер и ID SPI-NOR, например `204018` = XMC XM25QH128C/D, `c84018` = GD25Q128; `nor=32,nor-id=ef4019` = Winbond W25Q256JV, `nor=64,nor-id=ef4020` = Winbond W25Q512JV (больше 16 МБ — 4-байтовая адресация; например, WR3000 с перепаянной микросхемой). MT7621: 16, 32 или 64 МБ, без `nor-id` — микросхема Winbond этого размера |
-| `nor-uid` | 16 hex-цифр | только MT7621: уникальный ID SPI-NOR (команда 4b, по умолчанию нет); стоковая прошивка Cudy на NOR-платах (M1300 v2) сверяет ID и уникальный ID микросхемы (`/proc/sys/dev/flash_uuid`, например `2040182040-` + 16 цифр) с bdinfo, без совпадения пароль администратора нельзя ни задать, ни проверить: задайте в `nor-id` ID микросхемы, а в `nor-uid=` — 16 цифр после `-` |
+| `flash-type=emmc`, `emmc-boot` | МБ (4) | вместо этого eMMC на MSDC0: один образ (первый `*.img` в папке флеша или `-drive if=sd`) = boot0 + boot1 (по `emmc-boot` МБ) + пользовательская область, размер — степень двойки |
 | `ddr` | `ddr3` · `ddr4` | тип распаянной памяти: BL2, собранный для другого типа, останавливает машину, как не проходит инициализация DRAM на настоящей плате |
 | `usb-port` | `none` · `2` · `3` | разъём USB (USB 3.0: устройства подключаются на SuperSpeed) |
 | `usb-host` | `VID:PID[;VID:PID…]` | проброс USB-устройств этого ПК в роутер (корневые порты USB 2.0 №2, 3, …, в том числе на платах без разъёма), например Wi-Fi-донгла, LTE-модема, USB-Ethernet; см. «USB Wi-Fi-донгл» |
@@ -112,7 +111,6 @@ BL2, на котором попробовать, — будем рады отз�
 | `led1` … `led32` | `ИМЯ: ЦВЕТ ИСТОЧНИК [+ ЦВЕТ ИСТОЧНИК…]` | светодиоды передней панели (см. ниже); `led-state` (QOM `/machine`) отдаёт их состояние |
 | `efuse` | файл | загрузить содержимое eFuse из дампа настоящей платы (до 4 КБ, как читается из `/sys/bus/nvmem/devices/nvmem0/nvmem`), чтобы калибровки и данные чипа совпадали с этой платой |
 | `efuse-uid` | 32 hex-цифры | задать уникальный блок чипа, чтобы несколько эмулированных плат не были одинаковыми |
-| `nand-uid` | 32 hex-цифры | уникальный ID SPI-NAND (по умолчанию выводится из имени папки флеша); стоковая прошивка Cudy сверяет ID микросхемы и уникальный ID (`/proc/sys/dev/flash_uuid`) с `fuuid` из bdinfo (`C801-` + уникальный ID + его дополнение), без совпадения вход закрыт («Invalid board info!»): задайте `nand-id=c8017f7f7f` и в `nand-uid=` 32 hex-цифры после `C801-` |
 
 Светодиоды передней панели: `led1=Status: red gpio:11:low + white gpio:10:low` —
 одна лампа двух цветов, у каждого цвета свой GPIO (`:low` = GPIO_ACTIVE_LOW).
@@ -144,16 +142,34 @@ device tree OpenWrt (`--write --all`).
 ## Пресеты плат
 
 Пресет — INI-файл: `name`, `description`, `soc` (`mt7981` по умолчанию,
-`mt7986`), `ram` (МБ), `nand-dir`, ключи
+`mt7986`), `ram` (МБ), `dump-dir` (папка флеша), ключи
 только для сборки пакета (`openwrt=` профиль OpenWrt, `openwrt-local=`
 своя сборка, `openwrt-stock=` дампы стокового загрузчика) и параметры
 машины. Их используют оба лаунчера; в Windows-лаунчере есть редактор
 (Ethernet, подписи портов коммутатора, тип/размер RAM, загрузочный флеш и
-второй флеш (SPI-NOR + SPI-NAND, `nor-nand`), USB, светодиоды (GPIO, PHY,
+второй флеш (SPI-NOR + SPI-NAND, `flash2-id`), USB, светодиоды (GPIO, PHY,
 WS2812B, 74HC595, PWM), GPIO
 кнопок с галкой «active high» — снята = active low, это умолчание и так
 у большинства роутеров; при сохранении из редактора комментарии `;`
 пропадают).
+
+**С версии 4.1** параметры флеша — `dump-dir`, `flash-type`, `flash-id`,
+`flash-mb`, `flash-uid` и `flash2-id` / `flash2-mb` / `flash2-uid`. Старые
+больше не принимаются: пресеты, которые вы сохранили сами до 4.1 (свои
+файлы `.ini`), нужно исправить вручную:
+
+| До 4.1 | С 4.1 |
+|---|---|
+| `nand-dir=ПАПКА` | `dump-dir=ПАПКА` |
+| `flash=nand` · `flash=nor` · `flash=emmc` | `flash-type=nand` · `nor` · `emmc` (MT7621 `flash=nand`: `flash-type=parallel-nand`) |
+| `nand=128` / `256` / `512` | `flash-id=efaa21` / `efaa22` / `efaa23` (или `flash-id` своей микросхемы с `flash-mb`) |
+| `nor=16` / `32` / `64` | `flash-id=ef4018` / `ef4019` / `ef4020` |
+| `nand-id=ID`, `nor-id=ID` | `flash-id=ID` |
+| `nand-uid=UID`, `nor-uid=UID` | `flash-uid=UID` |
+| `nor-nand=on` | `flash2-id=` вторая микросхема (`efaa23`, `ef4018`, …) |
+
+Windows-лаунчер тоже хранит последнюю папку флеша под новым именем: после
+обновления выберите её ещё раз.
 
 | Пресет | Ethernet | RAM | NAND | USB | Загрузчик |
 |---|---|---|---|---|---|
@@ -256,7 +272,7 @@ tools/prepare-nand.sh --soc mt7987 --flash-mb 256 --ubi-fip bananapi_bpi-r4-lite
 ./emulator.sh -P bananapi-bpi-r4-lite
 ```
 
-Платы с eMMC (GL.iNet GL-MT6000) — `flash=emmc`: модель контроллера MSDC
+Платы с eMMC (GL.iNet GL-MT6000) — `flash-type=emmc`: модель контроллера MSDC
 обслуживает TF-A и U-Boot (PIO) и Linux (DMA по дескрипторам); BL2
 загружается из загрузочного раздела boot0 eMMC («EMMC_BOOT»), FIP, ядро и
 rootfs — разделы GPT. `tools/prepare-nand.sh --soc mt7986 --emmc
@@ -313,11 +329,11 @@ TL-7DR7230 v1 есть только в снапшоте OpenWrt: в пресет
 
 ## SPI-NOR + SPI-NAND (Teltonika RUTC50, OpenWrt One)
 
-С `nor-nand=on` у платы оба флеша: SPI-NOR на SPI2 и SPI-NAND на SPI0
-(`nand-spi`). В папке флеша лежат файлы разделов NOR, в её подпапке `nand`
-— файлы NAND (те же имена `*mtdN*`, у каждого флеша свои); `flash=nor` или
-`flash=nand` задаёт, с какого флеша грузится BootROM, — это переключатель
-загрузки OpenWrt One.
+С `flash2-id` (или другим параметром `flash2-*`) у платы оба флеша: SPI-NOR
+на SPI2 и SPI-NAND на SPI0 (`nand-spi`). В папке флеша лежат файлы разделов
+NOR, в её подпапке `nand` — файлы NAND (те же имена `*mtdN*`, у каждого
+флеша свои); `flash-type` задаёт, с какого флеша грузится BootROM, вторая
+микросхема `flash2-*` — другой флеш; это переключатель загрузки OpenWrt One.
 
 ```
 nor-rutc50/mt7981.mtd0.BL2.bin … mt7981.mtd8.recovery.bin    SPI-NOR 16 МБ
@@ -339,7 +355,8 @@ nor-rutc50/nand/mt7981.mtd0.rutos-a.bin, mt7981.mtd1.rutos-b.bin   SPI-NAND 512 
 - **OpenWrt One** — официальные `snand-factory.bin` (BL2 + UBI с FIP,
   ubootenv, recovery, production) и `nor-factory.bin` (BL2 recovery,
   Factory с EEPROM Wi-Fi, FIP и система recovery). Пресет грузится с NAND;
-  `-o flash=nor` — переключатель в положении NOR (U-Boot и система
+  `-o flash-type=nor,flash-id=ef4018,flash2-id=efaa22` — переключатель в
+  положении NOR (U-Boot и система
   recovery). 2.5G PHY порта WAN — Airoha EN8811H (`gmac0=en8811h`): Linux
   загружает прошивку его MCU по MDIO, после чего линк поднимается на
   2,5 Гбит/с.
@@ -348,7 +365,8 @@ nor-rutc50/nand/mt7981.mtd0.rutos-a.bin, mt7981.mtd1.rutos-b.bin   SPI-NAND 512 
 tools/prepare-nand.sh --nor-nand rutc50 teltonika_rutc50 25.12.5
 ./emulator.sh -P teltonika-rutc50
 tools/prepare-nand.sh --nor-nand openwrt-one openwrt_one 25.12.5
-./emulator.sh -P openwrt-one            # -o flash=nor: recovery с NOR
+./emulator.sh -P openwrt-one            # recovery с NOR:
+#   -o flash-type=nor,flash-id=ef4018,flash2-id=efaa22
 ```
 
 ## MT7621 (MIPS)
@@ -372,8 +390,8 @@ GPIO с кнопками и светодиодами, PCIe-хост (три ко
 `mt7663e` (MT7663E / MT7613BE, 5 ГГц, драйвер mt7615e: ROM-патч и прошивка
 N9) загружают прошивку, hostapd работает, в эфир ничего не уходит; карта без
 EEPROM во флеше получает минимальный из eFuse с MAC 80:af:ca:11:22:35 +
-номер слота; параллельный NAND (NFI + ECC, PIO, `flash=nand`,
-`nand-id=`); программный тестовый движок DRAMC, так что вендорский stage1,
+номер слота; параллельный NAND (NFI + ECC, PIO,
+`flash-type=parallel-nand`, `flash-id=`); программный тестовый движок DRAMC, так что вендорский stage1,
 который сам калибрует DDR (стоковый U-Boot Xiaomi), находит окна;
 `poweroff=stop|halt` (`poweroff` / `halt` в Linux закрывают эмулятор или
 он остаётся остановленным, как сам чип, который не умеет выключать
@@ -441,12 +459,12 @@ tools/prepare-nand.sh --soc mt7621 --nor --stock DIR cudy_wr1300s 25.12.5 nor-wr
 `mt7621.mtd0.u-boot.bin` ... `mt7621.mtd4.bdinfo.bin` в одной папке и
 передайте её через `-n`. Её адрес LAN — 192.168.10.1
 (`-o lan-ip=192.168.10.1` с `-l user`), shell в консоли нет. В пресете —
-микросхема NOR платы (`nor-id=204018`, XMC XM25QH128D). Стоковая прошивка
+микросхема NOR платы (`flash-id=204018`, XMC XM25QH128D). Стоковая прошивка
 сверяет уникальный ID микросхемы с `bdinfo`: без ID вашего роутера пароль
 администратора нельзя ни задать, ни проверить («Invalid password!»).
-Передайте его в `nor-uid` — 16 цифр после `-` из
+Передайте его в `flash-uid` — 16 цифр после `-` из
 `cat /proc/sys/dev/flash_uuid` на роутере:
-`-o lan-ip=192.168.10.1,nor-uid=0123456789ABCDEF`.
+`-o lan-ip=192.168.10.1,flash-uid=0123456789ABCDEF`.
 
 В папке (`tools/mknand.py mt7621-nand`) — стоковые разделы, `kernel1.bin`
 OpenWrt в `kernel` (0x600000, «System 2») и `rootfs0.bin` в `ubi`;
@@ -525,7 +543,7 @@ tools/prepare-nand.sh --soc mt7621 --nor --nor-mb 64 --stock DIR --parts PARTS x
 | SPI (IPM) | `mtk_spim.c` | FIFO + DMA, полудуплексный режим spi-mem (TF-A/U-Boot/Linux) |
 | SPI-NAND | `spinand.c` | W25N01GV (2048+64) / W25N02KV (2048+128) / W25N04KV (512 МБ, 2048+128, две плоскости), on-die ECC, ONFI parameter page, страница уникального ID; хранилище — папка с дампами разделов (см. ниже) или один raw-образ с OOB |
 | eMMC | `mtk_msdc.c` + eMMC из QEMU | контроллер MSDC: команды, авто CMD23/CMD12, PIO через FIFO (TF-A, U-Boot), DMA по дескрипторам GPD/BD (Linux); карта с boot0/boot1 и пользовательской областью; BootROM загружает образы `EMMC_BOOT` из boot0 |
-| SPI-NOR | `spinor.c` | 3-байтовая адресация (до 16 МБ), задаваемый JEDEC ID, чтение 1-1-1/1-1-2/1-1-4/1-2-2/1-4-4, запись страниц, стирание 4K/32K/64K/всего чипа, регистры статуса с QE; BootROM загружает с него образы `SF_BOOT`; хранилище — такая же папка; с `nor-nand=on` — вместе с SPI-NAND |
+| SPI-NOR | `spinor.c` | 3-байтовая адресация (до 16 МБ), задаваемый JEDEC ID, чтение 1-1-1/1-1-2/1-1-4/1-2-2/1-4-4, запись страниц, стирание 4K/32K/64K/всего чипа, регистры статуса с QE; BootROM загружает с него образы `SF_BOOT`; хранилище — такая же папка; с `flash2-id` — вместе с SPI-NAND |
 | Ethernet | `mtk_eth.c` | frame engine: QDMA TX (Linux), PDMA RX, PDMA v2 (U-Boot); TSO и offload контрольных сумм; 2× LynxI SGMII PCS; любая комбинация коммутатора и PHY на двух GMAC; маршрутизация прерываний mainline Linux и SDK-драйвера MediaTek (заводские прошивки: группы `FE_INT_GRP`, PDMA RX на линиях pdma, GIC 189..192) |
 | Коммутатор | `mtk_eth.c` | MT7531: страничный доступ по MDIO, косвенный доступ к PHY, special tag MTK (DSA), FDB с обучением, port matrix, таблица VLAN (SDK-драйвер коммутатора MediaTek), порт 5 к PHY или к GMAC1, IRQ линка → EINT 38. Airoha AN8855: 32-битная шина регистров через страницу 4 MDIO, внутренние PHY на MDIO 1..5, регистры транслируются в модель MT7531 (CPU-порт 5). Встроенный коммутатор MT7988: модель MT7531 по MMIO 0x15020000, GbE PHY SoC (ID MT7988, калибровка из eFuse) |
 | PHY | `mtk_eth.c` | 5× GPHY MT7531; RTL8221B-VB-CG (C45, термодатчик); Motorcomm YT8821 (расширенные регистры, пространства UTP/SerDes, статус 2.5G); MaxLinear GPY211C (C45, версия прошивки, mailbox, термодатчик); Airoha EN8811H (окно buckpbus на странице 4 MDIO, загрузка прошивки MCU, статус 2.5G, регистры LED); встроенный GbE PHY MT7981 (с калибровкой); PHY на порту 5 MT7531; необязательные GPIO аппаратного сброса |
@@ -552,18 +570,18 @@ mtd1, … в полный образ, например `mt7981.mtd0.BL2.bin`,
 
 Всё, что роутер пишет во флеш (настройки, sysupgrade, env U-Boot),
 записывается обратно в эти файлы. Дампы с настоящего роутера
-(`cat /dev/mtdN > имя.mtdN.метка.bin`) подходят напрямую. При `flash=nor`
-папка — это содержимое SPI-NOR (например, BL2, u-boot-env, Factory,
-bdinfo, FIP, firmware); с `nor-nand=on` файлы NAND лежат в её подпапке
-`nand`. Если файлы меньше флеша (например, дамп 128 МБ
-запущен с `nand=256`), при первом запуске последний файл дополняется
+(`cat /dev/mtdN > имя.mtdN.метка.bin`) подходят напрямую. При
+`flash-type=nor` папка — это содержимое SPI-NOR (например, BL2, u-boot-env,
+Factory, bdinfo, FIP, firmware); с `flash2-id` файлы NAND лежат в её
+подпапке `nand`. Если файлы меньше флеша (например, дамп 128 МБ
+запущен с `flash-id=efaa22`), при первом запуске последний файл дополняется
 стёртыми байтами (`0xff`) до размера флеша, чтобы то, что роутер туда
 запишет, сохранялось.
 
-- [`tools/prepare-nand.sh`](tools/prepare-nand.sh) `[--stock ПАПКА [--nor] | --local ПАПКА] [--flash-mb N] [--no-bdinfo] ПРОФИЛЬ [ВЕРСИЯ] [ПАПКА_NAND]` — собирает папку NAND для профиля устройства OpenWrt: скачивает официальные образы с U-Boot OpenWrt (`ПРОФИЛЬ-ubootmod-*` или `ПРОФИЛЬ-*`, с проверкой sha256), или берёт свои сборки (`--local`), или оставляет стоковые BL2/FIP (`--stock`) с OpenWrt `sysupgrade.bin` в стоковой разметке; `--no-bdinfo` — для плат без раздела bdinfo, `--nor` — для плат с SPI-NOR (стоковые BL2/FIP + OpenWrt `sysupgrade.bin` в разделе `firmware`), `--soc mt7986` — для плат на MT7986 (файлы разделов `mt7986.mtdN.*`, минимальный EEPROM Wi-Fi в пустом Factory: ID чипа, MAC, 4 тракта, целевая мощность 20 дБм), `--ubi-fip` — для BL2 «spim-nand-ubi» (BL2 с 0, UBI с 0x200000, FIP — том `fip`), `--ubi-factory РАЗМЕР` (Factory как UBI-том `factory`, Asus BT8), `--emmc [--emmc-layout L]` (образ eMMC, см. [MT7988](#mt7988-filogic-880--860)), `--nor-nand rutc50|openwrt-one` (папка SPI-NOR + SPI-NAND, см. [выше](#spi-nor--spi-nand-teltonika-rutc50-openwrt-one)). Factory/bdinfo берутся из `factory/`.
+- [`tools/prepare-nand.sh`](tools/prepare-nand.sh) `[--stock ПАПКА [--nor] | --local ПАПКА] [--flash-type T --flash-id ID] [--no-bdinfo] ПРОФИЛЬ [ВЕРСИЯ] [ПАПКА_NAND]` — собирает папку NAND для профиля устройства OpenWrt (`--flash-type`, `--flash-id`, `--flash-mb`, `--flash2-id`, `--flash2-mb` — микросхемы как в пресете, их размеры из таблицы микросхем QEMU): скачивает официальные образы с U-Boot OpenWrt (`ПРОФИЛЬ-ubootmod-*` или `ПРОФИЛЬ-*`, с проверкой sha256), или берёт свои сборки (`--local`), или оставляет стоковые BL2/FIP (`--stock`) с OpenWrt `sysupgrade.bin` в стоковой разметке; `--no-bdinfo` — для плат без раздела bdinfo, `--nor` — для плат с SPI-NOR (стоковые BL2/FIP + OpenWrt `sysupgrade.bin` в разделе `firmware`), `--soc mt7986` — для плат на MT7986 (файлы разделов `mt7986.mtdN.*`, минимальный EEPROM Wi-Fi в пустом Factory: ID чипа, MAC, 4 тракта, целевая мощность 20 дБм), `--ubi-fip` — для BL2 «spim-nand-ubi» (BL2 с 0, UBI с 0x200000, FIP — том `fip`), `--ubi-factory РАЗМЕР` (Factory как UBI-том `factory`, Asus BT8), `--emmc [--emmc-layout L]` (образ eMMC, см. [MT7988](#mt7988-filogic-880--860)), `--nor-nand rutc50|openwrt-one` (папка SPI-NOR + SPI-NAND, см. [выше](#spi-nor--spi-nand-teltonika-rutc50-openwrt-one)). Factory/bdinfo берутся из `factory/`.
 - [`tools/mknand.py`](tools/mknand.py) — создание и правка образов: `create` (BL2, FIP, Factory, bdinfo, UBI из `.itb` или `sysupgrade.bin`), `write --part fip`, `read`, `split`, `join`, `--flash-mb 256`, `--no-bdinfo`, `nor` (папка SPI-NOR: разметка `--parts`, образ всего чипа `--raw`, `--mac-part`, окружение U-Boot `--env`; с `--nand-parts`, `--nand-file`, `--nand-sysupgrade` — ещё и подпапка `nand`).
 - [`tools/kernel-dts.sh`](tools/kernel-dts.sh) — DTS MediaTek из ядра с DTS-частями патчей OpenWrt (`work/kdts`) для плат, чей DTS лежит в дереве ядра (BPi-R4); оттуда их читает [`tools/dts-leds.py`](tools/dts-leds.py).
-- [`tools/mkemmc.py`](tools/mkemmc.py) — образ eMMC (`flash=emmc`): BL2 в boot0, GPT с разделами u-boot-env, factory, fip, kernel, rootfs (разметка GL-MT6000, `--layout wh3000-pro` или `--layout bpi-r4` с `--fit` / `--recovery` — FIT в production / recovery), OpenWrt `squashfs-factory.bin` в kernel + rootfs или `--sysupgrade` (tar sysupgrade), `--boot-env` (окружение U-Boot OpenWrt, загружающее раздел `kernel`).
+- [`tools/mkemmc.py`](tools/mkemmc.py) — образ eMMC (`flash-type=emmc`): BL2 в boot0, GPT с разделами u-boot-env, factory, fip, kernel, rootfs (разметка GL-MT6000, `--layout wh3000-pro` или `--layout bpi-r4` с `--fit` / `--recovery` — FIT в production / recovery), OpenWrt `squashfs-factory.bin` в kernel + rootfs или `--sysupgrade` (tar sysupgrade), `--boot-env` (окружение U-Boot OpenWrt, загружающее раздел `kernel`).
 
 ## Запуск
 
