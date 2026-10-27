@@ -113,7 +113,10 @@ def test_opt_in_service(guest, mirror, evidence):
     finally:
         # Do not delete managed files after any failure: ownership checks
         # on remove are authoritative; preserve private forensic evidence.
-        guest.execute('rm -f /opt/lab/kas-web-manage.sh', timeout=15)
+        try:
+            guest.execute('rm -f /opt/lab/kas-web-manage.sh', timeout=15)
+        except Exception:
+            pass
 
 
 def lifecycle(guest, mirror, revision, evidence, web_binary):
