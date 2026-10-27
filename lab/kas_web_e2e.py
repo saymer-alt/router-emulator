@@ -4,9 +4,9 @@ This is NOT a benchmark or physical KeeneticOS acceptance. The build-time
 bundled real config-import.sh must be the committed KAS source.
 Only fixed PASS/FAIL labels leave the private CI workspace.
 """
+import hashlib
 import json
 from pathlib import Path
-import shlex
 import time
 
 from lab.kas_lifecycle import install, prepare
@@ -60,6 +60,17 @@ def post(guest, source):
     return payload
 
 
+def put_large_binary(guest, path, content):
+    # 8+ MiB is much larger than ordinary KAS scripts; a default 30-second
+    # SSH command timeout is NOT a valid transfer budget for emulated CPU.
+    # Destination is fixed by the caller and never influenced by HTTP clients.
+    check(path == '/opt/lab/kas-web', 'unsafe_binary_destination')
+    guest.command('umask 077; cat > /opt/lab/kas-web; chmod 700 /opt/lab/kas-web',
+                  timeout=180, input_data=content)
+    remote_sha = guest.command('sha256sum /opt/lab/kas-web', timeout=30).split()[0]
+    check(remote_sha == hashlib.sha256(content).hexdigest(), 'web_binary_integrity_error')
+
+
 def lifecycle(guest, mirror, revision, evidence, web_binary):
     evidence.check('KAS_WEB_IMPORT', 'NOT_TESTED', 'unattempted')
     # Match the proven normal KAS lifecycle: trusted pinned sources and
@@ -74,12 +85,14 @@ def lifecycle(guest, mirror, revision, evidence, web_binary):
         evidence.check('KAS_WEB_IMPORT', 'BLOCKED', 'prerequisite_blocked')
         return False
     process_started = False
+    phase = 'BINARY_TRANSFER'
     try:
         data = Path(web_binary).read_bytes()
         check(data[:4] == b'\x7fELF' and len(data) <= 32 * 1024 * 1024,
               'invalid_web_binary')
         # Actual ARM64 binary, transferred with SHA-256 integrity check.
-        put(guest, '/opt/lab/kas-web', data, '700')
+        put_large_binary(guest, '/opt/lab/kas-web', data)
+        phase = 'SERVER_START'
         guest.command(
             'nohup /opt/lab/kas-web -listen 127.0.0.1:18081'
             ' </dev/null >/opt/lab/kas-web.log 2>&1 & echo $! > /opt/lab/kas-web.pid',
@@ -94,6 +107,7 @@ def lifecycle(guest, mirror, revision, evidence, web_binary):
             time.sleep(1)
         else:
             raise RuntimeError('web_loopback_server_unavailable')
+        phase = 'HTTP_GUARDS'
         # Negative checks must never run the importer.
         code = guest.command(
             "curl -sS --noproxy '*' --max-time 10"
@@ -107,6 +121,7 @@ def lifecycle(guest, mirror, revision, evidence, web_binary):
             " -H 'Host: attacker.example'"
             " -o /dev/null -w '%{http_code}' http://127.0.0.1:18081/api/status")
         check(code == '403', 'dns_rebinding_accepted')
+        phase = 'GOOD_YAML'
         # Preserve the real installed YAML, append harmless syntax-valid marker.
         guest.command(
             'umask 077; cp /opt/etc/mihomo/config.yaml /opt/lab/web-original.yaml; '
@@ -117,6 +132,7 @@ def lifecycle(guest, mirror, revision, evidence, web_binary):
         guest.command(
             'cmp -s /opt/etc/mihomo/config.yaml /opt/lab/web-good.yaml && '
             'cmp -s /opt/etc/mihomo/config.yaml.bak /opt/lab/web-original.yaml')
+        phase = 'INVALID_YAML'
         # This is an actual Mihomo YAML parser rejection after staging,
         # not merely a frontend/body pre-validation error.
         guest.command(
@@ -125,6 +141,7 @@ def lifecycle(guest, mirror, revision, evidence, web_binary):
         post(guest, '/opt/lab/web-bad.yaml')
         await_operation(guest, 'FAIL')
         guest.command('cmp -s /opt/etc/mihomo/config.yaml /opt/lab/web-good.yaml')
+        phase = 'RESTORE_YAML'
         # Restore original through the *same Web->canonical importer path*.
         post(guest, '/opt/lab/web-original.yaml')
         await_operation(guest, 'OK')
@@ -133,13 +150,16 @@ def lifecycle(guest, mirror, revision, evidence, web_binary):
             'test ! -e /tmp/mihomo-lifecycle.lock.d && '
             'test ! -e /tmp/mihomo.maintenance && '
             'test "$(pidof mihomo | wc -w)" -eq 1')
+        phase = 'POSTCONDITIONS'
         evidence.check('KAS_WEB_IMPORT', 'PASS', 'native_web_import_passed')
         print('KAS WEB: actual ARM64 HTTP upload -> canonical importer -> '
               'successful config, rejected invalid YAML, original restored: PASS', flush=True)
         return True
     except Exception as exc:
         evidence.check('KAS_WEB_IMPORT', 'FAIL', 'native_web_import_failed')
-        print('KAS WEB: FAIL (' + type(exc).__name__ + ')', flush=True)
+        # Public output is a fixed allowlisted phase name only, never a raw
+        # guest exception/URL/config. Detailed command output remains private.
+        print('KAS WEB: FAIL at ' + phase, flush=True)
         return False
     finally:
         if process_started:
