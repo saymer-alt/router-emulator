@@ -6,6 +6,9 @@ on:
   pull_request:
     paths:
       - "lab/**"
+      - "qemu-patches/**"
+      - "emulator.sh"
+      - "presets/cudy-wr3000p-v1.ini"
       - ".github/workflows/keenetic-lab.yml"
   workflow_dispatch:
 
@@ -27,7 +30,7 @@ jobs:
   openwrt-boot-reset:
     name: QEMU MT7981 - OpenWrt cold boot and reset
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 75
     env:
       EMU_VERSION: "3.8"
       OPENWRT_VERSION: "25.12.5"
@@ -37,9 +40,9 @@ jobs:
       - name: Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends mtd-utils unzip socat curl wget python3
+          sudo apt-get install -y --no-install-recommends mtd-utils unzip socat curl wget python3 build-essential ninja-build meson pkg-config libglib2.0-dev libpixman-1-dev zlib1g-dev libslirp-dev libfdt-dev python3-venv
 
-      - name: Download checked upstream emulator (no private firmware)
+      - name: Download checked 3.8 flash preparation seed (no private firmware)
         shell: bash
         run: |
           set -euo pipefail
@@ -59,6 +62,27 @@ jobs:
           set -euo pipefail
           cd "$EMU_ROOT"
           tools/prepare-nand.sh cudy_wr3000p-v1 "$OPENWRT_VERSION"
+
+      - name: Cache QEMU built from this checkout's patch series
+        id: qemu-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ runner.temp }}/ported-qemu/qemu-system-aarch64
+            ${{ runner.temp }}/ported-qemu/qemu.sha256
+          key: ported-qemu-ubuntu24-v10.1.0-${{ hashFiles('qemu-patches/*.patch', 'lab/build_qemu.sh') }}
+
+      - name: Build current patched QEMU
+        if: steps.qemu-cache.outputs.cache-hit != 'true'
+        run: bash lab/build_qemu.sh "$RUNNER_TEMP/ported-qemu"
+
+      - name: Install current QEMU, launcher and preset
+        run: |
+          (cd "$RUNNER_TEMP/ported-qemu" && sha256sum -c qemu.sha256)
+          install -m 755 "$RUNNER_TEMP/ported-qemu/qemu-system-aarch64" "$EMU_ROOT/qemu/qemu-system-aarch64"
+          install -m 755 emulator.sh "$EMU_ROOT/emulator.sh"
+          install -m 644 presets/cudy-wr3000p-v1.ini "$EMU_ROOT/presets/cudy-wr3000p-v1.ini"
+          install -m 644 VERSION "$EMU_ROOT/VERSION"
 
       - name: Run isolated scenario and produce JSON/JUnit
         shell: bash
