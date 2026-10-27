@@ -10,11 +10,12 @@ class WebImporterContractTests(unittest.TestCase):
         payload = b'fake-ELF-for-test'
         digest = __import__('hashlib').sha256(payload).hexdigest()
         guest = Mock()
-        guest.command.side_effect = [None, digest + '  /opt/lab/kas-web']
+        guest.command.side_effect = [None, None, digest + '  /opt/lab/.kas-web.new', None]
         kas_web_e2e.put_large_binary(guest, '/opt/lab/kas-web', payload)
-        call = guest.command.call_args_list[0]
-        self.assertEqual(call.kwargs['timeout'], 180)
-        self.assertEqual(call.kwargs['input_data'], payload)
+        calls = guest.command.call_args_list
+        self.assertEqual(calls[1].kwargs['timeout'], 45)
+        self.assertEqual(calls[1].kwargs['input_data'], payload)
+        self.assertIn('mv /opt/lab/.kas-web.new', calls[-1].args[0])
         with self.assertRaises(RuntimeError):
             kas_web_e2e.put_large_binary(guest, '/untrusted/path', payload)
 
