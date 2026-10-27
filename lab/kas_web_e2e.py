@@ -107,7 +107,7 @@ def test_opt_in_service(guest, mirror, evidence):
         home_default = b'-lan -listen auto' in mirror.sources[key]
         if home_default:
             iface = guest.command('ip -4 -o addr show dev br0', timeout=15)
-            match = re.search(r'inet (\\d+\\.\\d+\\.\\d+\\.\\d+)/(\\d+)', iface)
+            match = re.search(r'inet (\d+\.\d+\.\d+\.\d+)/(\d+)', iface)
             check(match is not None, 'web_home_bridge_address_missing')
             home_ip = ipaddress.IPv4Address(match.group(1))
             check(home_ip.is_private, 'web_home_not_private')
