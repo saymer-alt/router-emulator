@@ -111,7 +111,7 @@ def run_entware(args, private, credentials, coldboot, evidence):
                 completed['ok'] = False
                 return
             print('KAS PREFLIGHT: native runtime capabilities verified', flush=True)
-            if args.stage in ('kas', 'uninstall-packages'):
+            if args.stage in ('kas', 'uninstall-packages', 'web'):
                 if args.stage == 'web':
                     from lab.kas_web_e2e import lifecycle
                     completed['ok'] = lifecycle(guest, tls, args.kas_ref, evidence, args.web_bin)
@@ -189,7 +189,7 @@ def main():
     evidence.reference('keenboot_sha256', '8b8615b345d912187853fea6bef6b1868760fd52ed92ba7c3a380ad5533cbf08')
     for name, filename in (('entware_lock_sha256', 'entware.lock.json'), ('kas_assets_lock_sha256', 'kas-assets.lock.json')):
         evidence.reference(name, hashlib.sha256(Path(__file__).with_name(filename).read_bytes()).hexdigest())
-    if args.stage in ('kas', 'uninstall-packages'):
+    if args.stage in ('kas', 'uninstall-packages', 'web'):
         evidence.reference('kas_commit', args.kas_ref)
     try:
         nand = private / 'nand'
