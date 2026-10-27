@@ -123,6 +123,36 @@ def test_opt_in_service(guest, mirror, evidence):
         guest.command('sh /opt/etc/init.d/S98kas-control-center stop', timeout=90)
         check(guest.command('sh /opt/etc/init.d/S98kas-control-center status') ==
               'NOT_RUNNING', 'web_service_stop_failed')
+        if home_default:
+            # No KAS password by default. Then explicitly opt in to a private
+            # LAN password while router-owned KeenDNS proxy auth is delegated.
+            # All credentials here are disposable lab literals, never real.
+            guest.command(
+                "umask 077; printf '%s\\n' 'lab-local-panel-password-1234'"
+                " > /opt/etc/kas-control-center.password; "
+                "printf '%s\\n' 'https://kas.lab.keenetic.pro'"
+                " > /opt/etc/kas-control-center.proxy-origin", timeout=15)
+            guest.command('sh /opt/etc/init.d/S98kas-control-center start', timeout=30)
+            direct = guest.command(
+                "curl -sS --noproxy '*' --max-time 5 -o /dev/null"
+                " -w '%{http_code}' http://" + str(home_ip) +
+                ":18081/api/status", timeout=15)
+            check(direct == '401', 'web_optional_password_not_enforced')
+            permitted = guest.command(
+                "curl -sS --noproxy '*' --max-time 5"
+                " -u kas:lab-local-panel-password-1234 -o /dev/null"
+                " -w '%{http_code}' http://" + str(home_ip) +
+                ":18081/api/status", timeout=15)
+            check(permitted == '200', 'web_optional_password_rejected')
+            via_router = guest.command(
+                "curl -sS --noproxy '*' --max-time 5"
+                " -H 'Host: kas.lab.keenetic.pro' -o /dev/null"
+                " -w '%{http_code}' http://" + str(home_ip) +
+                ":18081/api/status", timeout=15)
+            check(via_router == '200', 'web_router_proxy_required_second_password')
+            guest.command('sh /opt/etc/init.d/S98kas-control-center stop', timeout=90)
+            guest.command('rm -f /opt/etc/kas-control-center.password '
+                          '/opt/etc/kas-control-center.proxy-origin', timeout=15)
         guest.command('sh /opt/etc/init.d/S98kas-control-center remove', timeout=90)
         guest.command('test ! -e /opt/bin/kas-control-center && '
                       'test ! -e /opt/etc/init.d/S98kas-control-center && '
