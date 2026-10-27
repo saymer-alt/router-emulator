@@ -2,7 +2,7 @@
 """Power-cut stress test: kill (QMP quit) or reset QEMU at random moments,
 then check that BL2 still loads FIP (BL31 starts).
   powercut.py NANDDIR [MACHINE-OPTS] [ROUNDS]
-MACHINE-OPTS: -M options after nand-dir, default WR3000H-like hardware."""
+MACHINE-OPTS: -M options after dump-dir, default WR3000H-like hardware."""
 import json, os, random, socket, subprocess, sys, time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 nand = os.path.abspath(sys.argv[1]); opts = sys.argv[2] if len(sys.argv) > 2 else "gmac0=mt7531,ports=lan4:lan3:lan2:lan1:-,gmac1=rtl8221b,ddr=ddr3"
@@ -10,7 +10,7 @@ rounds = int(sys.argv[3]) if len(sys.argv) > 3 else 6
 
 def start():
     port = random.randint(20000, 40000)
-    q = subprocess.Popen([ROOT + "/src/qemu/build/qemu-system-aarch64", "-M", f"mt7981-router,nand-dir={nand},{opts}",
+    q = subprocess.Popen([ROOT + "/src/qemu/build/qemu-system-aarch64", "-M", f"mt7981-router,dump-dir={nand},{opts}",
         "-display", "none", "-serial", f"tcp:127.0.0.1:{port},server=on,wait=off",
         "-qmp", f"tcp:127.0.0.1:{port+1},server=on,wait=off", "-nic", "none"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

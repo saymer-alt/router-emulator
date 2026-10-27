@@ -41,9 +41,9 @@ namespace RouterEmulator
         ComboBox board, wan, lan;
         Label boardDesc;
         Button btnEdit;
-        TextBox nand, usb, logs;
+        TextBox dumpDir, usb, logs;
         CheckBox useUsb, gpioLog, useLogs;
-        Button nandBrowse, usbBrowse, logsBrowse, usbDevRefresh;
+        Button dumpDirBrowse, usbBrowse, logsBrowse, usbDevRefresh;
         TextBox usbDev;
         // passed through USB devices: "vid:pid" -> name
         List<KeyValuePair<string, string>> usbDevs = new List<KeyValuePair<string, string>>();
@@ -131,14 +131,14 @@ namespace RouterEmulator
             Controls.Add(boardDesc);
             y += 38;
 
-            AddLabel("main.nand", "Flash folder:", y);
-            nand = new TextBox { Left = 130, Top = y, Width = 380 };
-            Controls.Add(nand);
-            nandBrowse = AddBrowse(nand, y);
+            AddLabel("main.dump_dir", "Flash folder:", y);
+            dumpDir = new TextBox { Left = 130, Top = y, Width = 380 };
+            Controls.Add(dumpDir);
+            dumpDirBrowse = AddBrowse(dumpDir, y);
             y += 22;
-            var nandHint = new Label { Left = 130, Top = y, Width = 470, Height = 18, ForeColor = Color.DimGray };
-            Tr(nandHint, "main.nand_hint", "Files *.mtd0.BL2.bin, *.mtd1.*.bin ... are joined in mtd order into the flash.");
-            Controls.Add(nandHint);
+            var dumpDirHint = new Label { Left = 130, Top = y, Width = 470, Height = 18, ForeColor = Color.DimGray };
+            Tr(dumpDirHint, "main.dump_dir_hint", "Files *.mtd0.BL2.bin, *.mtd1.*.bin ... are joined in mtd order into the flash.");
+            Controls.Add(dumpDirHint);
             y += 28;
 
             AddLabel("main.wan", "WAN port:", y);
@@ -256,7 +256,7 @@ namespace RouterEmulator
             lan.SelectionChangeCommitted += delegate { WarnBridgeAdmin(lan); };
             board.SelectedIndexChanged += delegate { OnBoardChanged(); };
             FillPresets(Get("preset"));
-            if (Get("nand") != "") nand.Text = Get("nand");
+            if (Get("dump-dir") != "") dumpDir.Text = Get("dump-dir");
             usb.Text = Get("usb", Path.Combine(root, "usb"));
             useUsb.Checked = Get("useusb", "1") == "1";
             logs.Text = Get("logs", Path.Combine(root, "logs"));
@@ -337,14 +337,14 @@ namespace RouterEmulator
         void UpdateFolders()
         {
             bool off = qemu == null || qemu.HasExited;
-            nand.Enabled = nandBrowse.Enabled = off;
+            dumpDir.Enabled = dumpDirBrowse.Enabled = off;
             usb.Enabled = usbBrowse.Enabled = off && useUsb.Enabled && useUsb.Checked;
             logs.Enabled = logsBrowse.Enabled = off && useLogs.Checked;
         }
 
-        string NandOf(Preset p)
+        string DumpDirOf(Preset p)
         {
-            string d = p.Get("nand-dir", "nand");
+            string d = p.Get("dump-dir", "nand");
             return Path.IsPathRooted(d) ? d : Path.Combine(root, d);
         }
 
@@ -373,11 +373,11 @@ namespace RouterEmulator
             boardDesc.Text = b.Description;
             RefillNetworks();       // "This PC only" shows the preset's forwards
             // follow the preset's NAND folder unless the user picked another one
-            string cur = nand.Text;
+            string cur = dumpDir.Text;
             bool presetDir = cur == "";
             foreach (Preset o in board.Items)
-                if (string.Equals(cur, NandOf(o), StringComparison.OrdinalIgnoreCase)) presetDir = true;
-            if (presetDir) nand.Text = NandOf(b);
+                if (string.Equals(cur, DumpDirOf(o), StringComparison.OrdinalIgnoreCase)) presetDir = true;
+            if (presetDir) dumpDir.Text = DumpDirOf(b);
             useUsb.Enabled = b.HasUsb && (qemu == null || qemu.HasExited);
             if (usbBrowse != null) UpdateFolders();
         }
@@ -387,8 +387,8 @@ namespace RouterEmulator
             using (var f = new PresetForm(PresetDir, root, p)) {
                 if (f.ShowDialog(this) != DialogResult.OK) return;
                 string sel = f.Deleted ? "" : Path.GetFileName(f.Result.FilePath);
-                if (f.Result != null && p != null && string.Equals(nand.Text, NandOf(p), StringComparison.OrdinalIgnoreCase))
-                    nand.Text = NandOf(f.Result);
+                if (f.Result != null && p != null && string.Equals(dumpDir.Text, DumpDirOf(p), StringComparison.OrdinalIgnoreCase))
+                    dumpDir.Text = DumpDirOf(f.Result);
                 FillPresets(sel);
             }
         }
@@ -560,7 +560,7 @@ namespace RouterEmulator
             if (b == null) { Error(L.T("err.no_preset", "Select or create a board preset first.")); return; }
             string exe = Path.Combine(root, "qemu", b.QemuExe);
             if (!File.Exists(exe)) { Error(L.F("err.not_found", "Not found: {0}", exe)); return; }
-            if (!Directory.Exists(nand.Text)) { Error(L.F("err.no_nand", "Flash folder does not exist:\n{0}", nand.Text)); return; }
+            if (!Directory.Exists(dumpDir.Text)) { Error(L.F("err.no_dump_dir", "Flash folder does not exist:\n{0}", dumpDir.Text)); return; }
             var w = (NetChoice)wan.SelectedItem;
             var l = (NetChoice)lan.SelectedItem;
             if (w.Kind == "pcap" && l.Kind == "pcap" && w.Device == l.Device &&
@@ -591,7 +591,7 @@ namespace RouterEmulator
             // serial console (+ QEMU monitor via Ctrl-A C) on a local socket,
             // shown in the built-in terminal; QEMU waits until it connects
             var args = new List<string> {
-                "-M", b.Machine + ",nand-dir=" + Esc(nand.Text) + b.MachineOptions(root)
+                "-M", b.Machine + ",dump-dir=" + Esc(dumpDir.Text) + b.MachineOptions(root)
                       + (gpioLog.Checked ? ",gpio-log=on" : "")
                       + (usbDevs.Count > 0 ? ",usb-host=" + string.Join(";", usbDevs.ConvertAll(d => d.Key).ToArray()) : "")
                       + (resetHoldMs > 0 ? ",reset-hold=" + resetHoldMs : ""),
@@ -954,7 +954,7 @@ namespace RouterEmulator
             try {
                 File.WriteAllLines(CfgPath, new[] {
                     "preset=" + (board.SelectedItem != null ? Path.GetFileName(((Preset)board.SelectedItem).FilePath) : ""),
-                    "nand=" + nand.Text,
+                    "dump-dir=" + dumpDir.Text,
                     "usb=" + usb.Text,
                     "useusb=" + (useUsb.Checked ? "1" : "0"),
                     "logs=" + logs.Text,

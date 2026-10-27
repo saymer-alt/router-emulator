@@ -220,8 +220,8 @@ WAN = `offline`, LAN = только loopback (`127.0.0.1`).
 ## Происхождение и лицензии
 
 - Базовый эмулятор разработан upstream: [stavultras/router-emulator](https://github.com/stavultras/router-emulator)
-  (набор патчей QEMU v10.1.0 и инструменты). Текущая база `main` — **upstream 4.0**
-  (`3ae3e14`, merge PR #33; пост-релизные коммиты upstream без тега не догоняются —
+  (набор патчей QEMU v10.1.0 и инструменты). Текущая база `main` — **upstream 4.1**
+  (`2687edeb`, синхронизация с релизом [v4.1](https://github.com/stavultras/router-emulator/releases/tag/v4.1);
   см. [VERSION](VERSION)); лабораторная обвязка `lab/` — часть `main` (слита PR #1–#3).
   Исходная документация сохранена без изменений:
   [README.upstream.md](README.upstream.md) (English), [README.ru.md](README.ru.md) (Русский).

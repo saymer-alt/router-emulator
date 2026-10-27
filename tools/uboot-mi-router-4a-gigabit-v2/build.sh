@@ -12,14 +12,14 @@
 #
 #   tools/uboot-mi-router-4a-gigabit-v2/build.sh [OUT.bin]
 #
-#   default OUT: work/u-boot-mt7621-mi-router-4a-gigabit-v2.bin (not in the
-#   repository and not built by CI: owners of such a router have theirs)
+#   default OUT: tools/uboot-mi-router-4a-gigabit-v2/u-boot.bin (padded
+#   with 0xff to the u-boot partition, 0x30000; not built by CI)
 #   CROSS_COMPILE (default mipsel-linux-gnu-)
 set -e
 cd "$(dirname "$(readlink -f "$0")")/../.."
 ROOT=$PWD
 HERE=$ROOT/tools/uboot-mi-router-4a-gigabit-v2
-OUT=$(readlink -f "${1:-$ROOT/work/u-boot-mt7621-mi-router-4a-gigabit-v2.bin}")
+OUT=$(readlink -f "${1:-$HERE/u-boot.bin}")
 export CROSS_COMPILE=${CROSS_COMPILE:-mipsel-linux-gnu-}
 MK=src/openwrt/package/boot/uboot-mediatek/Makefile
 VER=$(sed -n 's/^PKG_VERSION:=//p' $MK)
@@ -44,7 +44,8 @@ mkdir -p "$SRC/defenvs"
 cp "$HERE/xiaomi_mi-router-4a-gigabit-v2_env" "$SRC/defenvs/"
 make -C "$SRC" -s mt7621_xiaomi_mi-router-4a-gigabit-v2_defconfig
 make -C "$SRC" -s -j"$(nproc)"
-[ "$(stat -c %s "$SRC/u-boot-mt7621.bin")" -le $((0x30000)) ] ||
+SIZE=$(stat -c %s "$SRC/u-boot-mt7621.bin")
+[ "$SIZE" -le $((0x30000)) ] ||
     { echo "u-boot-mt7621.bin is bigger than the u-boot partition" >&2; exit 1; }
-cp "$SRC/u-boot-mt7621.bin" "$OUT"
+{ cat "$SRC/u-boot-mt7621.bin"; head -c $((0x30000 - SIZE)) /dev/zero | tr '\0' '\377'; } > "$OUT"
 echo "wrote $OUT ($(stat -c %s "$OUT") bytes)"

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Build an eMMC image for the emulator (machine option flash=emmc), e.g. for
+Build an eMMC image for the emulator (machine option flash-type=emmc), e.g. for
 the GL.iNet GL-MT6000 (MT7986A) with the OpenWrt U-Boot.
 
 The image file is what the emulated eMMC holds, in this order:

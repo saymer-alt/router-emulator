@@ -65,3 +65,12 @@ git cat-file -p main:VERSION                                        # верси
 diff <(git show upstream/main:README.md | tail -n +2) \
      <(tail -n +9 README.upstream.md | tr -d '\r')                  # тело документации совпадает
 ```
+
+## Синхронизация с версией 4.1 (27.10.2026)
+
+- Исходный релиз upstream: [v4.1](https://github.com/stavultras/router-emulator/releases/tag/v4.1), коммит `2687edebaf58b2ba92ba2c39e35196ba69265255`.
+- Собственный IRQ-патч Filogic перенумерован с 0063 на 0064; upstream 0063 — flash chips by type and ID.
+- README.md форка сохранён как лендинг лаборатории, README.upstream.md обновлён английским текстом upstream.
+- В `build.yml` сохранены наши фильтры лабораторных workflow, а базовая конфигурация сборки взята из 4.1.
+- Параметр CLI `emulator.sh -n` сохранён в upstream 4.1; он передаётся в QEMU как `dump-dir`. Это позволяет сохранить совместимость существующего `lab/run.py --nand-dir`.
+- Применение обоих патчей и полная совместимость E2E требуют подтверждения тестами CI. Старые собранные `src/qemu` не использовать для первичной проверки: чистая сборка обязательна.

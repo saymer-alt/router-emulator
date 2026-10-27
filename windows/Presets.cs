@@ -5,14 +5,15 @@
 //   name=...            shown in the model list
 //   description=...     hardware summary
 //   ram=512             MB (-m)
-//   nand-dir=nand-xxx   default NAND folder (relative to the program folder)
+//   dump-dir=nand-xxx   default flash folder: the partition dumps (relative
+//                       to the program folder)
 //   openwrt=...         OpenWrt device profile the package's NAND folder is
 //                       built from (build-windows.sh; ignored here)
 //   soc=mt7981          SoC: mt7981 (default) or mt7986, the machine is
 //                       <soc>-router
 //   led1=...            front panel LEDs (see Leds.cs), also machine options
 //   key=value           every other key is a machine option
-//                       (gmac0, gmac1, ports, nand, ddr, usb-port, ...)
+//                       (gmac0, gmac1, ports, flash-type, flash-id, ddr, ...)
 
 using System;
 using System.Collections.Generic;
@@ -62,8 +63,8 @@ namespace RouterEmulator
         // machine options of the MT7621 machine (the editor writes the
         // Filogic ones, e.g. gmac0/nand, for every preset)
         static readonly string[] Mt7621Keys = { "ports", "ddr", "usb-port", "reset-gpio", "wps-gpio",
-            "reset-active-high", "wps-active-high", "pcie0", "pcie1", "pcie2", "flash", "nand-id",
-            "nor", "nor-id", "nor-uid", "dcache", "poweroff" };   // + led1..ledN
+            "reset-active-high", "wps-active-high", "pcie0", "pcie1", "pcie2", "flash-type", "flash-id",
+            "flash-mb", "flash-uid", "dcache", "poweroff" };   // + led1..ledN
 
         // LAN1 "This PC only": router LAN address and port forwards
         // "pcport:routerport,..." from 127.0.0.1 to the router
@@ -131,7 +132,7 @@ namespace RouterEmulator
         {
             var sb = new StringBuilder();
             foreach (var kv in Values) {
-                if (kv.Key == "name" || kv.Key == "description" || kv.Key == "ram" || kv.Key == "nand-dir"
+                if (kv.Key == "name" || kv.Key == "description" || kv.Key == "ram" || kv.Key == "dump-dir"
                     || kv.Key == "soc"                 // selects the machine
                     || kv.Key.StartsWith("lan-")       // LAN1 "This PC only" network
                     || kv.Key.StartsWith("openwrt"))   // used by the package build only
@@ -208,7 +209,7 @@ namespace RouterEmulator
         public Preset Result;   // saved preset (null if deleted / cancelled)
         public bool Deleted;
 
-        TextBox name, desc, nandDir;
+        TextBox name, desc, dumpDir;
         ComboBox soc, gmac0, gmac1, gmac0Port, gmac1Port, port5, port5Port, nandSize, flash2, ddr, ram, usbPort, pcieWifi;
         // MT7621 boards: Wi-Fi cards in the three PCIe slots, data cache model
         ComboBox[] pcieSlot = new ComboBox[3];
@@ -237,10 +238,11 @@ namespace RouterEmulator
         // keys written by the editor (dropped when not applicable)
         static readonly List<string> Known = new List<string> {
             "name", "description", "gmac0", "ports", "gmac0-port", "gmac0-reset-gpio", "gmac1",
-            "gmac1-port", "gmac1-reset-gpio", "nand", "ddr", "ram", "usb-port", "reset-gpio",
-            "wps-gpio", "reset-active-high", "wps-active-high", "lan-ip", "lan-forwards", "nand-dir",
-            "flash", "nor", "nor-id", "nor-uid", "poweroff", "efuse", "efuse-uid", "nand-uid", "soc", "port5",
-            "port5-phy-addr", "port5-reset-gpio", "pcie-wifi", "nor-nand", "nand-id", "pcie0", "pcie1",
+            "gmac1-port", "gmac1-reset-gpio", "ddr", "ram", "usb-port", "reset-gpio",
+            "wps-gpio", "reset-active-high", "wps-active-high", "lan-ip", "lan-forwards", "dump-dir",
+            "flash-type", "flash-id", "flash-mb", "flash-uid", "flash2-id", "flash2-mb", "flash2-uid",
+            "poweroff", "efuse", "efuse-uid", "soc", "port5",
+            "port5-phy-addr", "port5-reset-gpio", "pcie-wifi", "pcie0", "pcie1",
             "pcie2", "dcache" };
 
         public PresetForm(string presetDir, string root, Preset p)
@@ -338,12 +340,12 @@ namespace RouterEmulator
                 new Choice("1024", "1 " + gb),
                 new Choice("2048", "2 " + gb));
             // (boot flash list follows)
-            // value: "nand:<MB>[:<JEDEC ID>]" or "nor:<MB>:<JEDEC ID>"
+            // value: "nand:<MB>:<JEDEC ID>" or "nor:<MB>:<JEDEC ID>"
             nandSize = Combo(mem, L.T("ed.flash", "Boot flash:"), ref gy,
-                new Choice("nand:128", "SPI-NAND 128 " + mb + " (Winbond W25N01GV)"),
+                new Choice("nand:128:efaa21", "SPI-NAND 128 " + mb + " (Winbond W25N01GV)"),
                 new Choice("nand:128:c8017f7f7f", "SPI-NAND 128 " + mb + " (ESMT F50L1G41LB)"),
-                new Choice("nand:256", "SPI-NAND 256 " + mb + " (Winbond W25N02KV)"),
-                new Choice("nand:512", "SPI-NAND 512 " + mb + " (Winbond W25N04KV)"),
+                new Choice("nand:256:efaa22", "SPI-NAND 256 " + mb + " (Winbond W25N02KV)"),
+                new Choice("nand:512:efaa23", "SPI-NAND 512 " + mb + " (Winbond W25N04KV)"),
                 new Choice("nor:16:ef4018", "SPI-NOR 16 " + mb + " (Winbond W25Q128JV)"),
                 new Choice("nor:16:204018", "SPI-NOR 16 " + mb + " (XMC XM25QH128C/D)"),
                 new Choice("nor:16:c84018", "SPI-NOR 16 " + mb + " (GigaDevice GD25Q128)"),
@@ -364,9 +366,9 @@ namespace RouterEmulator
             // (nor-nand=on, e.g. Teltonika RUTC50, OpenWrt One)
             flash2 = Combo(mem, L.T("ed.flash2", "Second flash:"), ref gy,
                 new Choice("none", L.T("ed.none", "None")),
-                new Choice("nand:128", "SPI-NAND 128 " + mb + " (Winbond W25N01GV)"),
-                new Choice("nand:256", "SPI-NAND 256 " + mb + " (Winbond W25N02KV)"),
-                new Choice("nand:512", "SPI-NAND 512 " + mb + " (Winbond W25N04KV)"),
+                new Choice("nand:128:efaa21", "SPI-NAND 128 " + mb + " (Winbond W25N01GV)"),
+                new Choice("nand:256:efaa22", "SPI-NAND 256 " + mb + " (Winbond W25N02KV)"),
+                new Choice("nand:512:efaa23", "SPI-NAND 512 " + mb + " (Winbond W25N04KV)"),
                 new Choice("nor:16:ef4018", "SPI-NOR 16 " + mb + " (Winbond W25Q128JV)"),
                 new Choice("nor:16:204018", "SPI-NOR 16 " + mb + " (XMC XM25QH128C/D)"),
                 new Choice("nor:16:c84018", "SPI-NOR 16 " + mb + " (GigaDevice GD25Q128)"),
@@ -388,13 +390,13 @@ namespace RouterEmulator
             mem.Controls.Add(pcieHint);
             Extra(pcieWifi, pcieHint);
             gy += 14;
-            mem.Controls.Add(new Label { Left = 10, Top = gy + 3, Width = 130, Text = L.T("ed.nand_dir", "Flash folder:") });
-            nandDir = new TextBox { Left = 140, Top = gy, Width = 370 };
-            mem.Controls.Add(nandDir);
+            mem.Controls.Add(new Label { Left = 10, Top = gy + 3, Width = 130, Text = L.T("ed.dump_dir", "Flash folder:") });
+            dumpDir = new TextBox { Left = 140, Top = gy, Width = 370 };
+            mem.Controls.Add(dumpDir);
             var browse = new Button { Left = 516, Top = gy - 1, Width = 84, Height = 25, Text = L.T("main.browse", "Browse...") };
             browse.Click += delegate {
-                using (var d = new FolderBrowserDialog { SelectedPath = FullDir(nandDir.Text) }) {
-                    if (d.ShowDialog(this) == DialogResult.OK) nandDir.Text = RelDir(d.SelectedPath);
+                using (var d = new FolderBrowserDialog { SelectedPath = FullDir(dumpDir.Text) }) {
+                    if (d.ShowDialog(this) == DialogResult.OK) dumpDir.Text = RelDir(d.SelectedPath);
                 }
             };
             mem.Controls.Add(browse);
@@ -582,7 +584,7 @@ namespace RouterEmulator
             p.Set("ports", "lan1:lan2:lan3:lan4:-");
             p.Set("gmac1", "rtl8221b");
             p.Set("gmac1-port", "wan");
-            p.Set("nand", "128");
+            p.Set("flash-type", "nand");
             p.Set("ddr", "ddr4");
             p.Set("ram", "512");
             p.Set("usb-port", "2");
@@ -670,13 +672,18 @@ namespace RouterEmulator
         static string ChipId(string v)
         {
             var f = v.Split(':');
-            if (f[0] == "emmc") return "";
-            return f.Length > 2 ? f[2] : WinbondNandId(f[1]);
+            return f.Length > 2 ? f[2] : "";
         }
 
-        static string WinbondNandId(string mb)
+        // the list entry of a chip ("nand", "nor", "pnand") by its ID; an ID
+        // not in the list (kept in the ID box): the first chip of that size
+        static string FindChip(ComboBox list, string kind, string mb, string id)
         {
-            return mb == "512" ? "efaa23" : mb == "256" ? "efaa22" : "efaa21";
+            var chips = list.Items.Cast<Choice>().Where(ch => ch.Value.StartsWith(kind + ":")).ToList();
+            var c = chips.FirstOrDefault(ch => id != "" && ch.Value.EndsWith(":" + id))
+                ?? chips.FirstOrDefault(ch => ch.Value.StartsWith(kind + ":" + mb + ":"))
+                ?? chips.FirstOrDefault();
+            return c != null ? c.Value : "";
         }
 
         static string Val(ComboBox c) { var ch = c.SelectedItem as Choice; return ch != null ? ch.Value : ""; }
@@ -708,25 +715,23 @@ namespace RouterEmulator
             SelectValue(ddr, p.Get("ddr", "ddr4"));
             SelectValue(ram, p.Get("ram", "512"));
             // the boot flash; MT7621 machines default to SPI-NOR
-            string bootFlash = p.Get("flash", p.Soc == "mt7621" ? "nor" : "nand");
-            string spiNandId = p.Get("nand-id").ToLowerInvariant();
-            string spiNand = "nand:" + p.Get("nand", "128");
-            if (spiNandId != "" && nandSize.Items.Cast<Choice>().Any(ch => ch.Value == spiNand + ":" + spiNandId))
-                spiNand += ":" + spiNandId;
-            SelectValue(nandSize, bootFlash == "nor"
-                ? "nor:" + p.Get("nor", "16") + ":" + p.Get("nor-id", "ef4018").ToLowerInvariant()
-                : bootFlash == "emmc" ? "emmc:0"
-                : p.Soc == "mt7621" ? "pnand:128:" + p.Get("nand-id", "ecf1009540").ToLowerInvariant()
-                : spiNand);
+            // the chips by flash-type + flash-id (without an ID the machine's
+            // default: the first chip of the type in the list)
+            string type = p.Get("flash-type", p.Soc == "mt7621" ? "nor" : "nand");
+            string kind = type == "parallel-nand" ? "pnand" : type;
+            string id = p.Get("flash-id").ToLowerInvariant();
+            string boot = kind == "emmc" ? "emmc:0" : FindChip(nandSize, kind, p.Get("flash-mb"), id);
+            SelectValue(nandSize, boot);
             // an ID of the preset that is not in the list is kept
-            flashId.Text = bootFlash == "nor" ? p.Get("nor-id", "ef4018").ToLowerInvariant()
-                : bootFlash == "emmc" ? ""
-                : p.Soc == "mt7621" ? p.Get("nand-id", "ecf1009540").ToLowerInvariant()
-                : spiNandId != "" ? spiNandId : ChipId(Val(nandSize));
-            // the second flash: the type the boot flash is not
-            SelectValue(flash2, !IsOn(p.Get("nor-nand")) ? "none"
-                : p.Get("flash", "nand") == "nor" ? "nand:" + p.Get("nand", "128")
-                : "nor:" + p.Get("nor", "16") + ":" + p.Get("nor-id", "ef4018").ToLowerInvariant());
+            flashId.Text = kind == "emmc" ? "" : id != "" ? id : ChipId(boot);
+            // the second flash (flash2-*): the type the boot flash is not
+            bool two = kind != "emmc" && (p.Get("flash2-id") + p.Get("flash2-mb") + p.Get("flash2-uid")) != "";
+            SelectValue(flash2, !two ? "none"
+                : FindChip(flash2, kind == "nor" ? "nand" : "nor", p.Get("flash2-mb"), p.Get("flash2-id").ToLowerInvariant()));
+            // unique IDs: the SPI-NAND's in the NAND UID box, the SPI-NOR's in
+            // the NOR UID box (shown on the MT7621 only, a Filogic one is kept)
+            string nandUidOf = kind == "nand" ? p.Get("flash-uid") : two ? p.Get("flash2-uid") : "";
+            string norUidOf = kind == "nor" ? p.Get("flash-uid") : two ? p.Get("flash2-uid") : "";
             SelectValue(usbPort, p.Get("usb-port", "2"));
             SelectValue(pcieWifi, p.Get("pcie-wifi", "none"));
             for (int i = 0; i < 3; i++) SelectValue(pcieSlot[i], p.Get("pcie" + i, "none"));
@@ -735,14 +740,14 @@ namespace RouterEmulator
             wpsGpio.Value = Clamp(wpsGpio, Int(p.Get("wps-gpio"), 0));   // MT7621: 0 = none
             resetHigh.Checked = IsOn(p.Get("reset-active-high"));
             wpsHigh.Checked = IsOn(p.Get("wps-active-high"));
-            nandDir.Text = p.Get("nand-dir", "nand");
+            dumpDir.Text = p.Get("dump-dir", "nand");
             lanIp.Text = p.LanIp;
             lanFwd.Text = p.LanForwards;
             SelectValue(poweroff, p.Get("poweroff", "stop"));
             efuseFile.Text = p.Get("efuse");
             efuseUid.Text = p.Get("efuse-uid");
-            nandUid.Text = p.Get("nand-uid");
-            norUid.Text = p.Get("nor-uid");
+            nandUid.Text = nandUidOf;
+            norUid.Text = norUidOf;
             ledList.Items.Clear();
             foreach (var d in LedDef.FromPreset(p)) ledList.Items.Add(d);
         }
@@ -840,7 +845,7 @@ namespace RouterEmulator
             if (!m && Val(gmac0) == "mt7530") SelectValue(gmac0, "mt7531");
             string f = Val(nandSize);
             if (m && (f.StartsWith("nand") || f.StartsWith("emmc"))) SelectValue(nandSize, "nor:16:ef4018");
-            if (!m && f.StartsWith("pnand")) SelectValue(nandSize, "nand:128");
+            if (!m && f.StartsWith("pnand")) SelectValue(nandSize, "nand:128:efaa21");
             if (m && Val(poweroff) == "reboot") SelectValue(poweroff, "halt");
             if (!m && Val(poweroff) == "halt") SelectValue(poweroff, "reboot");
             UpdateEnabled();
@@ -970,31 +975,24 @@ namespace RouterEmulator
             }
             var flash = Val(nandSize).Split(':');
             string id = flashId.Text.Trim().ToLowerInvariant();
-            if (flash[0] == "nor") {
-                p.Set("flash", "nor");
-                p.Set("nor", flash[1]);
-                p.Set("nor-id", id);
-                if (m && norUid.Text.Trim().Length > 0) p.Set("nor-uid", norUid.Text.Trim().ToLowerInvariant());
-            } else if (flash[0] == "emmc") {
-                p.Set("flash", "emmc");
-            } else if (flash[0] == "pnand") {
-                p.Set("flash", "nand");
-                p.Set("nand-id", id);
-            } else {
-                p.Set("nand", flash[1]);
-                // only another chip than the Winbond one of that size
-                if (id != WinbondNandId(flash[1])) p.Set("nand-id", id);
-                if (Val(soc) == "mt7621") p.Set("flash", "nand");   // not the default there
-            }
+            string type = flash[0] == "pnand" ? "parallel-nand" : flash[0];
             var second = Val(flash2).Split(':');
-            if (!m && flash[0] != "emmc" && second[0] != "none" && second[0] != flash[0]) {
-                p.Set("nor-nand", "on");
-                if (second[0] == "nor") {
-                    p.Set("nor", second[1]);
-                    p.Set("nor-id", second[2]);
-                } else {
-                    p.Set("nand", second[1]);
-                }
+            bool two = !m && type != "emmc" && second[0] != "none" && second[0] != flash[0];
+            string norUidNew = norUid.Text.Trim().ToLowerInvariant();
+            string nandUidNew = m ? "" : nandUid.Text.Trim().ToLowerInvariant();
+            p.Set("flash-type", type);
+            if (type != "emmc") {
+                p.Set("flash-id", id);
+                // a chip that is not in the list: the size of the entry
+                if (!nandSize.Items.Cast<Choice>().Any(ch => ch.Value.StartsWith(flash[0] + ":") && ChipId(ch.Value) == id))
+                    p.Set("flash-mb", flash[1]);
+                string uid = type == "nor" ? norUidNew : type == "nand" ? nandUidNew : "";
+                if (uid.Length > 0) p.Set("flash-uid", uid);
+            }
+            if (two) {
+                p.Set("flash2-id", second[2]);
+                string uid2 = second[0] == "nor" ? norUidNew : nandUidNew;
+                if (uid2.Length > 0) p.Set("flash2-uid", uid2);
             }
             p.Set("ddr", Val(ddr));
             p.Set("ram", Val(ram));
@@ -1015,9 +1013,8 @@ namespace RouterEmulator
             if (!m) {           // Filogic machines only
                 if (efuseFile.Text.Trim().Length > 0) p.Set("efuse", efuseFile.Text.Trim());
                 if (efuseUid.Text.Trim().Length > 0) p.Set("efuse-uid", efuseUid.Text.Trim().ToLowerInvariant());
-                if (nandUid.Text.Trim().Length > 0) p.Set("nand-uid", nandUid.Text.Trim().ToLowerInvariant());
             }
-            p.Set("nand-dir", nandDir.Text.Trim());
+            p.Set("dump-dir", dumpDir.Text.Trim());
             // keep keys this editor does not know (openwrt=..., new options)
             if (preset != null) {
                 foreach (var kv in preset.Values)
