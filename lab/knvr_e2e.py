@@ -215,9 +215,24 @@ def lifecycle(guest, args, evidence, context, private, cameras):
         current = 'open_segment'
         # Open MKV cannot be removed even if its mtime is beyond the time horizon.
         active_pid = command('cat /tmp/nvr-v2/cam101.pid')
-        active = command('for fd in /proc/' + active_pid + '/fd/*; do readlink "$fd"; done | grep -E "/cam101/.*[.]mkv$" | head -1')
-        if not active.startswith(base + '/cam101/'):
-            raise RuntimeError('actual open segment unavailable')
+        expected = command('readlink -f ' + q(base + '/cam101')) + '/'
+        active = ''
+        until = time.monotonic() + 90
+        while time.monotonic() < until:
+            # A newly launched FFmpeg can still be connecting to RTSP while
+            # status sees the preceding segment. Inspect this PID's real FD.
+            candidate = command('for fd in /proc/' + active_pid + '/fd/*; do readlink "$fd"; done | grep -E "/cam101/.*[.]mkv$" | head -1')
+            if candidate:
+                resolved = command('readlink -f ' + q(candidate))
+                if not resolved.startswith(expected):
+                    raise RuntimeError('recorder FD escaped its camera directory')
+                code, _, _ = guest.execute('test -s ' + q(candidate))
+                if code == 0:
+                    active = candidate
+                    break
+            time.sleep(1)
+        if not active:
+            raise RuntimeError('actual nonempty open segment unavailable')
         command('kill -STOP ' + active_pid + '; touch -t 202001010000 ' + q(active))
         try:
             run('cleanup')
