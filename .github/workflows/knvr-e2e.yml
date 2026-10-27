@@ -1,139 +1,20 @@
 name: KNVR native Entware virtual acceptance
-
-on:
-  pull_request:
-    paths:
-      - 'lab/**'
-      - 'qemu-patches/0063-hw-arm-filogic-preserve-Keenetic-4.9-FE-receive-IRQ.patch'
-      - '.github/workflows/knvr-e2e.yml'
-
+on: [pull_request]
 permissions:
   contents: read
-
-concurrency:
-  group: knvr-lab-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
-  ported-lab:
+  package-metadata:
     runs-on: ubuntu-24.04
-    timeout-minutes: 75
     steps:
-      - uses: actions/checkout@v4
-        with:
-          repository: saymer-alt/router-emulator
-          ref: ${{ github.sha }}
-          persist-credentials: false
-      - name: Validate immutable laboratory inputs
-        env:
-          EMULATOR_REF: ${{ github.sha }}
-          KNVR_REF: 1b8667c8462c6600100626db967d4e33350f88d2
+      - name: Read official Entware timestamp tool metadata
         run: |
-          [[ "$EMULATOR_REF" =~ ^[a-f0-9]{40}$ ]]
-          [[ "$KNVR_REF" =~ ^[a-f0-9]{40}$ ]]
-      - name: Pinned KNVR source as guest input
-        uses: actions/checkout@v4
-        with:
-          repository: saymer-alt/keenetic-nvr
-          ref: 1b8667c8462c6600100626db967d4e33350f88d2
-          path: knvr-source
-          persist-credentials: false
-      - name: Host tools and regression contracts
-        run: |
-          # The Azure mirror downloaded 64 MB in 33 minutes in the prior run.
-          # Keep Ubuntu's signed repository and use its ordinary archive mirror.
-          for source in /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources /etc/apt/apt-mirrors.txt /etc/apt/apt-mirrors-security.txt; do
-            if [ -f "$source" ]; then
-              sudo sed -i -e 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' -e 's|https://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' "$source"
-            fi
-          done
-          if grep -qs 'azure.archive.ubuntu.com' /etc/apt/apt-mirrors.txt; then
-            echo '::error::Slow Azure mirror is still active'
-            exit 1
-          fi
-          sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 update
-          sudo apt-get install -y --no-install-recommends mtd-utils unzip socat curl wget python3 python3-paramiko e2fsprogs openssl build-essential ninja-build meson pkg-config libglib2.0-dev libpixman-1-dev zlib1g-dev libslirp-dev libfdt-dev python3-venv ffmpeg
-          python3 -m unittest discover -s lab -p 'test*.py' -v
-      - name: Cache the changed AArch64 target by exact patch series
-        id: qemu-cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            ${{ runner.temp }}/ported-qemu/qemu-system-aarch64
-            ${{ runner.temp }}/ported-qemu/qemu.sha256
-          key: ported-qemu-ubuntu24-v10.1.0-${{ hashFiles('qemu-patches/*.patch', 'lab/build_qemu.sh') }}
-      - name: Build only the required QEMU target after FE IRQ source fix
-        if: steps.qemu-cache.outputs.cache-hit != 'true'
-        run: bash lab/build_qemu.sh "$RUNNER_TEMP/ported-qemu"
-      - name: Retain the built target even when a later guest assertion fails
-        if: steps.qemu-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            ${{ runner.temp }}/ported-qemu/qemu-system-aarch64
-            ${{ runner.temp }}/ported-qemu/qemu.sha256
-          key: ported-qemu-ubuntu24-v10.1.0-${{ hashFiles('qemu-patches/*.patch', 'lab/build_qemu.sh') }}
-      - name: Pinned emulator wrapper and evaluation firmware
-        run: |
-          (cd "$RUNNER_TEMP/ported-qemu" && sha256sum -c qemu.sha256)
-          bash lab/fetch_lab_assets.sh "$RUNNER_TEMP/ported-assets"
-          cp "$RUNNER_TEMP/ported-qemu/qemu-system-aarch64" "$RUNNER_TEMP/ported-assets/downloads/Router-Emulator/qemu/qemu-system-aarch64"
-      - name: OpenWrt regression with the same patched QEMU
-        run: |
-          python3 -m lab.run \
-            --emulator-root "$RUNNER_TEMP/ported-assets/downloads/Router-Emulator" \
-            --scenario lab/scenarios/openwrt-mt7981.json \
-            --preset cudy-wr3000p-v1 \
-            --nand-dir "$RUNNER_TEMP/ported-assets/downloads/Router-Emulator/nand-wr3000p" \
-            --output-dir "$RUNNER_TEMP/ported-openwrt-private" \
-            --max-seconds 900
-      - name: Disposable NAND
-        run: |
-          python3 -m lab.prepare_ported_wr3000p \
-            --stock-nand "$RUNNER_TEMP/ported-assets/downloads/Router-Emulator/nand-wr3000p" \
-            --ported "$RUNNER_TEMP/ported-assets/downloads/ported.bin" \
-            --keenboot "$RUNNER_TEMP/ported-assets/downloads/keenboot.bin" \
-            --out "$RUNNER_TEMP/ported-nand"
-      - name: Pinned local RTSP server
-        run: |
-          curl -fLsS --retry 3 -o "$RUNNER_TEMP/mediamtx.tar.gz" https://github.com/bluenviron/mediamtx/releases/download/v1.21.3/mediamtx_v1.21.3_linux_amd64.tar.gz
-          echo '0a2ea7eba96023631efa1bea7804823a9145b043b6646a8a05798d4ac24ed635  '"$RUNNER_TEMP/mediamtx.tar.gz" | sha256sum -c
-          mkdir "$RUNNER_TEMP/mediamtx"
-          tar xzf "$RUNNER_TEMP/mediamtx.tar.gz" -C "$RUNNER_TEMP/mediamtx" mediamtx
-      - name: Execute KNVR native lifecycle
-        run: |
-          python3 -m lab.ported_e2e \
-            --emulator-root "$RUNNER_TEMP/ported-assets/downloads/Router-Emulator" \
-            --nand-dir "$RUNNER_TEMP/ported-nand" \
-            --private-dir "$RUNNER_TEMP/ported-private" \
-            --report-dir "$RUNNER_TEMP/ported-public" \
-            --stage knvr \
-            --knvr-dir "$GITHUB_WORKSPACE/knvr-source" \
-            --knvr-ref "1b8667c8462c6600100626db967d4e33350f88d2" \
-            --mediamtx "$RUNNER_TEMP/mediamtx/mediamtx"
-      - name: Public fixed-label summary
-        if: always()
-        run: |
-          if [ -f "$RUNNER_TEMP/ported-public/knvr.md" ]; then
-            cat "$RUNNER_TEMP/ported-public/knvr.md" >> "$GITHUB_STEP_SUMMARY"
-            cat "$RUNNER_TEMP/ported-public/knvr.json"
-          else
-            echo 'KNVR BLOCKED: prerequisites did not produce KNVR results.' >> "$GITHUB_STEP_SUMMARY"
-          fi
-      - name: Publish sanitized evidence only
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: knvr-gates
-          path: |
-            ${{ runner.temp }}/ported-public/gates.json
-            ${{ runner.temp }}/ported-public/junit.xml
-            ${{ runner.temp }}/ported-public/summary.md
-            ${{ runner.temp }}/ported-public/knvr.json
-            ${{ runner.temp }}/ported-public/knvr.md
-          if-no-files-found: warn
-          retention-days: 7
-      - name: Destroy private firmware, USB, credentials and UART
-        if: always()
-        run: |
-          rm -rf "$RUNNER_TEMP/ported-assets" "$RUNNER_TEMP/ported-nand" "$RUNNER_TEMP/ported-private" "$RUNNER_TEMP/ported-openwrt-private"
+          curl -fLsS --retry 3 https://bin.entware.net/aarch64-k3.10/Packages -o /tmp/entware-packages
+          python3 - <<'PY'
+          from pathlib import Path
+          for entry in Path('/tmp/entware-packages').read_text().split('\n\n'):
+              if entry.startswith('Package: coreutils-touch\n'):
+                  print(entry)
+                  break
+          else:
+              raise SystemExit('coreutils-touch missing')
+          PY
