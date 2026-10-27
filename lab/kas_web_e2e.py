@@ -150,19 +150,37 @@ def lifecycle(guest, mirror, revision, evidence, web_binary):
         # Actual ARM64 binary, transferred with SHA-256 integrity check.
         put_large_binary(guest, '/opt/lab/kas-web', data)
         phase = 'SERVER_START'
+        # First prove the target ELF is runnable in the actual Ported guest,
+        # independently of SSH backgrounding/HTTP/network diagnostics.
+        phase = 'BINARY_EXEC'
+        code, _, _ = guest.execute('/opt/lab/kas-web -help >/dev/null 2>&1',
+                                    timeout=20)
+        check(code == 0, 'web_binary_not_executable_on_guest')
+        phase = 'WEB_LAUNCH'
+        # Avoid depending on a BusyBox nohup applet; detach every fd in the
+        # guest shell and record a PID. The KAS adapter still owns no service
+        # at this point: this is a disposable smoke-test process only.
         guest.command(
-            'nohup /opt/lab/kas-web -listen 127.0.0.1:18081'
+            '/opt/lab/kas-web -listen 127.0.0.1:18081'
             ' </dev/null >/opt/lab/kas-web.log 2>&1 & echo $! > /opt/lab/kas-web.pid',
-            timeout=30)
+            timeout=15)
         process_started = True
-        for _ in range(25):
+        phase = 'HTTP_LISTEN'
+        for _ in range(15):
+            live, _, _ = guest.execute(
+                'p=$(cat /opt/lab/kas-web.pid) && kill -0 "$p" 2>/dev/null',
+                timeout=8)
+            if live != 0:
+                phase = 'WEB_PROCESS_EXITED'
+                raise RuntimeError('web_process_not_running')
             rc, _, _ = guest.execute(
-                "curl -fSs --noproxy '*' --max-time 3 "
+                "curl -fSs --noproxy '*' --connect-timeout 1 --max-time 3 "
                 "http://127.0.0.1:18081/api/status >/dev/null", timeout=8)
             if rc == 0:
                 break
             time.sleep(1)
         else:
+            phase = 'WEB_HTTP_UNREACHABLE'
             raise RuntimeError('web_loopback_server_unavailable')
         phase = 'HTTP_GUARDS'
         # Negative checks must never run the importer.
