@@ -8,9 +8,9 @@ import shlex
 import subprocess
 import time
 
-CHECKS = ('source', 'fresh_install', 'recording_3', 'watchdog', 'open_segment',
-          'time', 'circular', 'hybrid', 'read_only', 'unmount', 'recovery',
-          'reboot', 'busy_guard', 'uninstall', 'repeat', 'removed_reboot', 'reinstall')
+CHECKS = ('source', 'fresh_install', 'recording_3', 'busy_guard', 'uninstall',
+          'repeat', 'removed_reboot', 'reinstall', 'watchdog', 'open_segment',
+          'time', 'circular', 'hybrid', 'read_only', 'unmount', 'recovery', 'reboot')
 
 
 class Results:
@@ -155,16 +155,62 @@ def lifecycle(guest, args, evidence, context, private, cameras):
         healthy()
         print('KNVR recording status: HEALTHY 3/3', flush=True)
         results.mark(current, 'PASS')
+        def reboot():
+            command('/bin/ndmc -c "system configuration save"; sync')
+            guest.close()
+            from lab.run import send_monitor
+            send_monitor(context['monitor'], 'system_reset')
+            time.sleep(5)
+            guest.connect(300)
+            command('date -s ' + q(time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())))
+        current = 'busy_guard'
+        upload(guest, args.knvr_dir, args.knvr_ref)
+        # Real production lock refusal, held by the native shell invoking removal.
+        code, _, _ = guest.execute('mkdir /tmp/nvr-v2/.lock && echo $$ > /tmp/nvr-v2/.lock/pid; '
+                                   'sh /tmp/knvr-source/uninstall.sh --yes', timeout=90)
+        if code == 0:
+            raise RuntimeError('busy recorder removal falsely succeeded')
+        command('test -f /opt/etc/nvr-v2.sh; rm -f /tmp/nvr-v2/.lock/pid; rmdir /tmp/nvr-v2/.lock')
+        results.mark(current, 'PASS')
+        current = 'uninstall'
+        upload(guest, args.knvr_dir, args.knvr_ref)
+        config_hash = command('sha256sum /opt/etc/nvr-v2.conf')
+        files = command('find ' + q(base) + " -name '*.mkv' | sort")
+        packages = command('opkg list-installed')
+        command('sh /tmp/knvr-source/uninstall.sh --yes', timeout=120)
+        command('test ! -e /opt/etc/nvr-v2.sh; test -z "$(pidof ffmpeg)"; crontab -l | grep -q KNVR_FOREIGN_KEEP')
+        assert command('sha256sum /opt/etc/nvr-v2.conf') == config_hash
+        assert command('find ' + q(base) + " -name '*.mkv' | sort") == files
+        assert command('opkg list-installed') == packages
+        results.mark(current, 'PASS')
+        current = 'repeat'
+        command('sh /tmp/knvr-source/uninstall.sh --yes')
+        results.mark(current, 'PASS')
+        current = 'removed_reboot'
+        reboot()
+        command('test ! -e /opt/etc/nvr-v2.sh; test -z "$(pidof ffmpeg)"; crontab -l | grep -q KNVR_FOREIGN_KEEP')
+        results.mark(current, 'PASS')
+        current = 'reinstall'
+        upload(guest, args.knvr_dir, args.knvr_ref)
+        command('sh /tmp/knvr-source/NVR/v2/fresh-install.sh install-fresh', timeout=120)
+        healthy()
+        # Removal already closed the original recorder cleanly; prove its MKV
+        # remains decodable while the reinstalled recorder writes a new file.
+        closed = next(path for path in files.splitlines() if '/cam101/' in path)
+        command('/opt/bin/ffprobe -v error -show_entries stream=codec_name -of csv=p=0 ' + q(closed) + ' | grep -qx h264')
+        results.mark(current, 'PASS')
         current = 'watchdog'
         # First observe a healthy tick: initial start attempts retain a bounded
         # retry backoff until check confirms real footage. Do not erase it.
         run('check')
         command('for id in 101 201 301; do test \"$(cat /tmp/nvr-v2/cam$id.failures)\" = 0 || exit 1; done')
+        other_pids = command('cat /tmp/nvr-v2/cam201.pid /tmp/nvr-v2/cam301.pid')
         old_pid = command('cat /tmp/nvr-v2/cam101.pid')
         command('kill -KILL ' + old_pid)
         run('check')
         healthy()
         command('test "$(cat /tmp/nvr-v2/cam101.pid)" != ' + old_pid)
+        assert command('cat /tmp/nvr-v2/cam201.pid /tmp/nvr-v2/cam301.pid') == other_pids
         results.mark(current, 'PASS')
         current = 'open_segment'
         # Open MKV cannot be removed even if its mtime is beyond the time horizon.
@@ -244,55 +290,12 @@ def lifecycle(guest, args, evidence, context, private, cameras):
         command('sed -i ' + q("s/^NVR_CAMERAS=.*/NVR_CAMERAS='101 201 301'/") + ' /opt/etc/nvr-v2.conf')
         run('start'); healthy()
         results.mark(current, 'PASS')
-        def reboot():
-            command('/bin/ndmc -c "system configuration save"; sync')
-            guest.close()
-            from lab.run import send_monitor
-            send_monitor(context['monitor'], 'system_reset')
-            time.sleep(5)
-            guest.connect(300)
-            command('date -s ' + q(time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())))
         current = 'reboot'
         reboot()
         # A real cron tick, not a manual restart, must restore recording.
         time.sleep(15)
         # Cron check is every five minutes; allow the bounded native tick.
         healthy(360)
-        results.mark(current, 'PASS')
-        current = 'busy_guard'
-        upload(guest, args.knvr_dir, args.knvr_ref)
-        # Real production lock refusal, held by the native shell invoking removal.
-        code, _, _ = guest.execute('mkdir /tmp/nvr-v2/.lock && echo $$ > /tmp/nvr-v2/.lock/pid; '
-                                   'sh /tmp/knvr-source/uninstall.sh --yes', timeout=90)
-        if code == 0:
-            raise RuntimeError('busy recorder removal falsely succeeded')
-        command('test -f /opt/etc/nvr-v2.sh; rm -f /tmp/nvr-v2/.lock/pid; rmdir /tmp/nvr-v2/.lock')
-        results.mark(current, 'PASS')
-        current = 'uninstall'
-        upload(guest, args.knvr_dir, args.knvr_ref)
-        config_hash = command('sha256sum /opt/etc/nvr-v2.conf')
-        files = command('find ' + q(base) + " -name '*.mkv' | sort")
-        packages = command('opkg list-installed')
-        command('sh /tmp/knvr-source/uninstall.sh --yes', timeout=120)
-        command('test ! -e /opt/etc/nvr-v2.sh; test -z "$(pidof ffmpeg)"; crontab -l | grep -q KNVR_FOREIGN_KEEP')
-        assert command('sha256sum /opt/etc/nvr-v2.conf') == config_hash
-        assert command('find ' + q(base) + " -name '*.mkv' | sort") == files
-        assert command('opkg list-installed') == packages
-        results.mark(current, 'PASS')
-        current = 'repeat'
-        command('sh /tmp/knvr-source/uninstall.sh --yes')
-        results.mark(current, 'PASS')
-        current = 'removed_reboot'
-        reboot()
-        command('test ! -e /opt/etc/nvr-v2.sh; test -z "$(pidof ffmpeg)"; crontab -l | grep -q KNVR_FOREIGN_KEEP')
-        results.mark(current, 'PASS')
-        current = 'reinstall'
-        upload(guest, args.knvr_dir, args.knvr_ref)
-        command('sh /tmp/knvr-source/NVR/v2/fresh-install.sh install-fresh', timeout=120)
-        healthy()
-        # Flush real MKV trailers then ffprobe confirms actual H264, not a dummy file.
-        run('stop')
-        command('f=$(ls -t ' + q(base) + '/cam101/*.mkv | head -1); /opt/bin/ffprobe -v error -show_entries stream=codec_name -of csv=p=0 "$f" | grep -qx h264')
         results.mark(current, 'PASS')
         return True
     except Exception as error:
