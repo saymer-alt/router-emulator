@@ -83,7 +83,20 @@ JSON + JUnit + CI Artifacts     (9 гейтов PASS/FAIL/BLOCKED/NOT_TESTED, ф
 - **Keenetic KN-1010 / KN-1012** — только как **целевые сценарии сопоставления**. Оригинальная
   KeeneticOS в эмуляции не подтверждена; аппаратные пресеты существуют, E2E не проводилось.
 
-## Текущая готовность
+## KNVR: виртуальная приёмка завершена (27.10.2026)
+
+**17/17 этапов KNVR — PASS; 45 тестов стенда — PASS.** Проверены настоящий FFmpeg,
+три синтетических RTSP-канала, отдельный EXT4-образ, очистка под давлением на диск,
+удаление с сохранением данных и восстановление после reset через Cron.
+Платформенный KAS CI и OpenWrt regression также завершились успешно.
+[Результаты KNVR](https://github.com/saymer-alt/router-emulator/actions/runs/40454496615)
+· [Описание стенда](lab/KNVR.md).
+
+## Базовая матрица KAS (исторические прогоны)
+
+Ниже зафиксированы результаты старого пина KAS `6dd6438e` и указанных прогонов.
+Их BLOCKED относятся к тому исходному коду и не являются незавершёнными этапами
+новой приёмки KNVR: её собственный итог `knvr.json` — **PASS**.
 
 Статусы гейтов — из JSON/JUnit-отчётов лаборатории (`lab/gates.py`: девять гейтов
 `BOOT_READY, AUTH_READY, ENTWARE_READY, KAS_PREFLIGHT, KAS_INSTALL, KAS_DOCTOR, KAS_REBOOT,
@@ -180,9 +193,14 @@ WAN = `offline`, LAN = только loopback (`127.0.0.1`).
   [безопасное удаление `uninstall --remove` #179](https://github.com/saymer-alt/keenetic-auto-setup/issues/179)
   (снятие `KAS_UNINSTALL=BLOCKED` — работа в самом KAS), caller
   [PR #213](https://github.com/saymer-alt/keenetic-auto-setup/pull/213).
-- [keenetic-nvr](https://github.com/saymer-alt/keenetic-nvr) — **потенциальный потребитель:**
-  сценарии storage/retention и восстановления демонов после сбоев. Полный E2E KNVR в
-  лаборатории **не проводился** — подтверждений зелёным прогоном нет.
+- [keenetic-nvr](https://github.com/saymer-alt/keenetic-nvr) — **проверенный потребитель: 17/17 этапов PASS, 27.10.2026.**
+  Нативные установка, запись, watchdog, удаление/переустановка, TIME/CIRCULAR/HYBRID,
+  защита открытого MKV, RO/unmount/RW recovery и reset с настоящим Cron прошли
+  на Ported/Entware с отдельным реальным EXT4-образом и синтетическим RTSP.
+  [Успешный прогон](https://github.com/saymer-alt/router-emulator/actions/runs/40454496615) ·
+  [Стенд и границы проверки](lab/KNVR.md) ·
+  [Подробный протокол KNVR](https://github.com/saymer-alt/keenetic-nvr/blob/main/docs/testing/KNVR-EMULATOR-2026-10-27.md).
+  Физическая аппаратная приёмка, реальные камеры/Telegram и upgrade не заявляются.
 - [keenwhite](https://github.com/saymer-alt/keenwhite) — **потенциальный потребитель:**
   сценарии владения нативным DNS/firewall и персистентности. Полный E2E KeenWhite
   **не проводился** — результат KAS-гейтов не принимает эти проекты автоматически.
