@@ -114,7 +114,20 @@ def run_entware(args, private, credentials, coldboot, evidence):
             if args.stage in ('kas', 'uninstall-packages', 'web'):
                 if args.stage == 'web':
                     from lab.kas_web_e2e import lifecycle
-                    completed['ok'] = lifecycle(guest, tls, args.kas_ref, evidence, args.web_bin)
+                    def reboot_web():
+                        # Native KeeneticOS reboot, real Entware startup and
+                        # authenticated SSH reconnection. Keep tested configs
+                        # pinned; do not disclose guest output to public logs.
+                        guest.command('/bin/ndmc -c "system configuration save"; sync',
+                                      timeout=30)
+                        guest.close()
+                        send_monitor(context['monitor'], 'system_reset')
+                        time.sleep(5)
+                        guest.connect(300)
+                        guest.entware(marker)
+                    completed['ok'] = lifecycle(
+                        guest, tls, args.kas_ref, evidence, args.web_bin,
+                        reboot=reboot_web)
                 elif args.stage == 'kas':
                     from lab.kas_lifecycle import lifecycle
                     completed['ok'] = lifecycle(guest, tls, args.kas_ref, evidence, context, private, phase)
