@@ -66,7 +66,7 @@ def run_entware(args, private, credentials, coldboot, evidence):
     if args.stage == 'knvr':
         add_packages(mirror, private / 'cache', Path(__file__).with_name('knvr-packages.lock.json'))
     tls = None
-    if args.stage in ('kas', 'uninstall-packages'):
+    if args.stage in ('kas', 'uninstall-packages', 'web'):
         from lab.kas_mirror import KASMirror
         tls = KASMirror(args.kas_dir, args.kas_ref, private, private / 'cache')
     completed = {'ok': True}
@@ -111,8 +111,66 @@ def run_entware(args, private, credentials, coldboot, evidence):
                 completed['ok'] = False
                 return
             print('KAS PREFLIGHT: native runtime capabilities verified', flush=True)
-            if args.stage in ('kas', 'uninstall-packages'):
-                if args.stage == 'kas':
+            if args.stage in ('kas', 'uninstall-packages', 'web'):
+                if args.stage == 'web':
+                    from lab.kas_web_e2e import lifecycle
+                    def reboot_web():
+                        # Native KeeneticOS reboot, real Entware startup and
+                        # authenticated SSH reconnect. Print only fixed phase
+                        # identifiers and exception classes, NEVER guest text.
+                        reboot_phase = 'SAVE_CONFIG'
+                        try:
+                            guest.command('/bin/ndmc -c "system configuration save"; sync',
+                                          timeout=30)
+                            reboot_phase = 'CLOSE_SSH'
+                            guest.close()
+                            reboot_phase = 'SEND_RESET'
+                            send_monitor(context['monitor'], 'system_reset')
+                            reboot_phase = 'WAIT_RESET'
+                            time.sleep(5)
+                            reboot_phase = 'CONNECT_SSH'
+                            guest.connect(300)
+                            reboot_phase = 'CHECK_ENTWARE'
+                            # SSH may recover before all native Entware startup.
+                            # Retry the original full contract without skipping guards.
+                            for attempt in range(30):
+                                try:
+                                    guest.entware(marker)
+                                    break
+                                except RuntimeError as detail:
+                                    if attempt == 29:
+                                        categories = {
+                                            'lab SSH configuration is not reboot-safe': 'SSH_CONFIG',
+                                            'guest ABI mismatch': 'ABI',
+                                            'native shell privilege mismatch': 'PRIVILEGES',
+                                            'opt is not a mounted EXT4 filesystem': 'OPT_MOUNT',
+                                            'native opkg execution failed': 'OPKG',
+                                            'package ABI not configured': 'PACKAGE_ABI',
+                                            'real opkg database differs from pinned bootstrap': 'PACKAGE_DATABASE',
+                                            'EXT4 marker did not survive reboot': 'PERSISTENCE',
+                                            'guest probe returned nonzero': 'PROBE_NONZERO',
+                                        }
+                                        print('KAS WEB REBOOT: Entware check failure category=' +
+                                              categories.get(str(detail), 'OTHER_RUNTIME'),
+                                              flush=True)
+                                        raise
+                                    time.sleep(2)
+                            print('KAS WEB REBOOT: guest SSH and EXT4 persistence PASS',
+                                  flush=True)
+                        except Exception as error:
+                            # An explicit stage separates a VM/controller reset
+                            # problem from an actual Web autostart regression.
+                            error_type = (
+                                'TIMEOUT' if isinstance(error, TimeoutError)
+                                else 'PROBE_ERROR' if isinstance(error, RuntimeError)
+                                else 'CONTROLLER_ERROR')
+                            print('KAS WEB REBOOT: FAIL at %s (%s)' %
+                                  (reboot_phase, error_type), flush=True)
+                            raise
+                    completed['ok'] = lifecycle(
+                        guest, tls, args.kas_ref, evidence, args.web_bin,
+                        reboot=reboot_web)
+                elif args.stage == 'kas':
                     from lab.kas_lifecycle import lifecycle
                     completed['ok'] = lifecycle(guest, tls, args.kas_ref, evidence, context, private, phase)
                 else:
@@ -157,15 +215,18 @@ def main():
     parser.add_argument('--nand-dir', required=True)
     parser.add_argument('--private-dir', required=True)
     parser.add_argument('--report-dir', required=True)
-    parser.add_argument('--stage', choices=('entware', 'preflight', 'kas', 'uninstall-packages', 'knvr'), default='kas')
+    parser.add_argument('--stage', choices=('entware', 'preflight', 'kas', 'uninstall-packages', 'knvr', 'web'), default='kas')
+    parser.add_argument('--web-bin')
     parser.add_argument('--knvr-dir')
     parser.add_argument('--knvr-ref')
     parser.add_argument('--mediamtx')
     parser.add_argument('--kas-dir')
     parser.add_argument('--kas-ref', default='6dd6438e2b64bad0fe9205ab6575795f808dabd8')
     args = parser.parse_args()
-    if args.stage in ('kas', 'uninstall-packages') and not args.kas_dir:
+    if args.stage in ('kas', 'uninstall-packages', 'web') and not args.kas_dir:
         parser.error('--kas-dir is required for actual KAS execution')
+    if args.stage == 'web' and not args.web_bin:
+        parser.error('Web stage requires --web-bin for the pinned ARM64 binary')
     if args.stage == 'knvr' and not all((args.knvr_dir, args.knvr_ref, args.mediamtx)):
         parser.error('KNVR requires --knvr-dir, --knvr-ref and --mediamtx')
     private = Path(args.private_dir).resolve()
@@ -183,7 +244,7 @@ def main():
     evidence.reference('keenboot_sha256', '8b8615b345d912187853fea6bef6b1868760fd52ed92ba7c3a380ad5533cbf08')
     for name, filename in (('entware_lock_sha256', 'entware.lock.json'), ('kas_assets_lock_sha256', 'kas-assets.lock.json')):
         evidence.reference(name, hashlib.sha256(Path(__file__).with_name(filename).read_bytes()).hexdigest())
-    if args.stage in ('kas', 'uninstall-packages'):
+    if args.stage in ('kas', 'uninstall-packages', 'web'):
         evidence.reference('kas_commit', args.kas_ref)
     try:
         nand = private / 'nand'

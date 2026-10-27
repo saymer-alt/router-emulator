@@ -23,7 +23,9 @@ REASONS = {'unattempted', 'prerequisite_blocked', 'boot_stages_observed',
            'native_installer_failed', 'native_doctor_failed', 'doctor_warning', 'verified_tls_source_failed',
            'native_remove_not_implemented', 'snapshot_gate_blocked', 'native_reboot_failed',
            'native_rollback_failed', 'native_update_failed', 'idempotence_failed', 'rollback_not_exercised',
-           'uninstall_packages_passed', 'uninstall_packages_failed', 'watchdog_lock_blocked'}
+           'uninstall_packages_passed', 'uninstall_packages_failed', 'watchdog_lock_blocked',
+           'native_web_import_passed', 'native_web_import_failed',
+           'native_web_lifecycle_passed', 'native_web_lifecycle_failed'}
 REASONS.update({'native_services_duplicate', 'native_services_not_ready', 'native_ownership_invalid',
     'native_proxy_invalid', 'native_policy_invalid', 'native_dns_invalid', 'native_rules_not_ready',
     'native_file_digest_invalid', 'foreign_proxy_changed', 'foreign_cron_changed',
@@ -32,7 +34,8 @@ REASONS.update({'native_services_duplicate', 'native_services_not_ready', 'nativ
     'crontab_changed', 'ledger_changed', 'proxy_changed', 'policy_changed', 'netfilter_changed'})
 CHECKS = ('KAS_IDEMPOTENCE', 'KAS_INSTALL_INTERRUPTION', 'KAS_UPDATE', 'KAS_FOREIGN_RESOURCES',
           'KAS_UNINSTALL_SNAPSHOT', 'KAS_TRANSACTION_GATE', 'KAS_WAN_RESTART_GUARD', 'KAS_UNINSTALL_GUARD',
-          'KAS_UNINSTALL_PACKAGES_REPEAT', 'KAS_UNINSTALL_PACKAGES_REBOOT')
+          'KAS_UNINSTALL_PACKAGES_REPEAT', 'KAS_UNINSTALL_PACKAGES_REBOOT',
+          'KAS_WEB_IMPORT', 'KAS_WEB_LIFECYCLE')
 
 
 class Evidence:
