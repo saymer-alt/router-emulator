@@ -5,7 +5,9 @@ bundled real config-import.sh must be the committed KAS source.
 Only fixed PASS/FAIL labels leave the private CI workspace.
 """
 import hashlib
+import ipaddress
 import json
+import re
 from pathlib import Path
 import time
 
@@ -99,8 +101,25 @@ def test_opt_in_service(guest, mirror, evidence):
         guest.command('sh /opt/etc/init.d/S98kas-control-center start', timeout=30)
         check(guest.command('sh /opt/etc/init.d/S98kas-control-center status') ==
               'RUNNING', 'web_service_start_failed')
-        guest.command("curl -fSs --noproxy '*' --max-time 5 "
-                      "http://127.0.0.1:18081/api/status >/dev/null")
+        # Stage 4 installs an HTTP listener only on the private Home br0
+        # address; Stage 3's historical installer listened on localhost.
+        # Select expectations from pinned source, never from run timing.
+        home_default = b'-lan -listen auto' in mirror.sources[key]
+        if home_default:
+            iface = guest.command('ip -4 -o addr show dev br0', timeout=15)
+            match = re.search(r'inet (\\d+\\.\\d+\\.\\d+\\.\\d+)/(\\d+)', iface)
+            check(match is not None, 'web_home_bridge_address_missing')
+            home_ip = ipaddress.IPv4Address(match.group(1))
+            check(home_ip.is_private, 'web_home_not_private')
+            guest.command("curl -fSs --noproxy '*' --max-time 5 "
+                          "http://" + str(home_ip) + ":18081/api/status >/dev/null")
+            deny, _, _ = guest.execute(
+                "curl -sS --noproxy '*' --connect-timeout 2 --max-time 5 "
+                "http://127.0.0.1:18081/api/status >/dev/null", timeout=10)
+            check(deny != 0, 'web_home_listener_exposed_on_loopback')
+        else:
+            guest.command("curl -fSs --noproxy '*' --max-time 5 "
+                          "http://127.0.0.1:18081/api/status >/dev/null")
         guest.command('sh /opt/etc/init.d/S98kas-control-center stop', timeout=90)
         check(guest.command('sh /opt/etc/init.d/S98kas-control-center status') ==
               'NOT_RUNNING', 'web_service_stop_failed')
