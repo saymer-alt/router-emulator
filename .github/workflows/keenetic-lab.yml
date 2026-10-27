@@ -61,7 +61,7 @@ jobs:
         run: |
           set -euo pipefail
           cd "$EMU_ROOT"
-          tools/prepare-nand.sh cudy_wr3000p-v1 "$OPENWRT_VERSION"
+          tools/prepare-nand.sh --flash-type nand --flash-id c8017f7f7f --flash-mb 128 cudy_wr3000p-v1 "$OPENWRT_VERSION"
 
       - name: Cache QEMU built from this checkout's patch series
         id: qemu-cache
