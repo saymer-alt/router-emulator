@@ -89,6 +89,7 @@ def test_opt_in_service(guest, mirror, evidence):
         evidence.check('KAS_WEB_LIFECYCLE', 'NOT_TESTED', 'unattempted')
         return True
     evidence.check('KAS_WEB_LIFECYCLE', 'NOT_TESTED', 'unattempted')
+    phase = 'SERVICE_INSTALL'
     try:
         put(guest, '/opt/lab/kas-web-manage.sh', mirror.sources[key], '700')
         before = guest.command('sha256sum /opt/etc/mihomo/config.yaml').split()[0]
@@ -98,6 +99,7 @@ def test_opt_in_service(guest, mirror, evidence):
         check(code == 0, 'web_service_install_failed')
         check(guest.command('sh /opt/etc/init.d/S98kas-control-center status') ==
               'NOT_RUNNING', 'web_service_implicit_start')
+        phase = 'SERVICE_START'
         guest.command('sh /opt/etc/init.d/S98kas-control-center start', timeout=30)
         check(guest.command('sh /opt/etc/init.d/S98kas-control-center status') ==
               'RUNNING', 'web_service_start_failed')
@@ -106,13 +108,16 @@ def test_opt_in_service(guest, mirror, evidence):
         # Select expectations from pinned source, never from run timing.
         home_default = b'-lan -listen auto' in mirror.sources[key]
         if home_default:
+            phase = 'HOME_ADDRESS'
             iface = guest.command('ip -4 -o addr show dev br0', timeout=15)
             match = re.search(r'inet (\d+\.\d+\.\d+\.\d+)/(\d+)', iface)
             check(match is not None, 'web_home_bridge_address_missing')
             home_ip = ipaddress.IPv4Address(match.group(1))
             check(home_ip.is_private, 'web_home_not_private')
+            phase = 'HOME_HTTP'
             guest.command("curl -fSs --noproxy '*' --max-time 5 "
                           "http://" + str(home_ip) + ":18081/api/status >/dev/null")
+            phase = 'LOOPBACK_NOT_EXPOSED'
             deny, _, _ = guest.execute(
                 "curl -sS --noproxy '*' --connect-timeout 2 --max-time 5 "
                 "http://127.0.0.1:18081/api/status >/dev/null", timeout=10)
@@ -120,10 +125,12 @@ def test_opt_in_service(guest, mirror, evidence):
         else:
             guest.command("curl -fSs --noproxy '*' --max-time 5 "
                           "http://127.0.0.1:18081/api/status >/dev/null")
+        phase = 'SERVICE_STOP'
         guest.command('sh /opt/etc/init.d/S98kas-control-center stop', timeout=90)
         check(guest.command('sh /opt/etc/init.d/S98kas-control-center status') ==
               'NOT_RUNNING', 'web_service_stop_failed')
         if home_default:
+            phase = 'PASSWORD_SETUP'
             # No KAS password by default. Then explicitly opt in to a private
             # LAN password while router-owned KeenDNS proxy auth is delegated.
             # All credentials here are disposable lab literals, never real.
@@ -133,17 +140,20 @@ def test_opt_in_service(guest, mirror, evidence):
                 "printf '%s\\n' 'https://kas.lab.keenetic.pro'"
                 " > /opt/etc/kas-control-center.proxy-origin", timeout=15)
             guest.command('sh /opt/etc/init.d/S98kas-control-center start', timeout=30)
+            phase = 'PASSWORD_REQUIRED'
             direct = guest.command(
                 "curl -sS --noproxy '*' --max-time 5 -o /dev/null"
                 " -w '%{http_code}' http://" + str(home_ip) +
                 ":18081/api/status", timeout=15)
             check(direct == '401', 'web_optional_password_not_enforced')
+            phase = 'PASSWORD_ACCEPTED'
             permitted = guest.command(
                 "curl -sS --noproxy '*' --max-time 5"
                 " -u kas:lab-local-panel-password-1234 -o /dev/null"
                 " -w '%{http_code}' http://" + str(home_ip) +
                 ":18081/api/status", timeout=15)
             check(permitted == '200', 'web_optional_password_rejected')
+            phase = 'ROUTER_PROXY_AUTH_DELEGATION'
             via_router = guest.command(
                 "curl -sS --noproxy '*' --max-time 5"
                 " -H 'Host: kas.lab.keenetic.pro' -o /dev/null"
@@ -153,6 +163,7 @@ def test_opt_in_service(guest, mirror, evidence):
             guest.command('sh /opt/etc/init.d/S98kas-control-center stop', timeout=90)
             guest.command('rm -f /opt/etc/kas-control-center.password '
                           '/opt/etc/kas-control-center.proxy-origin', timeout=15)
+        phase = 'SERVICE_REMOVE'
         guest.command('sh /opt/etc/init.d/S98kas-control-center remove', timeout=90)
         guest.command('test ! -e /opt/bin/kas-control-center && '
                       'test ! -e /opt/etc/init.d/S98kas-control-center && '
@@ -160,13 +171,15 @@ def test_opt_in_service(guest, mirror, evidence):
         check(guest.command('sha256sum /opt/etc/mihomo/config.yaml').split()[0] ==
               before, 'web_lifecycle_modified_core_config')
         guest.command('test "$(pidof mihomo | wc -w)" -eq 1')
+        phase = 'POSTCONDITIONS'
         evidence.check('KAS_WEB_LIFECYCLE', 'PASS', 'native_web_lifecycle_passed')
         print('KAS WEB: isolated install/start/stop/remove and core SHA: PASS',
               flush=True)
         return True
     except Exception:
         evidence.check('KAS_WEB_LIFECYCLE', 'FAIL', 'native_web_lifecycle_failed')
-        print('KAS WEB: opt-in component lifecycle FAIL', flush=True)
+        # No guest data, URLs, credentials or command output in public logs.
+        print('KAS WEB: service lifecycle FAIL at ' + phase, flush=True)
         return False
     finally:
         # Do not delete managed files after any failure: ownership checks
