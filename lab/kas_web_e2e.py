@@ -82,7 +82,7 @@ def put_large_binary(guest, path, content):
                   'chmod 700 /opt/lab/kas-web', timeout=30)
 
 
-def test_opt_in_service(guest, mirror, evidence):
+def test_opt_in_service(guest, mirror, evidence, reboot=None):
     """Native guest installation/stop/remove of ONLY the dedicated Web files."""
     key = 'web/control-center/kas-web-manage.sh'
     if key not in mirror.sources:
@@ -107,6 +107,49 @@ def test_opt_in_service(guest, mirror, evidence):
         # address; Stage 3's historical installer listened on localhost.
         # Select expectations from pinned source, never from run timing.
         home_default = b'-lan -listen auto' in mirror.sources[key]
+        idle_rss = None
+        postboot_rss = None
+        binary_kib = None
+        if home_default:
+            phase = 'IDLE_MEMORY'
+            pid = guest.command('cat /opt/var/run/kas-control-center.pid', timeout=15)
+            check(pid.isdecimal(), 'web_invalid_service_pid')
+            rss = guest.command(
+                "awk '/^VmRSS:/ {print $2}' /proc/" + pid + "/status",
+                timeout=15)
+            check(rss.isdecimal(), 'web_idle_rss_unavailable')
+            idle_rss = int(rss)
+            binary_bytes = guest.command(
+                'wc -c < /opt/bin/kas-control-center', timeout=15)
+            check(binary_bytes.isdecimal(), 'web_binary_size_unavailable')
+            binary_kib = (int(binary_bytes) + 1023) // 1024
+            # One 96-MiB ceiling prevents an obviously unsuitable Web daemon,
+            # while also publishing numeric evidence for tighter profiles.
+            check(0 < idle_rss <= 96 * 1024, 'web_idle_rss_budget_exceeded')
+        if home_default and reboot is not None:
+            phase = 'REBOOT'
+            reboot()
+            phase = 'REBOOT_AUTOSTART'
+            started = False
+            for _ in range(20):
+                code, result, _ = guest.execute(
+                    'sh /opt/etc/init.d/S98kas-control-center status',
+                    timeout=15)
+                if code == 0 and result == 'RUNNING':
+                    started = True
+                    break
+                time.sleep(3)
+            check(started, 'web_not_running_after_reboot')
+            phase = 'REBOOT_MEMORY'
+            pid = guest.command('cat /opt/var/run/kas-control-center.pid', timeout=15)
+            check(pid.isdecimal(), 'web_postboot_pid_unavailable')
+            rss = guest.command(
+                "awk '/^VmRSS:/ {print $2}' /proc/" + pid + "/status",
+                timeout=15)
+            check(rss.isdecimal(), 'web_postboot_rss_unavailable')
+            postboot_rss = int(rss)
+            check(0 < postboot_rss <= 96 * 1024,
+                  'web_postboot_rss_budget_exceeded')
         if home_default:
             phase = 'HOME_ADDRESS'
             iface = guest.command('ip -4 -o addr show dev br0', timeout=15)
@@ -172,6 +215,11 @@ def test_opt_in_service(guest, mirror, evidence):
               before, 'web_lifecycle_modified_core_config')
         guest.command('test "$(pidof mihomo | wc -w)" -eq 1')
         phase = 'POSTCONDITIONS'
+        if idle_rss is not None:
+            print('KAS WEB MEMORY: binary_kib=%d idle_rss_kib=%d postboot_rss_kib=%s'
+                  % (binary_kib, idle_rss,
+                     str(postboot_rss) if postboot_rss is not None else 'NOT_TESTED'),
+                  flush=True)
         evidence.check('KAS_WEB_LIFECYCLE', 'PASS', 'native_web_lifecycle_passed')
         print('KAS WEB: isolated install/start/stop/remove and core SHA: PASS',
               flush=True)
@@ -190,7 +238,7 @@ def test_opt_in_service(guest, mirror, evidence):
             pass
 
 
-def lifecycle(guest, mirror, revision, evidence, web_binary):
+def lifecycle(guest, mirror, revision, evidence, web_binary, reboot=None):
     evidence.check('KAS_WEB_IMPORT', 'NOT_TESTED', 'unattempted')
     # Match the proven normal KAS lifecycle: trusted pinned sources and
     # guest TLS mapping must be prepared BEFORE any real installer invocation.
@@ -309,7 +357,7 @@ def lifecycle(guest, mirror, revision, evidence, web_binary):
                 raise RuntimeError('web_smoke_process_did_not_stop')
             process_started = False
             phase = 'OPT_IN_LIFECYCLE'
-            return test_opt_in_service(guest, mirror, evidence)
+            return test_opt_in_service(guest, mirror, evidence, reboot=reboot)
         evidence.check('KAS_WEB_LIFECYCLE', 'NOT_TESTED', 'unattempted')
         return True
     except Exception as exc:
