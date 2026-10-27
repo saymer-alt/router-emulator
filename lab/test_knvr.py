@@ -1,0 +1,55 @@
+import tempfile
+import unittest
+from pathlib import Path
+from lab.run import storage_args
+
+
+class KNVRStorageTests(unittest.TestCase):
+    def test_separate_disposable_archive_and_opt(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            source = root / 'source.img'
+            source.write_bytes(b'synthetic image')
+            work = root / 'work'
+            work.mkdir()
+            opt = storage_args(source, work, 'labopt')
+            archive = storage_args(source, work, 'labarchive')
+            self.assertNotEqual(opt, archive)
+            self.assertEqual((work / 'labarchive.img').read_bytes(), b'synthetic image')
+            (work / 'labarchive.img').write_bytes(b'changed by guest')
+            self.assertEqual(source.read_bytes(), b'synthetic image')
+
+    def test_archive_symlink_rejected(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / 'real.img').write_bytes(b'x')
+            (root / 'link.img').symlink_to(root / 'real.img')
+            with self.assertRaises(ValueError):
+                storage_args(root / 'link.img', root, 'labarchive')
+
+
+class KNVRAssertionTests(unittest.TestCase):
+    def test_first_failed_guest_assertion_cannot_be_hidden(self):
+        import subprocess
+        from lab.knvr_e2e import checked
+        class ShellGuest:
+            def command(self, text, **kwargs):
+                return subprocess.run(['sh', '-c', text], check=True, capture_output=True)
+        with self.assertRaises(subprocess.CalledProcessError):
+            checked(ShellGuest(), 'false; true')
+        checked(ShellGuest(), 'true; true')
+
+
+class RecordingFileTests(unittest.TestCase):
+    def test_all_three_current_segments_must_contain_data(self):
+        import subprocess
+        from lab.knvr_e2e import recording_files_command
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            for cam in ('101', '201', '301'):
+                (root / ('cam' + cam)).mkdir()
+                (root / ('cam' + cam) / ('cam' + cam + '_current.mkv')).write_bytes(b'frame')
+            command = recording_files_command(root)
+            self.assertEqual(subprocess.run(['sh', '-c', command], capture_output=True).returncode, 0)
+            (root / 'cam201/cam201_current.mkv').write_bytes(b'')
+            self.assertNotEqual(subprocess.run(['sh', '-c', command], capture_output=True).returncode, 0)
