@@ -32,7 +32,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 75
     env:
-      EMU_VERSION: "3.8"
+      EMU_VERSION: "4.1"
       OPENWRT_VERSION: "25.12.5"
     steps:
       - uses: actions/checkout@v4
@@ -42,7 +42,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends mtd-utils unzip socat curl wget python3 build-essential ninja-build meson pkg-config libglib2.0-dev libpixman-1-dev zlib1g-dev libslirp-dev libfdt-dev python3-venv
 
-      - name: Download checked 3.8 flash preparation seed (no private firmware)
+      - name: Download checked 4.1 flash preparation seed (no private firmware)
         shell: bash
         run: |
           set -euo pipefail
@@ -51,8 +51,8 @@ jobs:
           base="https://github.com/stavultras/router-emulator/releases/download/v$EMU_VERSION"
           curl --retry 3 -fL -o emulator.tar.gz "$base/Router-Emulator-$EMU_VERSION-linux-x86_64.tar.gz"
           curl --retry 3 -fL -o presets.zip "$base/Router-Emulator-$EMU_VERSION-presets.zip"
-          echo '77fa6f8a6a00af1164c9e144dc2f8bda7154877271498666bb9f17355d2e74d6  emulator.tar.gz' | sha256sum -c -
-          echo 'ef98b33c7636b5e792dcb16bcd1ad54f247639fccc19e9d9662fd422954d0732  presets.zip' | sha256sum -c -
+          echo '8ae277cc0fecfb99da3a452fb4226f272ee6d571f362898ca2176513f3adb0b7  emulator.tar.gz' | sha256sum -c -
+          echo '8146b505a9d75407c4504bf90638d7e3d3e3ccfc529d09c45a40b2b6868604a2  presets.zip' | sha256sum -c -
           tar -xzf emulator.tar.gz
           unzip -q presets.zip
           echo "EMU_ROOT=$RUNNER_TEMP/qemu-lab/Router-Emulator" >> "$GITHUB_ENV"
@@ -61,7 +61,7 @@ jobs:
         run: |
           set -euo pipefail
           cd "$EMU_ROOT"
-          tools/prepare-nand.sh cudy_wr3000p-v1 "$OPENWRT_VERSION"
+          tools/prepare-nand.sh --flash-type nand --flash-id c8017f7f7f --flash-mb 128 cudy_wr3000p-v1 "$OPENWRT_VERSION"
 
       - name: Cache QEMU built from this checkout's patch series
         id: qemu-cache
