@@ -15,6 +15,7 @@ output, provider payloads and config bytes stay private.
 """
 import hashlib
 import json
+from pathlib import Path
 import re
 import time
 
@@ -160,8 +161,7 @@ def lifecycle(guest, mirror, revision, evidence, web_binary):
                 '      - ' + PROVIDER_A + '\n      - ' + PROVIDER_B + '\n')
         put(guest, '/opt/lab/filter-seed.yaml', seed.encode())
         phase = 'BINARY_TRANSFER'
-        data = web_binary.read_bytes() if hasattr(web_binary, 'read_bytes') \
-            else web_binary
+        data = Path(web_binary).read_bytes()
         check(data[:4] == b'\x7fELF' and len(data) <= 32 * 1024 * 1024,
               'invalid_web_binary')
         # Same bounded 256 KiB channel discipline as the proven Web import E2E.
