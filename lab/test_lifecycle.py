@@ -155,12 +155,12 @@ class LifecycleDataTests(unittest.TestCase):
                     self.attempt += 1
                     if self.attempt == 1:
                         return (1, '', 'iptables: No chain/target/match by that name; PRIVATE_ROUTER')
-                    return (0, '-P _CUST_BYPASS_WA_ ACCEPT\\n'
-                            '-A _CUST_BYPASS_WA_ -j MARK --set-xmark 0x2000/0xffffffff\\n'
-                            '-A _CUST_BYPASS_WA_ -j CONNMARK --save-mark\\n'
-                            '-A _CUST_BYPASS_WA_ -j RETURN\\n', '')
-                return (0, '-P PREROUTING ACCEPT\\n'
-                        '-A PREROUTING -m mark --mark 0x0 -j _CUST_BYPASS_WA_\\n', '')
+                    return (0, '-P _CUST_BYPASS_WA_ ACCEPT\n'
+                            '-A _CUST_BYPASS_WA_ -j MARK --set-xmark 0x2000/0xffffffff\n'
+                            '-A _CUST_BYPASS_WA_ -j CONNMARK --save-mark\n'
+                            '-A _CUST_BYPASS_WA_ -j RETURN\n', '')
+                return (0, '-P PREROUTING ACCEPT\n'
+                        '-A PREROUTING -m mark --mark 0x0 -j _CUST_BYPASS_WA_\n', '')
 
         captured = io.StringIO()
         original_sleep = lifecycle.time.sleep
@@ -183,12 +183,12 @@ class LifecycleDataTests(unittest.TestCase):
         class CleanGuest:
             def execute(self, text, timeout=30):
                 if text.endswith('_CUST_BYPASS_WA_'):
-                    return (0, '-P _CUST_BYPASS_WA_ ACCEPT\\n'
-                            '-A _CUST_BYPASS_WA_ -j MARK --set-xmark 0x2000/0xffffffff\\n'
-                            '-A _CUST_BYPASS_WA_ -j CONNMARK --save-mark\\n'
-                            '-A _CUST_BYPASS_WA_ -j RETURN\\n', '')
-                return (0, '-P PREROUTING ACCEPT\\n'
-                        '-A PREROUTING -m mark --mark 0x0 -j _CUST_BYPASS_WA_\\n', '')
+                    return (0, '-P _CUST_BYPASS_WA_ ACCEPT\n'
+                            '-A _CUST_BYPASS_WA_ -j MARK --set-xmark 0x2000/0xffffffff\n'
+                            '-A _CUST_BYPASS_WA_ -j CONNMARK --save-mark\n'
+                            '-A _CUST_BYPASS_WA_ -j RETURN\n', '')
+                return (0, '-P PREROUTING ACCEPT\n'
+                        '-A PREROUTING -m mark --mark 0x0 -j _CUST_BYPASS_WA_\n', '')
 
         captured = io.StringIO()
         with contextlib.redirect_stdout(captured):
