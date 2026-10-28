@@ -212,6 +212,7 @@ def wait_netfilter_settled(guest, budget=60):
     until = time.monotonic() + budget
     probe_failures = 0
     content_samples = 0
+    incomplete_samples = 0
     last_shape = None
     failures = {}
     while True:
@@ -236,7 +237,18 @@ def wait_netfilter_settled(guest, budget=60):
                     value in entries[index] for index, value in
                     enumerate(('-j MARK', '-j CONNMARK --save-mark', '-j RETURN'))))
                 if netfilter_settled(rules, links):
+                    # Without this marker, all successful CI runs hide brief
+                    # missing-chain / lock / SSH problems that recovered.
+                    if probe_failures or incomplete_samples:
+                        categories = ','.join(
+                            '%s:%d' % (key, failures[key])
+                            for key in sorted(failures)) or 'none'
+                        print('KAS SETTLE RECOVERED: probe_failures=%d '
+                              'incomplete_samples=%d failure_categories=%s'
+                              % (probe_failures, incomplete_samples, categories),
+                              flush=True)
                     return rules, links
+                incomplete_samples += 1
         if time.monotonic() >= until:
             # Keys only come from fixed enums and stage names, values are
             # integers. Never publish stderr/stdout, command text or secrets.

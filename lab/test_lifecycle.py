@@ -141,6 +141,61 @@ class LifecycleDataTests(unittest.TestCase):
             lifecycle.time.sleep = original_sleep
         self.assertTrue(netfilter_settled(rules, links))
 
+    def test_settle_success_reports_recovered_failure_categories_without_stderr(self):
+        import contextlib
+        import io
+        from lab import kas_lifecycle as lifecycle
+
+        class RecoveredGuest:
+            def __init__(self):
+                self.attempt = 0
+
+            def execute(self, text, timeout=30):
+                if text.endswith('_CUST_BYPASS_WA_'):
+                    self.attempt += 1
+                    if self.attempt == 1:
+                        return (1, '', 'iptables: No chain/target/match by that name; PRIVATE_ROUTER')
+                    return (0, '-P _CUST_BYPASS_WA_ ACCEPT\\n'
+                            '-A _CUST_BYPASS_WA_ -j MARK --set-xmark 0x2000/0xffffffff\\n'
+                            '-A _CUST_BYPASS_WA_ -j CONNMARK --save-mark\\n'
+                            '-A _CUST_BYPASS_WA_ -j RETURN\\n', '')
+                return (0, '-P PREROUTING ACCEPT\\n'
+                        '-A PREROUTING -m mark --mark 0x0 -j _CUST_BYPASS_WA_\\n', '')
+
+        captured = io.StringIO()
+        original_sleep = lifecycle.time.sleep
+        lifecycle.time.sleep = lambda seconds: None
+        try:
+            with contextlib.redirect_stdout(captured):
+                rules, links = lifecycle.wait_netfilter_settled(RecoveredGuest())
+        finally:
+            lifecycle.time.sleep = original_sleep
+        self.assertTrue(netfilter_settled(rules, links))
+        self.assertIn('KAS SETTLE RECOVERED:', captured.getvalue())
+        self.assertIn('CHAIN_CHAIN_MISSING:1', captured.getvalue())
+        self.assertNotIn('PRIVATE_ROUTER', captured.getvalue())
+
+    def test_settle_clean_success_does_not_emit_failure_record(self):
+        import contextlib
+        import io
+        from lab import kas_lifecycle as lifecycle
+
+        class CleanGuest:
+            def execute(self, text, timeout=30):
+                if text.endswith('_CUST_BYPASS_WA_'):
+                    return (0, '-P _CUST_BYPASS_WA_ ACCEPT\\n'
+                            '-A _CUST_BYPASS_WA_ -j MARK --set-xmark 0x2000/0xffffffff\\n'
+                            '-A _CUST_BYPASS_WA_ -j CONNMARK --save-mark\\n'
+                            '-A _CUST_BYPASS_WA_ -j RETURN\\n', '')
+                return (0, '-P PREROUTING ACCEPT\\n'
+                        '-A PREROUTING -m mark --mark 0x0 -j _CUST_BYPASS_WA_\\n', '')
+
+        captured = io.StringIO()
+        with contextlib.redirect_stdout(captured):
+            rules, links = lifecycle.wait_netfilter_settled(CleanGuest())
+        self.assertTrue(netfilter_settled(rules, links))
+        self.assertEqual(captured.getvalue(), '')
+
     def test_settle_loop_fails_closed_when_probes_never_succeed(self):
         import lab.kas_lifecycle as lifecycle
 
