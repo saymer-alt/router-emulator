@@ -191,17 +191,16 @@ def lifecycle(guest, mirror, revision, evidence, web_binary):
             check(fixture in mirror.sources and
                   mirror.sources[fixture].startswith(b'#'),
                   'provider_payload_missing')
-        # Mihomo loads HTTP providers synchronously from these cache paths
-        # at startup and refreshes them per interval in the background.
-        # Seeding the cache from the pinned mirror payloads keeps the
-        # imported config startup within the canonical importer's
-        # port-verification window on the emulated CPU; the mirror fetch
-        # path itself is proven by the installer downloads earlier in the
-        # same run.
-        put(guest, '/opt/tmp/kas-lab-provider-a.yaml',
+        # Mihomo requires provider cache paths inside the -d home directory
+        # (path is not subpath of home directory or SAFE_PATHS otherwise) and
+        # loads HTTP providers synchronously from them at startup, refreshing
+        # per interval in the background. Seeding the cache from the pinned
+        # mirror payloads keeps the imported config startup within the
+        # canonical importer's port-verification window on the emulated CPU.
+        put(guest, '/opt/etc/mihomo/kas-lab-provider-a.yaml',
             mirror.sources['tests/fixtures/filter-e2e-provider-a.yaml'],
             '600')
-        put(guest, '/opt/tmp/kas-lab-provider-b.yaml',
+        put(guest, '/opt/etc/mihomo/kas-lab-provider-b.yaml',
             mirror.sources['tests/fixtures/filter-e2e-provider-b.yaml'],
             '600')
         seed = ('mixed-port: 7890\nmode: rule\nlog-level: info\n'
@@ -210,12 +209,12 @@ def lifecycle(guest, mirror, revision, evidence, web_binary):
                 '    url: https://raw.githubusercontent.com/saymer-alt/'
                 'keenetic-auto-setup/' + revision +
                 '/tests/fixtures/filter-e2e-provider-a.yaml\n'
-                '    path: /opt/tmp/kas-lab-provider-a.yaml\n    interval: 3600\n'
+                '    path: /opt/etc/mihomo/kas-lab-provider-a.yaml\n    interval: 3600\n'
                 '  ' + PROVIDER_B + ':\n    type: http\n'
                 '    url: https://raw.githubusercontent.com/saymer-alt/'
                 'keenetic-auto-setup/' + revision +
                 '/tests/fixtures/filter-e2e-provider-b.yaml\n'
-                '    path: /opt/tmp/kas-lab-provider-b.yaml\n    interval: 3600\n'
+                '    path: /opt/etc/mihomo/kas-lab-provider-b.yaml\n    interval: 3600\n'
                 'proxy-groups:\n  - name: LAB\n    type: select\n    use:\n'
                 '      - ' + PROVIDER_A + '\n      - ' + PROVIDER_B + '\n')
         put(guest, '/opt/lab/filter-seed.yaml', seed.encode())
@@ -385,8 +384,8 @@ def lifecycle(guest, mirror, revision, evidence, web_binary):
                       '/opt/lab/snapshot-stale.yaml /opt/lab/snapshot-fresh.yaml '
                       '/opt/lab/snapshot-valid.yaml /opt/lab/kas-web '
                       '/opt/lab/kas-web.pid /opt/lab/kas-web.log '
-                      '/opt/tmp/kas-lab-provider-a.yaml '
-                      '/opt/tmp/kas-lab-provider-b.yaml', timeout=30)
+                      '/opt/etc/mihomo/kas-lab-provider-a.yaml '
+                      '/opt/etc/mihomo/kas-lab-provider-b.yaml', timeout=30)
         evidence.check('KAS_FILTER_APPLY', 'PASS', 'native_filter_apply_passed')
         print('KAS FILTER: provider apply verified via Mihomo listing, clear '
               'without loaded names, stale 409, real-importer gate A and '
