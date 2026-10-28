@@ -28,6 +28,7 @@ PROVIDER_B_NODES = ('Gamma', 'Delta')
 EXCLUDED = 'Beta'
 
 PANEL = 'http://127.0.0.1:18081'
+PANEL_SIMPLE = 'http://127.0.0.1:18081'
 CONTROLLER = 'http://127.0.0.1:9090'
 IMPORTER = '/opt/lab/config-import.sh'
 
@@ -76,6 +77,15 @@ def await_operation(guest, expected, seconds=300):
                             PANEL + '/api/config/operation', timeout=20)
         status = json.loads(raw)
         if status.get('state') != 'RUNNING':
+            if status.get('state') != expected or (
+                    expected == 'OK' and status.get('exit_code') != 0):
+                # Private-only deep diagnostics; the public log gets fixed
+                # machine tokens from the operation record itself.
+                guest.execute('date; cat ' + PANEL_SIMPLE + '/api/config/operation '
+                              "2>&1 | head -3; pidof mihomo | wc -w; "
+                              'ls -la /tmp/mihomo-lifecycle.lock.d '
+                              '/tmp/mihomo.maintenance 2>&1 | head -4; '
+                              'tail -5 /opt/lab/kas-web.log 2>&1', timeout=30)
             check(status.get('state') == expected, 'unexpected_filter_result')
             code = status.get('exit_code')
             if expected == 'OK':
@@ -116,6 +126,11 @@ def hygiene(payload, what):
 
 
 def import_via_web(guest, seed_path):
+    # Read-only deep diagnostic first: does real Mihomo accept this seed at
+    # all? Output stays in the private SSH log; public labels stay fixed.
+    guest.execute('for b in /opt/sbin/mihomo /opt/bin/mihomo; do test -x "$b" '
+                  '&& { "$b" -d /opt/etc/mihomo -f ' + seed_path +
+                  ' -t; echo PRIVATE_TEST_EXIT=$?; break; }; done', timeout=120)
     code = guest.command(
         "curl -sS --noproxy '*' --connect-timeout 3 --max-time 30"
         ' -X POST -H Origin:http://127.0.0.1:18081'
@@ -123,6 +138,9 @@ def import_via_web(guest, seed_path):
         ' --data-binary @' + seed_path +
         ' -o /opt/lab/filter-res.json -w %{http_code} ' + PANEL +
         '/api/config/import', timeout=45)
+    if code != '202':
+        guest.execute('cat ' + PANEL_SIMPLE + '/api/config/operation 2>&1 | '
+                      'head -3; tail -5 /opt/lab/kas-web.log 2>&1', timeout=30)
     check(code == '202', 'seed_import_not_accepted')
     return await_operation(guest, 'OK')
 
@@ -333,7 +351,10 @@ def lifecycle(guest, mirror, revision, evidence, web_binary):
               'without loaded names, stale 409, real-importer gate A and '
               'rollback: PASS', flush=True)
         return True
-    except Exception:
+    except Exception as error:
         evidence.check('KAS_FILTER_APPLY', 'FAIL', 'native_filter_apply_failed')
-        print('KAS FILTER: FAIL at ' + phase, flush=True)
+        # RuntimeError labels are fixed identifiers raised by check() or
+        # guest.command; any other exception class is printed without content.
+        label = str(error) if isinstance(error, RuntimeError)             else type(error).__name__
+        print('KAS FILTER: FAIL at %s (%s)' % (phase, label[:60]), flush=True)
         return False
