@@ -86,6 +86,11 @@ def await_operation(guest, expected, seconds=300):
                               'ls -la /tmp/mihomo-lifecycle.lock.d '
                               '/tmp/mihomo.maintenance 2>&1 | head -4; '
                               'tail -5 /opt/lab/kas-web.log 2>&1', timeout=30)
+                print('KAS FILTER DIAG: importer_state=%s exit_code=%s '
+                      'error_code=%s' % (status.get('state'),
+                                         status.get('exit_code'),
+                                         status.get('error_code') or 'NONE'),
+                      flush=True)
             check(status.get('state') == expected, 'unexpected_filter_result')
             code = status.get('exit_code')
             if expected == 'OK':
@@ -128,9 +133,19 @@ def hygiene(payload, what):
 def import_via_web(guest, seed_path):
     # Read-only deep diagnostic first: does real Mihomo accept this seed at
     # all? Output stays in the private SSH log; public labels stay fixed.
-    guest.execute('for b in /opt/sbin/mihomo /opt/bin/mihomo; do test -x "$b" '
-                  '&& { "$b" -d /opt/etc/mihomo -f ' + seed_path +
-                  ' -t; echo PRIVATE_TEST_EXIT=$?; break; }; done', timeout=120)
+    test_code, test_out, test_err = guest.execute(
+        'for b in /opt/sbin/mihomo /opt/bin/mihomo; do test -x "$b" '
+        '&& { "$b" -d /opt/etc/mihomo -f ' + seed_path +
+        ' -t; echo EXIT=$?; break; }; done', timeout=180)
+    accepted = 'EXIT=0' in test_out
+    print('KAS FILTER DIAG: seed mihomo -t accepted=%s'
+          % str(accepted).lower(), flush=True)
+    if not accepted:
+        # Bring-up diagnostic only: the seed holds public fixture data and
+        # project contract keys, so a bounded sanitized reason is safe.
+        reason = re.sub(r'[^\w .:/()-]', ' ', (test_out + ' ' + test_err))
+        reason = re.sub(r'[ ]+', ' ', reason).strip()
+        print('KAS FILTER DIAG: seed reason=%s' % reason[:120], flush=True)
     code = guest.command(
         "curl -sS --noproxy '*' --connect-timeout 3 --max-time 30"
         ' -X POST -H Origin:http://127.0.0.1:18081'
@@ -163,6 +178,19 @@ def lifecycle(guest, mirror, revision, evidence, web_binary):
             check(fixture in mirror.sources and
                   mirror.sources[fixture].startswith(b'#'),
                   'provider_payload_missing')
+        # Mihomo loads HTTP providers synchronously from these cache paths
+        # at startup and refreshes them per interval in the background.
+        # Seeding the cache from the pinned mirror payloads keeps the
+        # imported config startup within the canonical importer's
+        # port-verification window on the emulated CPU; the mirror fetch
+        # path itself is proven by the installer downloads earlier in the
+        # same run.
+        put(guest, '/opt/tmp/kas-lab-provider-a.yaml',
+            mirror.sources['tests/fixtures/filter-e2e-provider-a.yaml'],
+            '600')
+        put(guest, '/opt/tmp/kas-lab-provider-b.yaml',
+            mirror.sources['tests/fixtures/filter-e2e-provider-b.yaml'],
+            '600')
         seed = ('mixed-port: 7890\nmode: rule\nlog-level: info\n'
                 'external-controller: 127.0.0.1:9090\nproxy-providers:\n'
                 '  ' + PROVIDER_A + ':\n    type: http\n'
