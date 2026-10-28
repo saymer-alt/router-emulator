@@ -52,6 +52,66 @@ class LifecycleDataTests(unittest.TestCase):
         self.assertFalse(netfilter_settled(rules, ['-A PREROUTING -m mark --mark 0x1/0xffffffff -j _CUST_BYPASS_WA_']))
         self.assertFalse(netfilter_settled('', link))
 
+    def test_iptables_failure_categories_never_expose_private_stderr(self):
+        from lab.kas_lifecycle import classify_iptables_error, read_iptables_diagnostic
+
+        self.assertEqual(classify_iptables_error(1, 'iptables: No chain/target/match by that name'), 'CHAIN_MISSING')
+        self.assertEqual(classify_iptables_error(4, 'Another app is currently holding the xtables lock'), 'XTABLES_LOCK')
+        self.assertEqual(classify_iptables_error(1, 'Resource temporarily unavailable'), 'XTABLES_LOCK')
+        self.assertEqual(classify_iptables_error(1, 'secret-host.example invalid'), 'COMMAND_NONZERO')
+        self.assertIsNone(classify_iptables_error(0, ''))
+
+        class Guest:
+            def __init__(self, result=None, exception=None):
+                self.result, self.exception = result, exception
+            def execute(self, command, timeout=30):
+                if self.exception:
+                    raise self.exception
+                return self.result
+
+        self.assertEqual(read_iptables_diagnostic(Guest((1, '', 'No chain/target/match by that name')),
+                                                   'iptables -t mangle -S chain'), (None, 'CHAIN_MISSING'))
+        self.assertEqual(read_iptables_diagnostic(Guest(exception=TimeoutError('private-host')),
+                                                   'iptables -t mangle -S chain'), (None, 'TIMEOUT'))
+        self.assertEqual(read_iptables_diagnostic(Guest(exception=EOFError('private-host')),
+                                                   'iptables -t mangle -S chain'), (None, 'SSH_ERROR'))
+
+    def test_failed_probe_prints_only_fixed_categories_and_never_stderr(self):
+        import contextlib
+        import io
+        from lab import kas_lifecycle as lifecycle
+
+        secret = 'PRIVATE_ROUTER_123'
+        class Guest:
+            def execute(self, text, timeout=30):
+                return 1, '', 'iptables: No chain/target/match by that name; ' + secret
+
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            with self.assertRaises(ContractFailure):
+                lifecycle.wait_netfilter_settled(Guest(), budget=0)
+        log = buffer.getvalue()
+        self.assertIn('CHAIN_CHAIN_MISSING:1', log)
+        self.assertNotIn(secret, log)
+        self.assertNotIn('iptables:', log)
+
+    def test_prerouting_probe_classified_separately_from_chain(self):
+        import contextlib
+        import io
+        from lab import kas_lifecycle as lifecycle
+
+        class Guest:
+            def execute(self, text, timeout=30):
+                if text.endswith('PREROUTING'):
+                    return 1, '', 'Could not get lock /run/xtables.lock'
+                return 0, '-P _CUST_BYPASS_WA_ ACCEPT', ''
+
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            with self.assertRaises(ContractFailure):
+                lifecycle.wait_netfilter_settled(Guest(), budget=0)
+        self.assertIn('PREROUTING_XTABLES_LOCK:1', buffer.getvalue())
+
     def test_settle_loop_retries_failed_probes_within_budget(self):
         import lab.kas_lifecycle as lifecycle
 
@@ -61,17 +121,17 @@ class LifecycleDataTests(unittest.TestCase):
             def __init__(self):
                 self.failures = 2
 
-            def command(self, text, timeout=30, input_data=None):
+            def execute(self, text, timeout=30, input_data=None):
                 if self.failures > 0:
                     self.failures -= 1
-                    raise RuntimeError('guest probe returned nonzero')
+                    return 1, '', 'Another app is currently holding the xtables lock'
                 if text.endswith('_CUST_BYPASS_WA_'):
-                    return ('-P _CUST_BYPASS_WA_ ACCEPT\n'
+                    return (0, '-P _CUST_BYPASS_WA_ ACCEPT\n'
                             '-A _CUST_BYPASS_WA_ -j MARK --set-xmark 0x2000/0xffffffff\n'
                             '-A _CUST_BYPASS_WA_ -j CONNMARK --save-mark --mask 0xffffffff\n'
-                            '-A _CUST_BYPASS_WA_ -j RETURN\n')
-                return ('-P PREROUTING ACCEPT\n'
-                        '-A PREROUTING -m mark --mark 0x0/0xffffffff -j _CUST_BYPASS_WA_\n')
+                            '-A _CUST_BYPASS_WA_ -j RETURN\n', '')
+                return (0, '-P PREROUTING ACCEPT\n'
+                        '-A PREROUTING -m mark --mark 0x0/0xffffffff -j _CUST_BYPASS_WA_\n', '')
 
         original_sleep = lifecycle.time.sleep
         lifecycle.time.sleep = lambda seconds: None
@@ -81,12 +141,67 @@ class LifecycleDataTests(unittest.TestCase):
             lifecycle.time.sleep = original_sleep
         self.assertTrue(netfilter_settled(rules, links))
 
+    def test_settle_success_reports_recovered_failure_categories_without_stderr(self):
+        import contextlib
+        import io
+        from lab import kas_lifecycle as lifecycle
+
+        class RecoveredGuest:
+            def __init__(self):
+                self.attempt = 0
+
+            def execute(self, text, timeout=30):
+                if text.endswith('_CUST_BYPASS_WA_'):
+                    self.attempt += 1
+                    if self.attempt == 1:
+                        return (1, '', 'iptables: No chain/target/match by that name; PRIVATE_ROUTER')
+                    return (0, '-P _CUST_BYPASS_WA_ ACCEPT\n'
+                            '-A _CUST_BYPASS_WA_ -j MARK --set-xmark 0x2000/0xffffffff\n'
+                            '-A _CUST_BYPASS_WA_ -j CONNMARK --save-mark\n'
+                            '-A _CUST_BYPASS_WA_ -j RETURN\n', '')
+                return (0, '-P PREROUTING ACCEPT\n'
+                        '-A PREROUTING -m mark --mark 0x0 -j _CUST_BYPASS_WA_\n', '')
+
+        captured = io.StringIO()
+        original_sleep = lifecycle.time.sleep
+        lifecycle.time.sleep = lambda seconds: None
+        try:
+            with contextlib.redirect_stdout(captured):
+                rules, links = lifecycle.wait_netfilter_settled(RecoveredGuest())
+        finally:
+            lifecycle.time.sleep = original_sleep
+        self.assertTrue(netfilter_settled(rules, links))
+        self.assertIn('KAS SETTLE RECOVERED:', captured.getvalue())
+        self.assertIn('CHAIN_CHAIN_MISSING:1', captured.getvalue())
+        self.assertNotIn('PRIVATE_ROUTER', captured.getvalue())
+
+    def test_settle_clean_success_does_not_emit_failure_record(self):
+        import contextlib
+        import io
+        from lab import kas_lifecycle as lifecycle
+
+        class CleanGuest:
+            def execute(self, text, timeout=30):
+                if text.endswith('_CUST_BYPASS_WA_'):
+                    return (0, '-P _CUST_BYPASS_WA_ ACCEPT\n'
+                            '-A _CUST_BYPASS_WA_ -j MARK --set-xmark 0x2000/0xffffffff\n'
+                            '-A _CUST_BYPASS_WA_ -j CONNMARK --save-mark\n'
+                            '-A _CUST_BYPASS_WA_ -j RETURN\n', '')
+                return (0, '-P PREROUTING ACCEPT\n'
+                        '-A PREROUTING -m mark --mark 0x0 -j _CUST_BYPASS_WA_\n', '')
+
+        captured = io.StringIO()
+        with contextlib.redirect_stdout(captured):
+            rules, links = lifecycle.wait_netfilter_settled(CleanGuest())
+        self.assertTrue(netfilter_settled(rules, links))
+        self.assertEqual(captured.getvalue(), '')
+
     def test_settle_loop_fails_closed_when_probes_never_succeed(self):
         import lab.kas_lifecycle as lifecycle
 
         class DeadGuest:
-            def command(self, text, timeout=30, input_data=None):
-                raise RuntimeError('guest probe returned nonzero')
+            def execute(self, text, timeout=30, input_data=None):
+                return 1, '', 'iptables: No chain/target/match by that name.'
 
         original_sleep = lifecycle.time.sleep
         lifecycle.time.sleep = lambda seconds: None
@@ -101,10 +216,10 @@ class LifecycleDataTests(unittest.TestCase):
         import lab.kas_lifecycle as lifecycle
 
         class HalfReadyGuest:
-            def command(self, text, timeout=30, input_data=None):
+            def execute(self, text, timeout=30, input_data=None):
                 if text.endswith('_CUST_BYPASS_WA_'):
-                    return '-P _CUST_BYPASS_WA_ ACCEPT\n'  # chain exists, rules missing
-                return '-P PREROUTING ACCEPT\n'
+                    return 0, '-P _CUST_BYPASS_WA_ ACCEPT\n', ''  # missing rules
+                return 0, '-P PREROUTING ACCEPT\n', ''
 
         original_sleep = lifecycle.time.sleep
         lifecycle.time.sleep = lambda seconds: None
