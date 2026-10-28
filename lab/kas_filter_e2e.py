@@ -133,13 +133,28 @@ def hygiene(payload, what):
 def import_via_web(guest, seed_path):
     # Read-only deep diagnostic first: does real Mihomo accept this seed at
     # all? Output stays in the private SSH log; public labels stay fixed.
+    guest.execute('mkdir -p /opt/lab/testhome', timeout=15)
     test_code, test_out, test_err = guest.execute(
         'for b in /opt/sbin/mihomo /opt/bin/mihomo; do test -x "$b" '
-        '&& { "$b" -d /opt/etc/mihomo -f ' + seed_path +
-        ' -t; echo EXIT=$?; break; }; done', timeout=180)
-    accepted = 'EXIT=0' in test_out
-    print('KAS FILTER DIAG: seed mihomo -t accepted=%s'
-          % str(accepted).lower(), flush=True)
+        '&& { echo CONFIG_HOME_RUN; "$b" -d /opt/etc/mihomo -f ' + seed_path +
+        ' -t; echo EXIT=$?; echo NEUTRAL_HOME_RUN; "$b" -d /opt/lab/testhome '
+        '-f ' + seed_path + ' -t; echo EXIT2=$?; break; }; done', timeout=300)
+    accepted = 'EXIT=0' in test_out and 'EXIT2=0' in test_out
+    print('KAS FILTER DIAG: seed mihomo -t accepted=%s' % str(accepted).lower(),
+          flush=True)
+    if not accepted:
+        # Bring-up diagnostic only: the seed holds public fixture data and
+        # project contract keys, so a bounded sanitized reason is safe.
+        reason = re.sub(r'[^' + chr(92) + r'w .:/()-]', ' ', (test_out + ' ' + test_err))
+        reason = re.sub(r'[ ]+', ' ', reason).strip()
+        # Prefer the actual failure lines over mihomo's info chatter.
+        keep = [part for part in reason.split('EXIT') if 0 < len(part)]
+        interesting = re.findall(
+            r'[^ ]*(?:error|fatal|invalid|failed|reject|unsupported|subpath)[^ ]*'
+            r'(?:[^ ]*(?:error|fatal|invalid|failed|reject|unsupported|subpath)[^ ]*)*',
+            reason, re.I)
+        tail = (interesting[0][:200] if interesting else reason[-200:])
+        print('KAS FILTER DIAG: seed reason=%s' % tail, flush=True)
     if not accepted:
         # Bring-up diagnostic only: the seed holds public fixture data and
         # project contract keys, so a bounded sanitized reason is safe.
