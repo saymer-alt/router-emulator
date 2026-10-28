@@ -66,7 +66,7 @@ def run_entware(args, private, credentials, coldboot, evidence):
     if args.stage == 'knvr':
         add_packages(mirror, private / 'cache', Path(__file__).with_name('knvr-packages.lock.json'))
     tls = None
-    if args.stage in ('kas', 'uninstall-packages', 'web'):
+    if args.stage in ('kas', 'uninstall-packages', 'web', 'web-filter'):
         from lab.kas_mirror import KASMirror
         tls = KASMirror(args.kas_dir, args.kas_ref, private, private / 'cache')
     completed = {'ok': True}
@@ -111,7 +111,7 @@ def run_entware(args, private, credentials, coldboot, evidence):
                 completed['ok'] = False
                 return
             print('KAS PREFLIGHT: native runtime capabilities verified', flush=True)
-            if args.stage in ('kas', 'uninstall-packages', 'web'):
+            if args.stage in ('kas', 'uninstall-packages', 'web', 'web-filter'):
                 if args.stage == 'web':
                     from lab.kas_web_e2e import lifecycle
                     def reboot_web():
@@ -170,6 +170,10 @@ def run_entware(args, private, credentials, coldboot, evidence):
                     completed['ok'] = lifecycle(
                         guest, tls, args.kas_ref, evidence, args.web_bin,
                         reboot=reboot_web)
+                elif args.stage == 'web-filter':
+                    from lab.kas_filter_e2e import lifecycle
+                    completed['ok'] = lifecycle(
+                        guest, tls, args.kas_ref, evidence, args.web_bin)
                 elif args.stage == 'kas':
                     from lab.kas_lifecycle import lifecycle
                     completed['ok'] = lifecycle(guest, tls, args.kas_ref, evidence, context, private, phase)
@@ -215,7 +219,7 @@ def main():
     parser.add_argument('--nand-dir', required=True)
     parser.add_argument('--private-dir', required=True)
     parser.add_argument('--report-dir', required=True)
-    parser.add_argument('--stage', choices=('entware', 'preflight', 'kas', 'uninstall-packages', 'knvr', 'web'), default='kas')
+    parser.add_argument('--stage', choices=('entware', 'preflight', 'kas', 'uninstall-packages', 'knvr', 'web', 'web-filter'), default='kas')
     parser.add_argument('--web-bin')
     parser.add_argument('--knvr-dir')
     parser.add_argument('--knvr-ref')
@@ -223,10 +227,10 @@ def main():
     parser.add_argument('--kas-dir')
     parser.add_argument('--kas-ref', default='6dd6438e2b64bad0fe9205ab6575795f808dabd8')
     args = parser.parse_args()
-    if args.stage in ('kas', 'uninstall-packages', 'web') and not args.kas_dir:
+    if args.stage in ('kas', 'uninstall-packages', 'web', 'web-filter') and not args.kas_dir:
         parser.error('--kas-dir is required for actual KAS execution')
-    if args.stage == 'web' and not args.web_bin:
-        parser.error('Web stage requires --web-bin for the pinned ARM64 binary')
+    if args.stage in ('web', 'web-filter') and not args.web_bin:
+        parser.error('Web stages require --web-bin for the pinned ARM64 binary')
     if args.stage == 'knvr' and not all((args.knvr_dir, args.knvr_ref, args.mediamtx)):
         parser.error('KNVR requires --knvr-dir, --knvr-ref and --mediamtx')
     private = Path(args.private_dir).resolve()
@@ -244,7 +248,7 @@ def main():
     evidence.reference('keenboot_sha256', '8b8615b345d912187853fea6bef6b1868760fd52ed92ba7c3a380ad5533cbf08')
     for name, filename in (('entware_lock_sha256', 'entware.lock.json'), ('kas_assets_lock_sha256', 'kas-assets.lock.json')):
         evidence.reference(name, hashlib.sha256(Path(__file__).with_name(filename).read_bytes()).hexdigest())
-    if args.stage in ('kas', 'uninstall-packages', 'web'):
+    if args.stage in ('kas', 'uninstall-packages', 'web', 'web-filter'):
         evidence.reference('kas_commit', args.kas_ref)
     try:
         nand = private / 'nand'

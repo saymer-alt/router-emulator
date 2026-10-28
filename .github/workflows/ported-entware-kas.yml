@@ -66,13 +66,13 @@ jobs:
           path: kas-source
           persist-credentials: false
       - name: Setup Go for optional Web ARM64 guest stage
-        if: ${{ inputs.stage == 'web' }}
+        if: ${{ inputs.stage == 'web' || inputs.stage == 'web-filter' }}
         uses: actions/setup-go@v5
         with:
           go-version: '1.23.x'
           cache: false
       - name: Cross-compile the pinned KAS Web bundle for guest
-        if: ${{ inputs.stage == 'web' }}
+        if: ${{ inputs.stage == 'web' || inputs.stage == 'web-filter' }}
         run: |
           cd kas-source/web/control-center
           go generate ./...
