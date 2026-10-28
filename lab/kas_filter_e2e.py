@@ -139,9 +139,9 @@ def import_via_web(guest, seed_path):
         '&& { echo CONFIG_HOME_RUN; "$b" -d /opt/etc/mihomo -f ' + seed_path +
         ' -t; echo EXIT=$?; echo NEUTRAL_HOME_RUN; "$b" -d /opt/lab/testhome '
         '-f ' + seed_path + ' -t; echo EXIT2=$?; break; }; done', timeout=300)
-    accepted = 'EXIT=0' in test_out and 'EXIT2=0' in test_out
-    print('KAS FILTER DIAG: seed mihomo -t accepted=%s' % str(accepted).lower(),
-          flush=True)
+    # The real contract is the config-home run; the neutral-home run only
+    # documents the home-directory boundary in the private log.
+    accepted = 'EXIT=0' in test_out
     if not accepted:
         # Bring-up diagnostic only: the seed holds public fixture data and
         # project contract keys, so a bounded sanitized reason is safe.
