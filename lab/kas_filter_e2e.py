@@ -145,16 +145,14 @@ def import_via_web(guest, seed_path):
     if not accepted:
         # Bring-up diagnostic only: the seed holds public fixture data and
         # project contract keys, so a bounded sanitized reason is safe.
-        reason = re.sub(r'[^' + chr(92) + r'w .:/()-]', ' ', (test_out + ' ' + test_err))
+        text = test_out + ' ' + test_err
+        # Strip mihomo's timestamp/level chatter so the actual failure line
+        # fits the bounded public diagnostic.
+        text = re.sub(r'[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z?', ' ', text)
+        text = re.sub(r'time=|level=[a-z]+|msg=', ' ', text)
+        reason = re.sub(r'[^' + chr(92) + r'w .:/()=-]', ' ', text)
         reason = re.sub(r'[ ]+', ' ', reason).strip()
-        # Prefer the actual failure lines over mihomo's info chatter.
-        keep = [part for part in reason.split('EXIT') if 0 < len(part)]
-        interesting = re.findall(
-            r'[^ ]*(?:error|fatal|invalid|failed|reject|unsupported|subpath)[^ ]*'
-            r'(?:[^ ]*(?:error|fatal|invalid|failed|reject|unsupported|subpath)[^ ]*)*',
-            reason, re.I)
-        tail = (interesting[0][:200] if interesting else reason[-200:])
-        print('KAS FILTER DIAG: seed reason=%s' % tail, flush=True)
+        print('KAS FILTER DIAG: seed reason=%s' % reason[-300:], flush=True)
     if not accepted:
         # Bring-up diagnostic only: the seed holds public fixture data and
         # project contract keys, so a bounded sanitized reason is safe.
