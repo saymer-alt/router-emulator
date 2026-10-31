@@ -22,6 +22,10 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+      - name: Host test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends python3-paramiko
       - name: Python syntax and unit tests
         run: |
           python3 -m py_compile lab/run.py lab/test_runner.py
