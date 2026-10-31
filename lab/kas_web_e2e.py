@@ -76,7 +76,7 @@ class ClassifiedGuest:
                 ('panel_process', 'pgrep -f /opt/bin/kas-control-center >/dev/null 2>&1 && echo alive || echo absent')):
             try:
                 code, output, _ = self._guest.execute(command, 10, None)
-                facts.append(label + '=' + (output.strip().replace(chr(10), ';') if code == 0 else 'unavailable'))
+                facts.append(label + '=' + (output.decode('utf-8', 'replace').strip().replace(chr(10), ';') if code == 0 else 'unavailable'))
             except Exception:
                 facts.append(label + '=unavailable')
         return ' '.join(facts)
