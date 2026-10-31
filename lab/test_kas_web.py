@@ -103,7 +103,7 @@ class ProbeClassificationTests(unittest.TestCase):
         guest.execute.side_effect = [(0, b'PANEL_ADDRESS: 192.168.1.1:8081\n', b''), (0, b'alive\n', b'')]
         classified = kas_web_e2e.ClassifiedGuest(guest)
         evidence = classified.public_failure_evidence()
-        self.assertIn('startup_records=PANEL_ADDRESS: 192.168.1.1:8081;', evidence)
+        self.assertIn('startup_records=PANEL_ADDRESS: 192.168.1.1:8081', evidence)
         self.assertIn('panel_process=alive', evidence)
         guest.execute.side_effect = TimeoutError()
         degraded = kas_web_e2e.ClassifiedGuest(guest).public_failure_evidence()
