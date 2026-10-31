@@ -164,49 +164,101 @@ def netfilter_settled(rules, links):
         and len(links) == 1 and bool(re.search(r'--mark 0x0(?:/0xffffffff)? -j ', links[0])))
 
 
+def classify_iptables_error(exit_code, stderr):
+    """Reduce private guest stderr to a small allowlist of public categories.
+
+    Real stderr may contain host-specific data. It must stay only in the
+    existing private SSH log, never in the public CI output or reports.
+    """
+    if exit_code == 0:
+        return None
+    msg = stderr.lower()
+    if ('no chain/target/match by that name' in msg
+            or 'chain does not exist' in msg
+            or 'chain not found' in msg):
+        return 'CHAIN_MISSING'
+    if ('xtables lock' in msg or 'another app is currently holding' in msg
+            or 'resource temporarily unavailable' in msg
+            or 'could not get lock' in msg or 'cannot lock' in msg):
+        return 'XTABLES_LOCK'
+    return 'COMMAND_NONZERO'
+
+
+def read_iptables_diagnostic(guest, command):
+    """Return output or fixed failure category; keep all raw output private."""
+    try:
+        code, output, stderr = guest.execute(command)
+    except TimeoutError:
+        return None, 'TIMEOUT'
+    except (OSError, EOFError):
+        return None, 'SSH_ERROR'
+    except Exception as error:
+        # Paramiko transport and channel exceptions need no full guest text.
+        # Restrict the decision to the *class*, not a private message.
+        if type(error).__name__ in ('SSHException', 'ChannelException',
+                                    'AuthenticationException'):
+            return None, 'SSH_ERROR'
+        return None, 'PROBE_ERROR'
+    if code != 0:
+        return None, classify_iptables_error(code, stderr)
+    return output, None
+
+
 def wait_netfilter_settled(guest, budget=60):
-    # Native Netfilter rewrite callbacks apply asynchronously after the
-    # installer's Proxy down/up and hook reinstallation, including across a
-    # reboot. Sample the identical assertion until the chain settles, with the
-    # same bounded snapshot budget the native installer self-check uses; the
-    # expected content never changes and a chain that never settles fails.
-    # A failed probe is "not ready", never a verdict: while the rewrite holds
-    # the xtables lock an `iptables -S` read can exit nonzero, and a transient
-    # channel error must not abort the sample. The installer's own bounded
-    # self-check retries failed probes the same way; the assertion itself is
-    # unchanged and a chain that never settles still fails. The 60s bound
-    # (3x the installer's own budget) covers the foreign-profile churn under
-    # QEMU TCG observed exceeding 20s while every probe kept failing; real
-    # hardware settles in seconds, and exceeding the bound still fails.
+    # KeeneticOS may rewrite Netfilter asynchronously after Proxy down/up.
+    # Do not relax the three-entry rule and one PREROUTING link assertion.
+    # Classify command failures on a bounded 60s deadline instead of
+    # treating all failures as proof of missing/changing rules.
     until = time.monotonic() + budget
     probe_failures = 0
     content_samples = 0
+    incomplete_samples = 0
     last_shape = None
+    failures = {}
     while True:
-        try:
-            rules = guest.command('iptables -t mangle -S _CUST_BYPASS_WA_')
-            links = [line for line in guest.command('iptables -t mangle -S PREROUTING').splitlines()
-                     if line.endswith(' -j _CUST_BYPASS_WA_')]
-        except Exception:
-            rules = None
+        rules, reason = read_iptables_diagnostic(
+            guest, 'iptables -t mangle -S _CUST_BYPASS_WA_')
+        if reason is not None:
+            failures['CHAIN_' + reason] = failures.get('CHAIN_' + reason, 0) + 1
             probe_failures += 1
-        if rules is not None:
-            content_samples += 1
-            entries = [line for line in rules.splitlines() if line.startswith('-A ')]
-            last_shape = (len(entries), len(links), len(entries) == 3 and all(
-                value in entries[index] for index, value in
-                enumerate(('-j MARK', '-j CONNMARK --save-mark', '-j RETURN'))))
-            if netfilter_settled(rules, links):
-                return rules, links
+        else:
+            prerouting, reason = read_iptables_diagnostic(
+                guest, 'iptables -t mangle -S PREROUTING')
+            if reason is not None:
+                failures['PREROUTING_' + reason] = (
+                    failures.get('PREROUTING_' + reason, 0) + 1)
+                probe_failures += 1
+            else:
+                links = [line for line in prerouting.splitlines()
+                         if line.endswith(' -j _CUST_BYPASS_WA_')]
+                content_samples += 1
+                entries = [line for line in rules.splitlines() if line.startswith('-A ')]
+                last_shape = (len(entries), len(links), len(entries) == 3 and all(
+                    value in entries[index] for index, value in
+                    enumerate(('-j MARK', '-j CONNMARK --save-mark', '-j RETURN'))))
+                if netfilter_settled(rules, links):
+                    # Without this marker, all successful CI runs hide brief
+                    # missing-chain / lock / SSH problems that recovered.
+                    if probe_failures or incomplete_samples:
+                        categories = ','.join(
+                            '%s:%d' % (key, failures[key])
+                            for key in sorted(failures)) or 'none'
+                        print('KAS SETTLE RECOVERED: probe_failures=%d '
+                              'incomplete_samples=%d failure_categories=%s'
+                              % (probe_failures, incomplete_samples, categories),
+                              flush=True)
+                    return rules, links
+                incomplete_samples += 1
         if time.monotonic() >= until:
-            # Sanitized one-line diagnosis: counters and the chain's public
-            # shape only; no guest text, no rule bodies, no UART data.
+            # Keys only come from fixed enums and stage names, values are
+            # integers. Never publish stderr/stdout, command text or secrets.
+            counts = ','.join('%s:%d' % (key, failures[key])
+                              for key in sorted(failures)) or 'none'
             print('KAS SETTLE DIAGNOSTIC: probe_failures=%d content_samples=%d '
-                  'last_shape(entries,links,order_ok)=%s'
-                  % (probe_failures, content_samples, last_shape), flush=True)
+                  'last_shape(entries,links,order_ok)=%s failure_categories=%s'
+                  % (probe_failures, content_samples, last_shape, counts), flush=True)
             raise ContractFailure('native_rules_not_ready')
         time.sleep(2)
-
 
 def contract(guest, mirror, foreign=None):
     wait_services(guest)

@@ -73,4 +73,13 @@ diff <(git show upstream/main:README.md | tail -n +2) \
 - README.md форка сохранён как лендинг лаборатории, README.upstream.md обновлён английским текстом upstream.
 - В `build.yml` сохранены наши фильтры лабораторных workflow, а базовая конфигурация сборки взята из 4.1.
 - Параметр CLI `emulator.sh -n` сохранён в upstream 4.1; он передаётся в QEMU как `dump-dir`. Это позволяет сохранить совместимость существующего `lab/run.py --nand-dir`.
-- Применение обоих патчей и полная совместимость E2E требуют подтверждения тестами CI. Старые собранные `src/qemu` не использовать для первичной проверки: чистая сборка обязательна.
+- Применение обоих патчей и полная совместимость E2E подтверждены зелёными прогонами CI от 27.10.2026.
+  На sync-ветке 4.1 (PR #40, коммит `82189a9`): [Build/release](https://github.com/saymer-alt/router-emulator/actions/runs/40546172122),
+  [OpenWrt lab (Keenetic lab)](https://github.com/saymer-alt/router-emulator/actions/runs/40546171916),
+  [Ported Entware KAS](https://github.com/saymer-alt/router-emulator/actions/runs/40546172056),
+  [KNVR E2E](https://github.com/saymer-alt/router-emulator/actions/runs/40546172038).
+  Повторная валидация лабораторий в PR #43 (коммит `94d447d`, вошёл в `main`):
+  [OpenWrt lab](https://github.com/saymer-alt/router-emulator/actions/runs/40556374502),
+  [KAS](https://github.com/saymer-alt/router-emulator/actions/runs/40556374489),
+  [KNVR](https://github.com/saymer-alt/router-emulator/actions/runs/40556374393).
+- Старые собранные `src/qemu` не использовать для первичной проверки: чистая сборка обязательна.
