@@ -20,6 +20,52 @@ def check(condition, code):
         raise RuntimeError(code)
 
 
+def classify_web_error(error):
+    """Public category of a failed probe; never carries guest text."""
+    if isinstance(error, TimeoutError):
+        return 'TIMEOUT'
+    if type(error).__name__ in ('SSHException', 'ChannelException',
+                                'AuthenticationException'):
+        return 'SSH_ERROR'
+    if isinstance(error, (OSError, EOFError)):
+        return 'SSH_ERROR'
+    if isinstance(error, RuntimeError) and 'nonzero' in str(error):
+        return 'COMMAND_NONZERO'
+    return 'PROBE_ERROR'
+
+
+class ClassifiedGuest:
+    """Delegates to the real guest and records the public category of the
+    last failed probe for the FAIL line: category, exit code, elapsed seconds.
+    No guest text, no URLs, no command output leaves the private workspace."""
+
+    def __init__(self, guest):
+        self._guest = guest
+        self.last_failure = 'no probe failed'
+
+    def command(self, text, timeout=30, input_data=None):
+        started = time.monotonic()
+        elapsed = lambda: max(0, int(time.monotonic() - started))
+        try:
+            code, output, stderr = self._guest.execute(text, timeout, input_data)
+        except TimeoutError:
+            self.last_failure = 'TIMEOUT after %ds' % elapsed()
+            raise
+        except Exception as error:
+            self.last_failure = '%s after %ds' % (classify_web_error(error), elapsed())
+            raise
+        if code != 0:
+            self.last_failure = 'COMMAND_NONZERO exit=%d after %ds' % (code, elapsed())
+            raise RuntimeError('guest probe returned nonzero')
+        return output
+
+    def execute(self, text, timeout=30, input_data=None):
+        return self._guest.execute(text, timeout, input_data)
+
+    def __getattr__(self, name):
+        return getattr(self._guest, name)
+
+
 def read_operation(guest):
     raw = guest.command(
         "curl -fSs --noproxy '*' --max-time 10 "
@@ -227,7 +273,8 @@ def test_opt_in_service(guest, mirror, evidence, reboot=None):
     except Exception:
         evidence.check('KAS_WEB_LIFECYCLE', 'FAIL', 'native_web_lifecycle_failed')
         # No guest data, URLs, credentials or command output in public logs.
-        print('KAS WEB: service lifecycle FAIL at ' + phase, flush=True)
+        print('KAS WEB: service lifecycle FAIL at ' + phase
+              + ' (last probe: ' + guest.last_failure + ')', flush=True)
         return False
     finally:
         # Do not delete managed files after any failure: ownership checks
@@ -240,6 +287,8 @@ def test_opt_in_service(guest, mirror, evidence, reboot=None):
 
 def lifecycle(guest, mirror, revision, evidence, web_binary, reboot=None):
     evidence.check('KAS_WEB_IMPORT', 'NOT_TESTED', 'unattempted')
+    # Public per-attempt failure classification for the FAIL line below.
+    guest = ClassifiedGuest(guest)
     # Match the proven normal KAS lifecycle: trusted pinned sources and
     # guest TLS mapping must be prepared BEFORE any real installer invocation.
     try:
@@ -364,7 +413,8 @@ def lifecycle(guest, mirror, revision, evidence, web_binary, reboot=None):
         evidence.check('KAS_WEB_IMPORT', 'FAIL', 'native_web_import_failed')
         # Public output is a fixed allowlisted phase name only, never a raw
         # guest exception/URL/config. Detailed command output remains private.
-        print('KAS WEB: FAIL at ' + phase, flush=True)
+        print('KAS WEB: FAIL at ' + phase
+              + ' (last probe: ' + guest.last_failure + ')', flush=True)
         return False
     finally:
         if process_started:

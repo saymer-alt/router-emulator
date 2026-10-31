@@ -53,3 +53,47 @@ class WebImporterContractTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class ProbeClassificationTests(unittest.TestCase):
+    """Public category, exit code and elapsed seconds for the FAIL line only."""
+
+    def test_categories_map_without_guest_text(self):
+        self.assertEqual(kas_web_e2e.classify_web_error(TimeoutError()), 'TIMEOUT')
+        ssh_error = type('SSHException', (Exception,), {})
+        self.assertEqual(kas_web_e2e.classify_web_error(ssh_error()), 'SSH_ERROR')
+        self.assertEqual(kas_web_e2e.classify_web_error(EOFError()), 'SSH_ERROR')
+        self.assertEqual(
+            kas_web_e2e.classify_web_error(RuntimeError('guest probe returned nonzero')),
+            'COMMAND_NONZERO')
+        # Any other exception must stay a generic category, never carry text.
+        self.assertEqual(kas_web_e2e.classify_web_error(ValueError('secret-data')), 'PROBE_ERROR')
+
+    def test_nonzero_exit_is_recorded_publicly_and_raised(self):
+        guest = Mock()
+        guest.execute.return_value = (7, b'', b'private stderr stays private')
+        classified = kas_web_e2e.ClassifiedGuest(guest)
+        with self.assertRaises(RuntimeError):
+            classified.command('iptables -t mangle -S _CUST_BYPASS_WA_')
+        self.assertIn('COMMAND_NONZERO exit=7', classified.last_failure)
+        self.assertIn('after', classified.last_failure)
+        self.assertNotIn('private', classified.last_failure)
+
+    def test_success_returns_output_and_timeout_is_classified(self):
+        guest = Mock()
+        guest.execute.return_value = (0, b'-A _CUST_BYPASS_WA_', b'')
+        classified = kas_web_e2e.ClassifiedGuest(guest)
+        self.assertEqual(classified.command('x'), b'-A _CUST_BYPASS_WA_')
+        guest.execute.side_effect = TimeoutError()
+        with self.assertRaises(TimeoutError):
+            classified.command('x', timeout=5)
+        self.assertTrue(classified.last_failure.startswith('TIMEOUT after'))
+        guest.execute.side_effect = None
+        guest.execute.return_value = (0, b'ok', b'')
+        self.assertEqual(classified.execute('y'), (0, b'ok', b''))
+
+    def test_lifecycle_wraps_guest_for_classification(self):
+        # The wrapper is applied at the lifecycle entry, so every helper probe
+        # records its public category without touching the real guest class.
+        self.assertIn('guest = ClassifiedGuest(guest)',
+                      __import__('inspect').getsource(kas_web_e2e.lifecycle))

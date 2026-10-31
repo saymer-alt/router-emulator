@@ -20,6 +20,7 @@ import re
 import time
 
 from lab.kas_lifecycle import install, prepare, put
+from lab.kas_web_e2e import ClassifiedGuest
 
 PROVIDER_A = 'lab-first'
 PROVIDER_B = 'lab-second'
@@ -175,6 +176,8 @@ def import_via_web(guest, seed_path):
 
 def lifecycle(guest, mirror, revision, evidence, web_binary):
     evidence.check('KAS_FILTER_APPLY', 'NOT_TESTED', 'unattempted')
+    # Public per-attempt failure classification for the FAIL line below.
+    guest = ClassifiedGuest(guest)
     try:
         prepare(guest, mirror, revision)
     except Exception:
@@ -396,5 +399,6 @@ def lifecycle(guest, mirror, revision, evidence, web_binary):
         # RuntimeError labels are fixed identifiers raised by check() or
         # guest.command; any other exception class is printed without content.
         label = str(error) if isinstance(error, RuntimeError)             else type(error).__name__
-        print('KAS FILTER: FAIL at %s (%s)' % (phase, label[:60]), flush=True)
+        print('KAS FILTER: FAIL at %s (%s; last probe: %s)'
+              % (phase, label[:60], guest.last_failure), flush=True)
         return False
