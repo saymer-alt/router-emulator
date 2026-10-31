@@ -823,6 +823,13 @@ def legacy_bridge_phase(guest, mirror, revision, evidence, phase):
     phase['name'] = 'KAS_INSTALL'
     evidence.set('KAS_INSTALL', 'NOT_TESTED', 'unattempted')
     try:
+        # Same verified-TLS delivery of the pinned production sources the
+        # baseline lifecycle uses; no guest source is replaced by a mock.
+        prepare(guest, mirror, revision)
+    except Exception:
+        evidence.set('KAS_INSTALL', 'BLOCKED', 'verified_tls_source_failed')
+        return False
+    try:
         fixture = legacy_bridge_resources(guest)
     except Exception:
         evidence.set('KAS_INSTALL', 'BLOCKED', 'legacy_bridge_setup_failed')
