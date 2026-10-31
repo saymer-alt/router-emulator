@@ -66,6 +66,22 @@ class ClassifiedGuest:
         return getattr(self._guest, name)
 
 
+    def public_failure_evidence(self):
+        """Best-effort public facts after a failed phase: the panel's own
+        filtered startup records and whether a panel process survived. Read
+        only; every probe failure degrades to 'unavailable'."""
+        facts = []
+        for label, command in (
+                ('startup_records', 'cat /opt/var/run/kas-control-center.startup 2>/dev/null | sort -u | tr ' + chr(39) + chr(10) + chr(39) + ' ' + chr(39) + ';' + chr(39)),
+                ('panel_process', 'pgrep -f /opt/bin/kas-control-center >/dev/null 2>&1 && echo alive || echo absent')):
+            try:
+                code, output, _ = self._guest.execute(command, 10, None)
+                facts.append(label + '=' + (output.strip().replace(chr(10), ';') if code == 0 else 'unavailable'))
+            except Exception:
+                facts.append(label + '=unavailable')
+        return ' '.join(facts)
+
+
 def read_operation(guest):
     raw = guest.command(
         "curl -fSs --noproxy '*' --max-time 10 "
@@ -274,7 +290,8 @@ def test_opt_in_service(guest, mirror, evidence, reboot=None):
         evidence.check('KAS_WEB_LIFECYCLE', 'FAIL', 'native_web_lifecycle_failed')
         # No guest data, URLs, credentials or command output in public logs.
         print('KAS WEB: service lifecycle FAIL at ' + phase
-              + ' (last probe: ' + guest.last_failure + ')', flush=True)
+              + ' (last probe: ' + guest.last_failure + '; '
+              + guest.public_failure_evidence() + ')', flush=True)
         return False
     finally:
         # Do not delete managed files after any failure: ownership checks
