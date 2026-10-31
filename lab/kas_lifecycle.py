@@ -350,8 +350,11 @@ def contract(guest, mirror, foreign=None, legacy=None):
     try:
         policy = block(config, 'ip policy bypass_wa')
     except RuntimeError:
+        # Fixed public categories only; guest text stays in the private SSH log.
+        print('KAS CONTRACT: bypass_wa policy block absent', flush=True)
         raise ContractFailure('native_policy_invalid') from None
     if 'permit global ' + bridge not in policy:
+        print('KAS CONTRACT: policy present, permit global ' + bridge + ' absent', flush=True)
         raise ContractFailure('native_policy_invalid')
     if not re.search(r'(?m)^\s+intercept enable\s*$', config):
         raise ContractFailure('native_dns_invalid')
