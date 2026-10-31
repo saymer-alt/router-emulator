@@ -29,7 +29,8 @@ REASONS.update({'native_services_duplicate', 'native_services_not_ready', 'nativ
     'native_file_digest_invalid', 'foreign_proxy_changed', 'foreign_cron_changed',
     'foreign_setup_failed', 'native_socks_not_ready', 'native_command_failed', 'native_command_timed_out',
     'mihomo_config_changed', 'magi_config_changed', 'watchdog_changed', 'hook_changed',
-    'crontab_changed', 'ledger_changed', 'proxy_changed', 'policy_changed', 'netfilter_changed'})
+    'crontab_changed', 'ledger_changed', 'proxy_changed', 'policy_changed', 'netfilter_changed',
+    'legacy_bridge_setup_failed', 'legacy_bridge_changed', 'legacy_bridge_reactivated'})
 CHECKS = ('KAS_IDEMPOTENCE', 'KAS_INSTALL_INTERRUPTION', 'KAS_UPDATE', 'KAS_FOREIGN_RESOURCES',
           'KAS_UNINSTALL_SNAPSHOT', 'KAS_TRANSACTION_GATE', 'KAS_WAN_RESTART_GUARD', 'KAS_UNINSTALL_GUARD',
           'KAS_UNINSTALL_PACKAGES_REPEAT', 'KAS_UNINSTALL_PACKAGES_REBOOT')

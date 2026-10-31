@@ -82,7 +82,7 @@ def changed_reason(before, after):
     return 'idempotence_failed'
 
 
-def install(guest, mirror, revision, evidence, foreign=None):
+def install(guest, mirror, revision, evidence, foreign=None, legacy=None):
     evidence.set('KAS_INSTALL', 'NOT_TESTED', 'unattempted')
     code, output, errors = guest.execute('KEENETIC_AUTO_SETUP_REF=' + revision +
         ' sh /opt/lab/install.sh disk', timeout=900)
@@ -94,7 +94,7 @@ def install(guest, mirror, revision, evidence, foreign=None):
         evidence.set('KAS_INSTALL', 'FAIL', 'native_installer_failed')
         return False
     try:
-        contract(guest, mirror, foreign)
+        contract(guest, mirror, foreign, legacy)
     except ContractFailure as error:
         evidence.set('KAS_INSTALL', 'FAIL', error.reason)
         return False
@@ -260,7 +260,55 @@ def wait_netfilter_settled(guest, budget=60):
             raise ContractFailure('native_rules_not_ready')
         time.sleep(2)
 
-def contract(guest, mirror, foreign=None):
+# Issue #50: a surviving KeeneticOS-side legacy-compatible bridge fixture.
+# The description is deliberately non-canonical (never 'mihomo t2s<n>'); the
+# functional signature is exactly what install.sh accepts for reuse.
+LEGACY_BRIDGE_DESCRIPTION = 'user-legacy-bridge'
+
+
+def legacy_bridge_shape(proxy_block):
+    """The functional bridge signature plus a deliberately non-canonical name."""
+    required = ('proxy protocol socks5', 'proxy socks5-udp',
+                'proxy upstream 127.0.0.1 7890', LEGACY_BRIDGE_DESCRIPTION)
+    if not all(value in proxy_block for value in required):
+        return False
+    if 'mihomo t2s' in proxy_block:
+        return False
+    return re.search(r'(?m)^\s+up\s*$', proxy_block) is not None
+
+
+def legacy_bridge_resources(guest):
+    """Pre-seed a surviving legacy-compatible Proxy0 BEFORE the real installer.
+
+    Fresh Entware profile: /opt must hold no KAS artifacts yet, while the
+    KeeneticOS-side configuration already carries a functional bridge with a
+    non-canonical description. The fixture block is returned verbatim so the
+    post-install contract can require byte-identical preservation.
+    """
+    for path in ('/opt/bin/mihomo', '/opt/sbin/mihomo',
+                 '/opt/etc/ndm/netfilter.d/020-bypass_wa.sh',
+                 '/opt/etc/keenetic-auto-setup/ownership.v1'):
+        if guest.execute('test -e ' + path)[0] == 0:
+            raise RuntimeError('legacy-bridge profile requires a clean /opt')
+    config = plain(guest.command('/bin/ndmc -c "show running-config"'))
+    if re.search(r'(?m)^interface Proxy0\s*$', config):
+        raise RuntimeError('legacy-bridge profile requires a free Proxy0')
+    for command in ('interface Proxy0',
+                    'interface Proxy0 description "' + LEGACY_BRIDGE_DESCRIPTION + '"',
+                    'interface Proxy0 proxy protocol socks5',
+                    'interface Proxy0 proxy socks5-udp',
+                    'interface Proxy0 proxy upstream 127.0.0.1 7890',
+                    'interface Proxy0 up'):
+        guest.command('/bin/ndmc -c "' + command + '"')
+    proxy_block = block(plain(guest.command('/bin/ndmc -c "show running-config"')),
+                        'interface Proxy0')
+    if not legacy_bridge_shape(proxy_block):
+        raise RuntimeError('legacy bridge fixture was not applied')
+    guest.command('/bin/ndmc -c "system configuration save"; sync')
+    return {'iface': 'Proxy0', 'proxy': proxy_block}
+
+
+def contract(guest, mirror, foreign=None, legacy=None):
     wait_services(guest)
     def read(command, reason='native_command_failed'):
         try:
@@ -276,23 +324,34 @@ def contract(guest, mirror, foreign=None):
     if len(rows) != len(set(rows)):
         raise ContractFailure('native_ownership_invalid')
     proxies = [row[12:] for row in rows if row.startswith('owned|proxy|')]
-    if len(proxies) != 1 or not re.fullmatch(r'Proxy\d+', proxies[0]):
+    # A reused legacy bridge (issue #50) is deliberately never owned by KAS:
+    # the ledger must record zero owned proxies for the legacy profile.
+    if len(proxies) != (0 if legacy else 1) or not all(
+            re.fullmatch(r'Proxy\d+', value) for value in proxies):
+        raise ContractFailure('native_proxy_invalid')
+    if legacy and 'owned|proxy|' + legacy['iface'] in rows:
         raise ContractFailure('native_proxy_invalid')
     for package in ('mihomo', 'magitrickle'):
         if 'owned|package|' + package not in rows:
             raise ContractFailure('native_ownership_invalid')
     config = plain(guest.command('/bin/ndmc -c "show running-config"'))
+    bridge = legacy['iface'] if legacy else proxies[0]
     try:
-        proxy = block(config, 'interface ' + proxies[0])
+        proxy = block(config, 'interface ' + bridge)
     except RuntimeError:
         raise ContractFailure('native_proxy_invalid') from None
     if not all(value in proxy for value in ('proxy protocol socks5', 'proxy socks5-udp', 'proxy upstream 127.0.0.1 7890')):
         raise ContractFailure('native_proxy_invalid')
+    if legacy:
+        strip_newline = chr(10)
+        if (proxy.rstrip(strip_newline) != legacy['proxy'].rstrip(strip_newline)
+                or not legacy_bridge_shape(proxy)):
+            raise ContractFailure('legacy_bridge_changed')
     try:
         policy = block(config, 'ip policy bypass_wa')
     except RuntimeError:
         raise ContractFailure('native_policy_invalid') from None
-    if 'permit global ' + proxies[0] not in policy:
+    if 'permit global ' + bridge not in policy:
         raise ContractFailure('native_policy_invalid')
     if not re.search(r'(?m)^\s+intercept enable\s*$', config):
         raise ContractFailure('native_dns_invalid')
@@ -347,12 +406,17 @@ def foreign_resources(guest):
     return {'proxy': block(config, 'interface Proxy0'), 'cron': cron}
 
 
-def idempotence(guest, mirror, revision, evidence, foreign):
+def idempotence(guest, mirror, revision, evidence, foreign, legacy=None):
     evidence.check('KAS_IDEMPOTENCE', 'NOT_TESTED', 'unattempted')
-    before = contract(guest, mirror, foreign)
+    before = contract(guest, mirror, foreign, legacy)
     code, output, errors = guest.execute('KEENETIC_AUTO_SETUP_REF=' + revision +
         ' sh /opt/lab/install.sh disk', timeout=600)
-    after = contract(guest, mirror, foreign)
+    after = contract(guest, mirror, foreign, legacy)
+    # The reused legacy bridge must never see a second down/up toggle: the
+    # production guard prints this exact skip on an existing stack + reuse.
+    if legacy and 'Skipping proxy activation' not in plain(output):
+        evidence.check('KAS_IDEMPOTENCE', 'FAIL', 'legacy_bridge_reactivated')
+        return False
     if code != 0 or '[OK] Done' not in plain(output) or before != after:
         evidence.check('KAS_IDEMPOTENCE', 'FAIL', changed_reason(before, after) if before != after else 'native_installer_failed')
         return False
@@ -748,3 +812,32 @@ def foreign_profile(args, private, credentials, coldboot, mirror, port, tls_port
             failure['reason'] = 'serial_timeout' if not started['probes'] else 'runner_failure'
         evidence.check('KAS_FOREIGN_RESOURCES', 'FAIL', failure['reason'])
     return passed
+
+def legacy_bridge_phase(guest, mirror, revision, evidence, phase):
+    """Issue #50 fixture phase: clean Entware + a surviving legacy bridge.
+
+    Real pinned installer, real KeeneticOS netfilter.d, no mocks: the
+    fixture only pre-seeds the KeeneticOS-side Proxy0 before the production
+    install.sh runs.
+    """
+    phase['name'] = 'KAS_INSTALL'
+    evidence.set('KAS_INSTALL', 'NOT_TESTED', 'unattempted')
+    try:
+        fixture = legacy_bridge_resources(guest)
+    except Exception:
+        evidence.set('KAS_INSTALL', 'BLOCKED', 'legacy_bridge_setup_failed')
+        return False
+    print('KAS LEGACY BRIDGE: pre-seeded Proxy0, non-canonical description, '
+          'SOCKS5 UDP -> 127.0.0.1:7890, up', flush=True)
+    if not install(guest, mirror, revision, evidence, None, fixture):
+        return False
+    phase['name'] = 'KAS_DOCTOR'
+    evidence.set('KAS_DOCTOR', 'NOT_TESTED', 'unattempted')
+    if not doctor(guest, evidence, revision):
+        return False
+    evidence.check('KAS_IDEMPOTENCE', 'NOT_TESTED', 'unattempted')
+    if not idempotence(guest, mirror, revision, evidence, None, fixture):
+        return False
+    print('KAS LEGACY BRIDGE: bridge reused byte-identically, ledger has no '
+          'owned proxy, repeat install skipped the reactivation toggle', flush=True)
+    return True
