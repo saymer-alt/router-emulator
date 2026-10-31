@@ -130,6 +130,13 @@ class Guest:
         if any(observed.get(p['Package']) != p['Version'] for p in lock['packages']):
             raise RuntimeError('real opkg database differs from pinned bootstrap')
         if marker is None:
+            # A repeated probe (e.g. the preflight EXT4 capability check) must
+            # adopt the existing marker: the reboot check compares against the
+            # ORIGINAL content, so regenerating the file here would destroy
+            # the persistence evidence it is supposed to protect.
+            code, existing, _ = self.execute('cat /opt/.lab-persistence')
+            if code == 0:
+                return existing
             marker = secrets.token_hex(16)
             self.command("printf '%s' '" + marker + "' > /opt/.lab-persistence; sync")
         elif self.command('cat /opt/.lab-persistence') != marker:

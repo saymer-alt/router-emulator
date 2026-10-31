@@ -22,6 +22,10 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+      - name: Host test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends python3-paramiko
       - name: Python syntax and unit tests
         run: |
           python3 -m py_compile lab/run.py lab/test_runner.py
@@ -40,7 +44,7 @@ jobs:
       - name: Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends mtd-utils unzip socat curl wget python3 build-essential ninja-build meson pkg-config libglib2.0-dev libpixman-1-dev zlib1g-dev libslirp-dev libfdt-dev python3-venv
+          sudo apt-get install -y --no-install-recommends mtd-utils unzip socat curl wget python3 python3-paramiko build-essential ninja-build meson pkg-config libglib2.0-dev libpixman-1-dev zlib1g-dev libslirp-dev libfdt-dev python3-venv
 
       - name: Download checked 4.1 flash preparation seed (no private firmware)
         shell: bash

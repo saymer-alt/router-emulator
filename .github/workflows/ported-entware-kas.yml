@@ -24,7 +24,7 @@ on:
         required: false
         type: string
       stage:
-        description: 'Laboratory stage: kas (full lifecycle) or uninstall-packages (minimal package uninstall)'
+        description: 'Laboratory stage: kas, uninstall-packages, or web (native HTTP panel)'
         required: false
         default: kas
         type: string
@@ -38,7 +38,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ported-lab-${{ github.ref }}
+  group: ported-lab-${{ github.ref }}-${{ inputs.stage || 'kas' }}
   cancel-in-progress: true
 
 jobs:
@@ -65,6 +65,22 @@ jobs:
           ref: ${{ inputs.kas_ref || '6dd6438e2b64bad0fe9205ab6575795f808dabd8' }}
           path: kas-source
           persist-credentials: false
+      - name: Setup Go for optional Web ARM64 guest stage
+        if: ${{ inputs.stage == 'web' || inputs.stage == 'web-filter' }}
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+      - name: Cross-compile the pinned KAS Web bundle for guest
+        if: ${{ inputs.stage == 'web' || inputs.stage == 'web-filter' }}
+        run: |
+          cd kas-source/web/control-center
+          go generate ./...
+          cmp -s ../../mihomo-doctor.sh scripts/mihomo-doctor.sh
+          cmp -s ../../config-import.sh scripts/config-import.sh
+          go test ./...
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -o kas-control-center-arm64 .
+          test "$(stat -c %s kas-control-center-arm64)" -le 33554432
       - name: Host tools and regression contracts
         run: |
           sudo apt-get update
@@ -119,6 +135,7 @@ jobs:
             --report-dir "$RUNNER_TEMP/ported-public" \
             --stage "${{ inputs.stage || 'kas' }}" \
             --kas-dir "$GITHUB_WORKSPACE/kas-source" \
+            --web-bin "$GITHUB_WORKSPACE/kas-source/web/control-center/kas-control-center-arm64" \
             --kas-ref "${{ inputs.kas_ref || '6dd6438e2b64bad0fe9205ab6575795f808dabd8' }}"
       - name: Public fixed-label summary
         if: always()
