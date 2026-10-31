@@ -855,17 +855,17 @@ def legacy_bridge_phase(guest, mirror, revision, evidence, phase):
     print('KAS LEGACY BRIDGE: pre-seeded Proxy0, non-canonical description, '
           'SOCKS5 UDP -> 127.0.0.1:7890, up', flush=True)
     if not install(guest, mirror, revision, evidence, None, fixture):
+        # Environment probe (issue #50 diagnostics, disposable lab only):
+        # retry the exact production bind command once and report fixed labels
+        # only. Distinguishes a transient native refusal from a lab-image
+        # limitation; never replaces or repairs the production path.
+        retry_rc, _, _ = guest.execute(
+            '/bin/ndmc -c "ip policy bypass_wa permit global Proxy0"')
+        present = guest.execute(
+            '/bin/ndmc -c "show running-config" | grep -c "permit global Proxy0"')
+        print('KAS LEGACY BRIDGE BIND PROBE: retry_rc=%d permit_lines=%s'
+              % (retry_rc, present[1].strip()), flush=True)
         return False
-    # Environment probe (issue #50 diagnostics, disposable lab only): retry
-    # the exact production bind command once and report only fixed labels.
-    # If the native installer bound the exit, this is a no-op re-write; if it
-    # reported a bind failure, this distinguishes a transient refusal from a
-    # lab-image limitation. Never replaces the production path.
-    code, _, _ = guest.execute('/bin/ndmc -c "ip policy bypass_wa permit global Proxy0"')
-    present = ('permit global Proxy0' in guest.command(
-        '/bin/ndmc -c "show running-config"'))
-    print('KAS LEGACY BRIDGE BIND PROBE: retry_rc=%d permit_present=%s'
-          % (code, present), flush=True)
     phase['name'] = 'KAS_DOCTOR'
     evidence.set('KAS_DOCTOR', 'NOT_TESTED', 'unattempted')
     if not doctor(guest, evidence, revision):
