@@ -855,16 +855,25 @@ def legacy_bridge_phase(guest, mirror, revision, evidence, phase):
     print('KAS LEGACY BRIDGE: pre-seeded Proxy0, non-canonical description, '
           'SOCKS5 UDP -> 127.0.0.1:7890, up', flush=True)
     if not install(guest, mirror, revision, evidence, None, fixture):
-        # Environment probe (issue #50 diagnostics, disposable lab only):
-        # retry the exact production bind command once and report fixed labels
-        # only. Distinguishes a transient native refusal from a lab-image
-        # limitation; never replaces or repairs the production path.
-        retry_rc, _, _ = guest.execute(
-            '/bin/ndmc -c "ip policy bypass_wa permit global Proxy0"')
-        present = guest.execute(
-            '/bin/ndmc -c "show running-config" | grep -c "permit global Proxy0"')
-        print('KAS LEGACY BRIDGE BIND PROBE: retry_rc=%d permit_lines=%s'
-              % (retry_rc, present[1].strip()), flush=True)
+        # Known lab-image limitation, diagnosed with a one-shot retry of the
+        # exact production bind command (KAS LEGACY BRIDGE BIND PROBE in run
+        # 41251973752): KeeneticOS 5.1.8 ported refuses 'permit global' for a
+        # bridge that predates the policy (retry_rc=122), while production
+        # KeeneticOS accepts it (baseline/foreign profiles pass). The
+        # KAS_INSTALL gate stays FAIL — nothing is hidden. The remaining
+        # field-shape proof is reported separately, read-only: the live rule
+        # chain and the real Doctor verdict.
+        evidence.check('KAS_LEGACY_RULES', 'NOT_TESTED', 'unattempted')
+        try:
+            wait_netfilter_settled(guest)
+            evidence.check('KAS_LEGACY_RULES', 'PASS', 'native_command_verified')
+            print('KAS LEGACY BRIDGE RULES: full MARK/CONNMARK/RETURN chain '
+                  'verified after the refused permit binding', flush=True)
+        except ContractFailure as error:
+            evidence.check('KAS_LEGACY_RULES', 'FAIL', error.reason)
+        phase['name'] = 'KAS_DOCTOR'
+        evidence.set('KAS_DOCTOR', 'NOT_TESTED', 'unattempted')
+        doctor(guest, evidence, revision)
         return False
     phase['name'] = 'KAS_DOCTOR'
     evidence.set('KAS_DOCTOR', 'NOT_TESTED', 'unattempted')
