@@ -87,6 +87,19 @@ def install(guest, mirror, revision, evidence, foreign=None, legacy=None):
     code, output, errors = guest.execute('KEENETIC_AUTO_SETUP_REF=' + revision +
         ' sh /opt/lab/install.sh disk', timeout=900)
     if code != 0 or '[OK] Done' not in plain(output):
+        # Fixed public categories over the private guest output: counts and
+        # marker presence only, never installer or guest text.
+        out = plain(output)
+        print('KAS INSTALL DIAGNOSTIC: exit=%d ok_done=%s skip_activation=%s '
+              'policy_bound=%s policy_absent=%s bridge_incompatible=%s '
+              'down_toggle=%s warn=%d fail=%d'
+              % (code, '[OK] Done' in out,
+                 'Skipping proxy activation' in out,
+                 'policy bound to' in out,
+                 'policy not found' in out,
+                 'not a compatible' in out,
+                 'down/up' in out,
+                 out.count('[WARN]'), out.count('[FAIL]')), flush=True)
         evidence.set('KAS_INSTALL', 'FAIL', 'native_installer_failed')
         return False
     installed = guest.command('opkg list-installed')
