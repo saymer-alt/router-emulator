@@ -583,6 +583,15 @@ def update_and_rollback(guest, mirror, revision, evidence, foreign):
 
 
 def uninstall(guest, mirror, evidence, foreign, revision):
+    if 'uninstall.sh' not in mirror.sources:
+        # Older KAS revisions (e.g. the stable channel) ship no transactional
+        # uninstall: the phase is blocked, not failed, so the rest of the
+        # lifecycle still gates the candidate honestly.
+        evidence.set('KAS_UNINSTALL', 'BLOCKED', 'snapshot_gate_blocked')
+        evidence.check('KAS_UNINSTALL_GUARD', 'BLOCKED', 'snapshot_gate_blocked')
+        print('KAS UNINSTALL: uninstall.sh not delivered by this KAS revision; phase blocked', flush=True)
+        return True
+
     def phase(marker):
         # Public fixed-format progress marker; the controller side owns it.
         print('KAS UNINSTALL PHASE: ' + marker, flush=True)
