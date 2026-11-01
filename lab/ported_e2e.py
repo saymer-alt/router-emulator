@@ -115,7 +115,8 @@ def run_entware(args, private, credentials, coldboot, evidence):
                 if args.stage == 'kas' and args.profile == 'legacy-bridge':
                     from lab.kas_lifecycle import legacy_bridge_phase
                     completed['ok'] = legacy_bridge_phase(
-                        guest, tls, args.kas_ref, evidence, phase)
+                        guest, tls, args.kas_ref, evidence, phase,
+                        with_ip_global=args.legacy_ip_global == 'true')
                     return
                 if args.stage == 'kas':
                     from lab.kas_lifecycle import lifecycle
@@ -163,6 +164,9 @@ def main():
     parser.add_argument('--private-dir', required=True)
     parser.add_argument('--report-dir', required=True)
     parser.add_argument('--stage', choices=('entware', 'preflight', 'kas', 'uninstall-packages', 'knvr'), default='kas')
+    parser.add_argument('--legacy-ip-global', choices=('true', 'false'), default='false',
+                        help='legacy-bridge profile A/B: pre-seed Proxy0 with '
+                             "'ip global auto' as the production create does")
     parser.add_argument('--profile', choices=('baseline', 'legacy-bridge'), default='baseline',
                         help='kas stage profile: full lifecycle (baseline) or the issue #50 '
                              'fresh-Entware + surviving legacy-compatible Proxy0 fixture')

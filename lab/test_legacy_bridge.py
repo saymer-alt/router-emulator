@@ -193,5 +193,47 @@ class LegacyBridgeIdempotenceTests(unittest.TestCase):
                          'native_command_verified')
 
 
+class LegacyBridgeIpGlobalTests(unittest.TestCase):
+    """A/B (issue #50 review): 'ip global auto' is issued only when requested."""
+
+    BLOCK = ('interface Proxy0\n'
+             ' description "user-legacy-bridge"\n'
+             ' proxy protocol socks5\n'
+             ' proxy socks5-udp\n'
+             ' proxy upstream 127.0.0.1 7890\n'
+             ' up\n!')
+
+    def _fixture_calls(self, with_ip_global):
+        calls = []
+        shows = {'n': 0}
+
+        class Guest:
+            def execute(self, command):
+                if command.startswith('test -e '):
+                    return 1, '', ''
+                raise AssertionError('unexpected execute: ' + command)
+
+            def command(self, text):
+                calls.append(text)
+                if 'show running-config' in text:
+                    shows['n'] += 1
+                    return self.BLOCK if shows['n'] >= 2 else ''
+                return ''
+        Guest.BLOCK = self.BLOCK
+        guest = Guest()
+        kl.legacy_bridge_resources(guest, with_ip_global=with_ip_global)
+        return [c for c in calls if 'ndmc' in c]
+
+    def test_ip_global_issued_when_requested(self):
+        calls = self._fixture_calls(True)
+        self.assertTrue(any('ip global auto' in c for c in calls),
+                        'ip global auto missing: %r' % (calls,))
+
+    def test_ip_global_omitted_by_default(self):
+        calls = self._fixture_calls(False)
+        self.assertFalse(any('ip global auto' in c for c in calls))
+        self.assertTrue(any(c.endswith('"interface Proxy0 up"') for c in calls))
+
+
 if __name__ == '__main__':
     unittest.main()

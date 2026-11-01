@@ -292,13 +292,17 @@ def legacy_bridge_shape(proxy_block):
     return re.search(r'(?m)^\s+up\s*$', proxy_block) is not None
 
 
-def legacy_bridge_resources(guest):
+def legacy_bridge_resources(guest, with_ip_global=False):
     """Pre-seed a surviving legacy-compatible Proxy0 BEFORE the real installer.
 
     Fresh Entware profile: /opt must hold no KAS artifacts yet, while the
     KeeneticOS-side configuration already carries a functional bridge with a
     non-canonical description. The fixture block is returned verbatim so the
     post-install contract can require byte-identical preservation.
+
+    with_ip_global adds 'interface ProxyN ip global auto' exactly as the KAS
+    production create_project_proxy() does; the A/B pair isolates whether the
+    lab image refuses 'permit global' for a bridge without it.
     """
     for path in ('/opt/bin/mihomo', '/opt/sbin/mihomo',
                  '/opt/etc/ndm/netfilter.d/020-bypass_wa.sh',
@@ -308,12 +312,15 @@ def legacy_bridge_resources(guest):
     config = plain(guest.command('/bin/ndmc -c "show running-config"'))
     if re.search(r'(?m)^interface Proxy0\s*$', config):
         raise RuntimeError('legacy-bridge profile requires a free Proxy0')
-    for command in ('interface Proxy0',
-                    'interface Proxy0 description "' + LEGACY_BRIDGE_DESCRIPTION + '"',
-                    'interface Proxy0 proxy protocol socks5',
-                    'interface Proxy0 proxy socks5-udp',
-                    'interface Proxy0 proxy upstream 127.0.0.1 7890',
-                    'interface Proxy0 up'):
+    commands = ('interface Proxy0',
+                'interface Proxy0 description "' + LEGACY_BRIDGE_DESCRIPTION + '"',
+                'interface Proxy0 proxy protocol socks5',
+                'interface Proxy0 proxy socks5-udp',
+                'interface Proxy0 proxy upstream 127.0.0.1 7890')
+    if with_ip_global:
+        commands += ('interface Proxy0 ip global auto',)
+    commands += ('interface Proxy0 up',)
+    for command in commands:
         guest.command('/bin/ndmc -c "' + command + '"')
     proxy_block = block(plain(guest.command('/bin/ndmc -c "show running-config"')),
                         'interface Proxy0')
@@ -831,7 +838,8 @@ def foreign_profile(args, private, credentials, coldboot, mirror, port, tls_port
         evidence.check('KAS_FOREIGN_RESOURCES', 'FAIL', failure['reason'])
     return passed
 
-def legacy_bridge_phase(guest, mirror, revision, evidence, phase):
+def legacy_bridge_phase(guest, mirror, revision, evidence, phase,
+                        with_ip_global=False):
     """Issue #50 fixture phase: clean Entware + a surviving legacy bridge.
 
     Real pinned installer, real KeeneticOS netfilter.d, no mocks: the
@@ -848,7 +856,7 @@ def legacy_bridge_phase(guest, mirror, revision, evidence, phase):
         evidence.set('KAS_INSTALL', 'BLOCKED', 'verified_tls_source_failed')
         return False
     try:
-        fixture = legacy_bridge_resources(guest)
+        fixture = legacy_bridge_resources(guest, with_ip_global)
     except Exception:
         evidence.set('KAS_INSTALL', 'BLOCKED', 'legacy_bridge_setup_failed')
         return False
