@@ -112,6 +112,12 @@ def run_entware(args, private, credentials, coldboot, evidence):
                 return
             print('KAS PREFLIGHT: native runtime capabilities verified', flush=True)
             if args.stage in ('kas', 'uninstall-packages'):
+                if args.stage == 'kas' and args.profile == 'legacy-bridge':
+                    from lab.kas_lifecycle import legacy_bridge_phase
+                    completed['ok'] = legacy_bridge_phase(
+                        guest, tls, args.kas_ref, evidence, phase,
+                        with_ip_global=args.legacy_ip_global == 'true')
+                    return
                 if args.stage == 'kas':
                     from lab.kas_lifecycle import lifecycle
                     completed['ok'] = lifecycle(guest, tls, args.kas_ref, evidence, context, private, phase)
@@ -136,7 +142,7 @@ def run_entware(args, private, credentials, coldboot, evidence):
             preset='cudy-wr3000p-v1', lan_forwards='8080:80;8022:222',
             opt_image=image, archive_image=archive, rtsp_port=cameras.port if cameras else None,
             mirror_port=port, mirror_tls_port=tls_port, after_scenario=probes))
-        if result == 0 and completed['ok'] and args.stage == 'kas':
+        if result == 0 and completed['ok'] and args.stage == 'kas' and args.profile == 'baseline':
             # A separate copy of the pre-install snapshot exercises collision
             # handling without changing the clean profile's nine gate results.
             from lab.kas_lifecycle import foreign_profile
@@ -158,6 +164,12 @@ def main():
     parser.add_argument('--private-dir', required=True)
     parser.add_argument('--report-dir', required=True)
     parser.add_argument('--stage', choices=('entware', 'preflight', 'kas', 'uninstall-packages', 'knvr'), default='kas')
+    parser.add_argument('--legacy-ip-global', choices=('true', 'false'), default='false',
+                        help='legacy-bridge profile A/B: pre-seed Proxy0 with '
+                             "'ip global auto' as the production create does")
+    parser.add_argument('--profile', choices=('baseline', 'legacy-bridge'), default='baseline',
+                        help='kas stage profile: full lifecycle (baseline) or the issue #50 '
+                             'fresh-Entware + surviving legacy-compatible Proxy0 fixture')
     parser.add_argument('--knvr-dir')
     parser.add_argument('--knvr-ref')
     parser.add_argument('--mediamtx')

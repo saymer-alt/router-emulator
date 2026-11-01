@@ -13,6 +13,14 @@ on:
         type: string
         required: false
         default: kas
+      profile:
+        type: string
+        required: false
+        default: baseline
+      legacy_ip_global:
+        type: boolean
+        required: false
+        default: false
   workflow_dispatch:
     inputs:
       emulator_ref:
@@ -28,6 +36,16 @@ on:
         required: false
         default: kas
         type: string
+      profile:
+        description: 'kas profile: baseline (full lifecycle) or legacy-bridge (issue #50 fresh Entware + surviving legacy-compatible Proxy0)'
+        required: false
+        default: baseline
+        type: string
+      legacy_ip_global:
+        description: 'legacy-bridge A/B: pre-seed Proxy0 with ip global auto as production create does'
+        required: false
+        default: false
+        type: boolean
   pull_request:
     paths:
       - 'lab/**'
@@ -118,6 +136,8 @@ jobs:
             --private-dir "$RUNNER_TEMP/ported-private" \
             --report-dir "$RUNNER_TEMP/ported-public" \
             --stage "${{ inputs.stage || 'kas' }}" \
+            --profile "${{ inputs.profile || 'baseline' }}" \
+            --legacy-ip-global "${{ inputs.legacy_ip_global || 'false' }}" \
             --kas-dir "$GITHUB_WORKSPACE/kas-source" \
             --kas-ref "${{ inputs.kas_ref || '6dd6438e2b64bad0fe9205ab6575795f808dabd8' }}"
       - name: Public fixed-label summary
