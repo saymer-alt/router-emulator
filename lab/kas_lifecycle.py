@@ -583,13 +583,33 @@ def update_and_rollback(guest, mirror, revision, evidence, foreign):
 
 
 def uninstall(guest, mirror, evidence, foreign, revision):
+    if 'uninstall.sh' not in mirror.sources:
+        # Some legitimate candidates (the stable channel today) intentionally
+        # ship no transactional uninstall.sh (KAS #179/#192): full removal is
+        # then NOT APPLICABLE to this revision. Report it honestly as BLOCKED
+        # with the delivery reason — never a PASS, never a phase failure, and
+        # never an anonymous controller crash. The rest of the lifecycle still
+        # gates install/doctor/idempotence/reboot/rollback for the candidate.
+        evidence.set('KAS_UNINSTALL', 'BLOCKED', 'uninstall_not_delivered')
+        evidence.check('KAS_UNINSTALL_GUARD', 'BLOCKED', 'uninstall_not_delivered')
+        print('KAS UNINSTALL: uninstall.sh not delivered by this KAS revision; '
+              'full uninstall not applicable (BLOCKED)', flush=True)
+        return True
+
     def phase(marker):
         # Public fixed-format progress marker; the controller side owns it.
         print('KAS UNINSTALL PHASE: ' + marker, flush=True)
     phase('contract snapshot')
     before = contract(guest, mirror, foreign)
     phase('read-only --check')
-    guest.command('sh /opt/lab/uninstall.sh --check')
+    try:
+        guest.command('sh /opt/lab/uninstall.sh --check')
+    except RuntimeError:
+        # A delivered-but-broken script is a candidate failure, never an
+        # absent component: fail the phase closed instead of escaping as an
+        # anonymous runner failure.
+        evidence.set('KAS_UNINSTALL', 'FAIL', 'execution_failed')
+        return False
     phase('read-only --plan')
     guest.execute('sh /opt/lab/uninstall.sh --plan')
     ready = False

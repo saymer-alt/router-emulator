@@ -1,7 +1,9 @@
 import hashlib
 import json
 from pathlib import Path
+import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 from lab.kas_lifecycle import (ContractFailure, block, changed_reason,
                               netfilter_settled, plain, wait_netfilter_settled)
 
@@ -229,3 +231,95 @@ class LifecycleDataTests(unittest.TestCase):
         finally:
             lifecycle.time.sleep = original_sleep
         self.assertEqual(raised.exception.reason, 'native_rules_not_ready')
+
+
+class _UninstallGuest:
+    """Records phase traffic; per-command scripted returns/raises."""
+
+    def __init__(self, command_plan=None, execute_plan=None):
+        self.commands = []
+        self.executes = []
+        self.command_plan = command_plan or {}
+        self.execute_plan = execute_plan or {}
+
+    def command(self, text, timeout=30, input_data=None):
+        self.commands.append(text)
+        result = self.command_plan.get(text)
+        if isinstance(result, Exception):
+            raise result
+        return result if result is not None else ''
+
+    def execute(self, text, timeout=30, input_data=None, on_stdout=None):
+        self.executes.append(text)
+        result = self.execute_plan.get(text)
+        if isinstance(result, Exception):
+            raise result
+        return result if result is not None else (0, '', '')
+
+
+class UninstallPhaseTests(unittest.TestCase):
+    """The uninstall phase must distinguish three candidate states honestly:
+    absent component -> BLOCKED (not applicable), delivered-but-broken -> FAIL,
+    delivered and gated -> existing snapshot/transaction gate semantics."""
+
+    CHECK = 'sh /opt/lab/uninstall.sh --check'
+
+    def test_absent_uninstall_sh_is_blocked_not_applicable(self):
+        import lab.kas_lifecycle as lifecycle
+        from lab.gates import Evidence
+
+        mirror = type('Mirror', (), {'sources': {'install.sh': b'#!/bin/sh\n'}})()
+        guest = _UninstallGuest()
+        evidence = Evidence()
+        for name in evidence.gates:
+            evidence.set(name, 'PASS', 'native_command_verified')
+        self.assertTrue(lifecycle.uninstall(guest, mirror, evidence, None, 'f' * 40))
+        self.assertEqual(guest.commands, [])  # the phase never touched the guest
+        self.assertEqual(evidence.gates['KAS_UNINSTALL'],
+                         {'status': 'BLOCKED', 'reason': 'uninstall_not_delivered'})
+        self.assertEqual(evidence.checks['KAS_UNINSTALL_GUARD'],
+                         {'status': 'BLOCKED', 'reason': 'uninstall_not_delivered'})
+        with tempfile.TemporaryDirectory() as directory:
+            evidence.write(directory)
+            report = json.loads((Path(directory) / 'gates.json').read_text())
+            self.assertEqual(report['outcome'], 'BLOCKED')  # never a PASS
+            root = ET.parse(Path(directory) / 'junit.xml').getroot()
+            self.assertEqual(len(root.findall('testcase/failure')), 0)
+            # exactly the blocked gate and its guard check, nothing else:
+            self.assertEqual(len(root.findall('testcase/skipped')), 2)
+
+    def test_present_broken_uninstall_sh_fails_closed(self):
+        import lab.kas_lifecycle as lifecycle
+        from lab.gates import Evidence
+        from unittest import mock
+
+        mirror = type('Mirror', (), {'sources': {'install.sh': b'#!/bin/sh\n',
+                                                 'uninstall.sh': b'#!/bin/sh\nexit 1\n'}})()
+        guest = _UninstallGuest(command_plan={self.CHECK: RuntimeError('guest probe returned nonzero')})
+        evidence = Evidence()
+        with mock.patch.object(lifecycle, 'contract', return_value={}):
+            self.assertFalse(lifecycle.uninstall(guest, mirror, evidence, None, 'f' * 40))
+        self.assertEqual(evidence.gates['KAS_UNINSTALL'],
+                         {'status': 'FAIL', 'reason': 'execution_failed'})
+
+    def test_present_uninstall_sh_keeps_existing_gate_semantics(self):
+        import lab.kas_lifecycle as lifecycle
+        from lab.gates import Evidence
+        from unittest import mock
+
+        mirror = type('Mirror', (), {'sources': {'install.sh': b'#!/bin/sh\n',
+                                                 'uninstall.sh': b'#!/bin/sh\n# synthetic candidate script\n'}})()
+        guest = _UninstallGuest(execute_plan={
+            'sh /opt/lab/uninstall.sh --plan': (0, '', ''),
+            'sh /opt/lab/uninstall-snapshot.sh --check': (1, '', ''),  # snapshot gate refuses
+        })
+        evidence = Evidence()
+        with mock.patch.object(lifecycle, 'contract', return_value={}):
+            result = lifecycle.uninstall(guest, mirror, evidence, None, 'f' * 40)
+        self.assertIn(self.CHECK, guest.commands)  # the delivered script was actually exercised
+        self.assertFalse(result)
+        self.assertEqual(evidence.gates['KAS_UNINSTALL'],
+                         {'status': 'BLOCKED', 'reason': 'snapshot_gate_blocked'})
+        self.assertEqual(evidence.checks['KAS_UNINSTALL_SNAPSHOT'],
+                         {'status': 'BLOCKED', 'reason': 'snapshot_gate_blocked'})
+
