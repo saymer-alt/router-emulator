@@ -13,8 +13,43 @@ class WebImporterContractTests(unittest.TestCase):
             marker: b'address:=net.JoinHostPort(ip.String(),"8081")'}))
         self.assertTrue(kas_web_e2e.web_uses_wildcard_listener({
             marker: b'address:=net.JoinHostPort("0.0.0.0","8081")'}))
+        self.assertTrue(kas_web_e2e.web_uses_wildcard_listener({
+            marker: b'address:=net.JoinHostPort("0.0.0.0","18080")'}))
         self.assertFalse(kas_web_e2e.web_uses_wildcard_listener({
             marker: b'address:=net.JoinHostPort("0.0.0.0","8080")'}))
+
+    def test_initial_port_comes_from_pinned_manage_script(self):
+        script = 'web/control-center/kas-web-manage.sh'
+        self.assertIsNone(kas_web_e2e.panel_initial_port({}))
+        self.assertEqual(kas_web_e2e.panel_initial_port({
+            script: b'set -- -lan -listen auto -lan-interface br0'
+                    b' -initial-port 18081 -settings-file "$ROOT/etc/x"'}), 18081)
+        self.assertEqual(kas_web_e2e.panel_initial_port({
+            script: b'set -- -lan -listen auto -lan-interface br0'
+                    b' -initial-port 18080 -settings-file "$ROOT/etc/x"'}), 18080)
+
+    def test_service_port_prefers_the_panel_persisted_record(self):
+        import json as _json
+        script = 'web/control-center/kas-web-manage.sh'
+        beta6_sources = {
+            script: b'-initial-port 18080 -settings-file "$ROOT/etc/kas.settings"',
+        }
+        guest = Mock()
+        guest.command.return_value = _json.dumps(
+            {'version': 1, 'port': 18084, 'auto_port_fallback': True})
+        self.assertEqual(
+            kas_web_e2e.panel_service_port(guest, beta6_sources), 18084)
+        # No persisted record: the pinned manage script default is the
+        # fallback, never a hard-coded panel assumption.
+        guest.command.side_effect = RuntimeError('guest probe returned nonzero')
+        self.assertEqual(
+            kas_web_e2e.panel_service_port(guest, beta6_sources), 18080)
+        # Unparseable record falls back as well.
+        guest.command.side_effect = None
+        guest.command.return_value = '{not json'
+        self.assertEqual(
+            kas_web_e2e.panel_service_port(guest, beta6_sources), 18080)
+        self.assertEqual(kas_web_e2e.panel_service_port(guest, {}), 18081)
 
     def test_large_binary_uses_bounded_extended_timeout_and_digest(self):
         payload = b'fake-ELF-for-test'

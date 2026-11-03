@@ -20,10 +20,42 @@ def check(condition, code):
         raise RuntimeError(code)
 
 
+# Fixed explicit smoke-test listener. This is an explicit -listen flag on the
+# disposable panel process, honored unchanged by beta.4/beta.5/beta.6; the
+# managed service port is a separate, evidence-derived value below.
+SMOKE_PORT = 18081
+# The managed service persists its actually selected port here (create-only)
+# at first startup; the guest record is authoritative over source defaults.
+PANEL_SETTINGS_PATH = '/opt/etc/kas-control-center.settings.json'
+
+
+def panel_initial_port(sources):
+    """Pinned KAS source contract: the startup port that the manage script
+    passes as -initial-port (beta.4/beta.5: 18081, beta.6: 18080)."""
+    match = re.search(rb'-initial-port[ \t]+([0-9]+)',
+                      sources.get('web/control-center/kas-web-manage.sh', b''))
+    return int(match.group(1)) if match else None
+
+
+def panel_service_port(guest, sources):
+    """Actual managed-service port: the panel's own persisted record when
+    available, otherwise the pinned manage script's initial port. beta.6 may
+    auto-hop 18080 -> 18081..18090, so the saved port is never assumed."""
+    try:
+        raw = guest.command('cat ' + PANEL_SETTINGS_PATH, timeout=15)
+        port = int(json.loads(raw).get('port', 0))
+        if 1 <= port <= 65535:
+            return port
+    except Exception:
+        pass
+    fallback = panel_initial_port(sources)
+    return fallback if fallback else 18081
+
+
 def read_operation(guest):
     raw = guest.command(
         "curl -fSs --noproxy '*' --max-time 10 "
-        "http://127.0.0.1:18081/api/config/operation", timeout=20)
+        "http://127.0.0.1:%d/api/config/operation" % SMOKE_PORT, timeout=20)
     return json.loads(raw)
 
 
@@ -48,12 +80,12 @@ def post(guest, source):
     check(source in ('/opt/lab/web-good.yaml', '/opt/lab/web-bad.yaml',
                      '/opt/lab/web-original.yaml'), 'unsafe_test_source')
     cmd = ("curl -sS --noproxy '*' --connect-timeout 2 --max-time 30"
-           " -X POST -H 'Origin: http://127.0.0.1:18081'"
+           " -X POST -H 'Origin: http://127.0.0.1:%d'" % SMOKE_PORT +
            " -H 'Content-Type: application/x-yaml'"
            " -H 'X-KAS-Confirm: apply'"
            " --data-binary @" + source +
            " -o /opt/lab/web-response.json -w '%{http_code}'"
-           " http://127.0.0.1:18081/api/config/import")
+           " http://127.0.0.1:%d/api/config/import" % SMOKE_PORT)
     response = guest.command(cmd, timeout=45)
     check(response == '202', 'web_post_not_accepted')
     payload = json.loads(guest.command('cat /opt/lab/web-response.json'))
@@ -83,9 +115,11 @@ def put_large_binary(guest, path, content):
 
 
 def web_uses_wildcard_listener(sources):
-    """Pinned KAS source contract: all-router IPv4 beta.5 vs Home-only beta.4."""
-    return (b'net.JoinHostPort("0.0.0.0","8081")'
-            in sources.get('web/control-center/lan.go', b''))
+    """Pinned KAS source contract: all-router IPv4 listener (beta.5 on 8081,
+    beta.6 on 18080) vs Home-only beta.4. Exact pinned literals, never regex."""
+    lan = sources.get('web/control-center/lan.go', b'')
+    return (b'net.JoinHostPort("0.0.0.0","8081")' in lan
+            or b'net.JoinHostPort("0.0.0.0","18080")' in lan)
 
 
 def test_opt_in_service(guest, mirror, evidence, reboot=None):
@@ -163,23 +197,31 @@ def test_opt_in_service(guest, mirror, evidence, reboot=None):
             check(match is not None, 'web_home_bridge_address_missing')
             home_ip = ipaddress.IPv4Address(match.group(1))
             check(home_ip.is_private, 'web_home_not_private')
+            # Evidence, not assumption: read the port the panel itself
+            # persisted (beta.6 default 18080 with bounded fallback), so a
+            # future auto-hop on the guest cannot fake a stale probe target.
+            service_port = panel_service_port(guest, mirror.sources)
             phase = 'HOME_HTTP'
             guest.command("curl -fSs --noproxy '*' --max-time 5 "
-                          "http://" + str(home_ip) + ":18081/api/status >/dev/null")
+                          "http://" + str(home_ip) + ':' + str(service_port) +
+                          "/api/status >/dev/null")
             if wildcard_default:
                 phase = 'LOOPBACK_AVAILABLE'
                 guest.command(
                     "curl -fSs --noproxy '*' --connect-timeout 2 --max-time 5 "
-                    "http://127.0.0.1:18081/api/status >/dev/null", timeout=10)
+                    "http://127.0.0.1:%d/api/status >/dev/null" % service_port,
+                    timeout=10)
             else:
                 phase = 'LOOPBACK_NOT_EXPOSED'
                 deny, _, _ = guest.execute(
                     "curl -sS --noproxy '*' --connect-timeout 2 --max-time 5 "
-                    "http://127.0.0.1:18081/api/status >/dev/null", timeout=10)
+                    "http://127.0.0.1:%d/api/status >/dev/null" % service_port,
+                    timeout=10)
                 check(deny != 0, 'web_home_listener_exposed_on_loopback')
         else:
             guest.command("curl -fSs --noproxy '*' --max-time 5 "
-                          "http://127.0.0.1:18081/api/status >/dev/null")
+                          "http://127.0.0.1:%d/api/status >/dev/null"
+                          % panel_service_port(guest, mirror.sources))
         phase = 'SERVICE_STOP'
         guest.command('sh /opt/etc/init.d/S98kas-control-center stop', timeout=90)
         check(guest.command('sh /opt/etc/init.d/S98kas-control-center status') ==
@@ -203,21 +245,21 @@ def test_opt_in_service(guest, mirror, evidence, reboot=None):
             direct = guest.command(
                 "curl -sS --noproxy '*' --max-time 5 -o /dev/null"
                 " -w '%{http_code}' http://" + str(home_ip) +
-                ":18081/api/status", timeout=15)
+                ':' + str(service_port) + "/api/status", timeout=15)
             check(direct == '401', 'web_optional_password_not_enforced')
             phase = 'PASSWORD_ACCEPTED'
             permitted = guest.command(
                 "curl -sS --noproxy '*' --max-time 5"
                 " -u kas:lab-local-panel-password-1234 -o /dev/null"
                 " -w '%{http_code}' http://" + str(home_ip) +
-                ":18081/api/status", timeout=15)
+                ':' + str(service_port) + "/api/status", timeout=15)
             check(permitted == '200', 'web_optional_password_rejected')
             phase = 'ROUTER_PROXY_AUTH_DELEGATION'
             via_router = guest.command(
                 "curl -sS --noproxy '*' --max-time 5"
                 " -H 'Host: kas.lab.keenetic.pro' -o /dev/null"
                 " -w '%{http_code}' http://" + str(home_ip) +
-                ":18081/api/status", timeout=15)
+                ':' + str(service_port) + "/api/status", timeout=15)
             check(via_router == '200', 'web_router_proxy_required_second_password')
             guest.command('sh /opt/etc/init.d/S98kas-control-center stop', timeout=90)
             guest.command('rm -f /opt/etc/kas-control-center.password '
@@ -287,7 +329,7 @@ def lifecycle(guest, mirror, revision, evidence, web_binary, reboot=None):
         # guest shell and record a PID. The KAS adapter still owns no service
         # at this point: this is a disposable smoke-test process only.
         guest.command(
-            '/opt/lab/kas-web -listen 127.0.0.1:18081'
+            '/opt/lab/kas-web -listen 127.0.0.1:%d' % SMOKE_PORT +
             ' </dev/null >/opt/lab/kas-web.log 2>&1 & echo $! > /opt/lab/kas-web.pid',
             timeout=15)
         process_started = True
@@ -301,7 +343,8 @@ def lifecycle(guest, mirror, revision, evidence, web_binary, reboot=None):
                 raise RuntimeError('web_process_not_running')
             rc, _, _ = guest.execute(
                 "curl -fSs --noproxy '*' --connect-timeout 1 --max-time 3 "
-                "http://127.0.0.1:18081/api/status >/dev/null", timeout=8)
+                "http://127.0.0.1:%d/api/status >/dev/null" % SMOKE_PORT,
+                timeout=8)
             if rc == 0:
                 break
             time.sleep(1)
@@ -315,12 +358,14 @@ def lifecycle(guest, mirror, revision, evidence, web_binary, reboot=None):
             " -X POST -H 'Origin: http://untrusted.example'"
             " -H 'Content-Type: application/x-yaml' -H 'X-KAS-Confirm: apply'"
             " --data-binary 'mixed-port: 7890'"
-            " -o /dev/null -w '%{http_code}' http://127.0.0.1:18081/api/config/import")
+            " -o /dev/null -w '%{http_code}'"
+            " http://127.0.0.1:%d/api/config/import" % SMOKE_PORT)
         check(code == '403', 'cross_origin_writes_accepted')
         code = guest.command(
             "curl -sS --noproxy '*' --max-time 10"
             " -H 'Host: attacker.example'"
-            " -o /dev/null -w '%{http_code}' http://127.0.0.1:18081/api/status")
+            " -o /dev/null -w '%{http_code}'"
+            " http://127.0.0.1:%d/api/status" % SMOKE_PORT)
         check(code == '403', 'dns_rebinding_accepted')
         phase = 'GOOD_YAML'
         # Preserve the real installed YAML, append harmless syntax-valid marker.
@@ -365,7 +410,8 @@ def lifecycle(guest, mirror, revision, evidence, web_binary, reboot=None):
             for _ in range(20):
                 code, _, _ = guest.execute(
                     "curl -sS --noproxy '*' --connect-timeout 1 --max-time 2"
-                    " -o /dev/null http://127.0.0.1:18081/api/status", timeout=5)
+                    " -o /dev/null http://127.0.0.1:%d/api/status" % SMOKE_PORT,
+                    timeout=5)
                 if code != 0:
                     break
                 time.sleep(1)
