@@ -6,6 +6,16 @@ from lab import kas_web_e2e
 
 
 class WebImporterContractTests(unittest.TestCase):
+    def test_old_and_new_listener_source_contracts(self):
+        marker = 'web/control-center/lan.go'
+        self.assertFalse(kas_web_e2e.web_uses_wildcard_listener({}))
+        self.assertFalse(kas_web_e2e.web_uses_wildcard_listener({
+            marker: b'address:=net.JoinHostPort(ip.String(),"8081")'}))
+        self.assertTrue(kas_web_e2e.web_uses_wildcard_listener({
+            marker: b'address:=net.JoinHostPort("0.0.0.0","8081")'}))
+        self.assertFalse(kas_web_e2e.web_uses_wildcard_listener({
+            marker: b'address:=net.JoinHostPort("0.0.0.0","8080")'}))
+
     def test_large_binary_uses_bounded_extended_timeout_and_digest(self):
         payload = b'fake-ELF-for-test'
         digest = __import__('hashlib').sha256(payload).hexdigest()

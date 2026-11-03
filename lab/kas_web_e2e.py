@@ -82,6 +82,12 @@ def put_large_binary(guest, path, content):
                   'chmod 700 /opt/lab/kas-web', timeout=30)
 
 
+def web_uses_wildcard_listener(sources):
+    """Pinned KAS source contract: all-router IPv4 beta.5 vs Home-only beta.4."""
+    return (b'net.JoinHostPort("0.0.0.0","8081")'
+            in sources.get('web/control-center/lan.go', b''))
+
+
 def test_opt_in_service(guest, mirror, evidence, reboot=None):
     """Native guest installation/stop/remove of ONLY the dedicated Web files."""
     key = 'web/control-center/kas-web-manage.sh'
@@ -103,10 +109,10 @@ def test_opt_in_service(guest, mirror, evidence, reboot=None):
         guest.command('sh /opt/etc/init.d/S98kas-control-center start', timeout=30)
         check(guest.command('sh /opt/etc/init.d/S98kas-control-center status') ==
               'RUNNING', 'web_service_start_failed')
-        # Stage 4 installs an HTTP listener only on the private Home br0
-        # address; Stage 3's historical installer listened on localhost.
-        # Select expectations from pinned source, never from run timing.
+        # Stage 4/beta.4: Home-only bind. Beta.5: router-wide IPv4 for KeenDNS.
+        # Choose the expectation from exact pinned KAS source, not wall time.
         home_default = b'-lan -listen auto' in mirror.sources[key]
+        wildcard_default = home_default and web_uses_wildcard_listener(mirror.sources)
         idle_rss = None
         postboot_rss = None
         binary_kib = None
@@ -160,11 +166,17 @@ def test_opt_in_service(guest, mirror, evidence, reboot=None):
             phase = 'HOME_HTTP'
             guest.command("curl -fSs --noproxy '*' --max-time 5 "
                           "http://" + str(home_ip) + ":18081/api/status >/dev/null")
-            phase = 'LOOPBACK_NOT_EXPOSED'
-            deny, _, _ = guest.execute(
-                "curl -sS --noproxy '*' --connect-timeout 2 --max-time 5 "
-                "http://127.0.0.1:18081/api/status >/dev/null", timeout=10)
-            check(deny != 0, 'web_home_listener_exposed_on_loopback')
+            if wildcard_default:
+                phase = 'LOOPBACK_AVAILABLE'
+                guest.command(
+                    "curl -fSs --noproxy '*' --connect-timeout 2 --max-time 5 "
+                    "http://127.0.0.1:18081/api/status >/dev/null", timeout=10)
+            else:
+                phase = 'LOOPBACK_NOT_EXPOSED'
+                deny, _, _ = guest.execute(
+                    "curl -sS --noproxy '*' --connect-timeout 2 --max-time 5 "
+                    "http://127.0.0.1:18081/api/status >/dev/null", timeout=10)
+                check(deny != 0, 'web_home_listener_exposed_on_loopback')
         else:
             guest.command("curl -fSs --noproxy '*' --max-time 5 "
                           "http://127.0.0.1:18081/api/status >/dev/null")
@@ -177,11 +189,15 @@ def test_opt_in_service(guest, mirror, evidence, reboot=None):
             # No KAS password by default. Then explicitly opt in to a private
             # LAN password while router-owned KeenDNS proxy auth is delegated.
             # All credentials here are disposable lab literals, never real.
-            guest.command(
+            password_setup = (
                 "umask 077; printf '%s\\n' 'lab-local-panel-password-1234'"
-                " > /opt/etc/kas-control-center.password; "
-                "printf '%s\\n' 'https://kas.lab.keenetic.pro'"
-                " > /opt/etc/kas-control-center.proxy-origin", timeout=15)
+                " > /opt/etc/kas-control-center.password")
+            if not wildcard_default:
+                # Beta.4 requires a private domain allowlist. Beta.5 does not.
+                password_setup += (
+                    "; printf '%s\\n' 'https://kas.lab.keenetic.pro'"
+                    " > /opt/etc/kas-control-center.proxy-origin")
+            guest.command(password_setup, timeout=15)
             guest.command('sh /opt/etc/init.d/S98kas-control-center start', timeout=30)
             phase = 'PASSWORD_REQUIRED'
             direct = guest.command(
