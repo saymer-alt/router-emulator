@@ -190,12 +190,12 @@ def test_opt_in_service(guest, mirror, evidence, reboot=None):
             # LAN password while router-owned KeenDNS proxy auth is delegated.
             # All credentials here are disposable lab literals, never real.
             password_setup = (
-                "umask 077; printf '%s\n' 'lab-local-panel-password-1234'"
+                "umask 077; printf '%s\\n' 'lab-local-panel-password-1234'"
                 " > /opt/etc/kas-control-center.password")
             if not wildcard_default:
                 # Beta.4 requires a private domain allowlist. Beta.5 does not.
                 password_setup += (
-                    "; printf '%s\n' 'https://kas.lab.keenetic.pro'"
+                    "; printf '%s\\n' 'https://kas.lab.keenetic.pro'"
                     " > /opt/etc/kas-control-center.proxy-origin")
             guest.command(password_setup, timeout=15)
             guest.command('sh /opt/etc/init.d/S98kas-control-center start', timeout=30)
