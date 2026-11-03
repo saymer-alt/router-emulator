@@ -98,3 +98,28 @@ class WebImporterContractTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+class ProbeFormatStringTests(unittest.TestCase):
+    def test_percent_formatted_strings_cannot_swallow_curl_directives(self):
+        # Adjacent string literals join before the % operator: a probe like
+        # "... -w '%{http_code}' http://127.0.0.1:%d/..." % port becomes an
+        # invalid format ("unsupported format character '{'") and the whole
+        # native E2E fails at the guard phase. Pin the invariant.
+        import ast
+        import pathlib
+        import re
+        source = pathlib.Path(kas_web_e2e.__file__).read_text(encoding='utf-8')
+        tree = ast.parse(source)
+        bad = []
+
+        class Visitor(ast.NodeVisitor):
+            def visit_BinOp(self, node):
+                if (isinstance(node.op, ast.Mod)
+                        and isinstance(node.left, ast.Constant)
+                        and isinstance(node.left.value, str)
+                        and re.search(r"%(?!%)[^{]*\{", node.left.value)):
+                    bad.append(node.left.value)
+                self.generic_visit(node)
+
+        Visitor().visit(tree)
+        self.assertEqual(bad, [])

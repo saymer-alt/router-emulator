@@ -85,7 +85,7 @@ def post(guest, source):
            " -H 'X-KAS-Confirm: apply'"
            " --data-binary @" + source +
            " -o /opt/lab/web-response.json -w '%{http_code}'"
-           " http://127.0.0.1:%d/api/config/import" % SMOKE_PORT)
+           " http://127.0.0.1:" + str(SMOKE_PORT) + "/api/config/import")
     response = guest.command(cmd, timeout=45)
     check(response == '202', 'web_post_not_accepted')
     payload = json.loads(guest.command('cat /opt/lab/web-response.json'))
@@ -359,13 +359,13 @@ def lifecycle(guest, mirror, revision, evidence, web_binary, reboot=None):
             " -H 'Content-Type: application/x-yaml' -H 'X-KAS-Confirm: apply'"
             " --data-binary 'mixed-port: 7890'"
             " -o /dev/null -w '%{http_code}'"
-            " http://127.0.0.1:%d/api/config/import" % SMOKE_PORT)
+            " http://127.0.0.1:" + str(SMOKE_PORT) + "/api/config/import")
         check(code == '403', 'cross_origin_writes_accepted')
         code = guest.command(
             "curl -sS --noproxy '*' --max-time 10"
             " -H 'Host: attacker.example'"
             " -o /dev/null -w '%{http_code}'"
-            " http://127.0.0.1:%d/api/status" % SMOKE_PORT)
+            " http://127.0.0.1:" + str(SMOKE_PORT) + "/api/status")
         check(code == '403', 'dns_rebinding_accepted')
         phase = 'GOOD_YAML'
         # Preserve the real installed YAML, append harmless syntax-valid marker.
