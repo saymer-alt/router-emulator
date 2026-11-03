@@ -122,6 +122,41 @@ def web_uses_wildcard_listener(sources):
             or b'net.JoinHostPort("0.0.0.0","18080")' in lan)
 
 
+# The pinned manage script refuses with a fixed "BLOCKED: <message>" line.
+# Map the start-phase refusals to fixed public categories; anything else is
+# reported without guest text.
+MANAGE_START_DENY_CATEGORIES = (
+    ('untracked Web process found; refusing duplicate', 'UNTRACKED_PROCESS'),
+    ('panel port is occupied or unavailable; choose another port;'
+     ' other services unchanged', 'PORT_UNAVAILABLE'),
+    ('Web process did not remain active', 'PROCESS_NOT_ACTIVE'),
+    ('Web process still draining; do not force kill during import',
+     'STILL_DRAINING'),
+    ('runtime directory unavailable', 'RUNTIME_DIR'),
+    ('cannot create private startup log', 'STARTUP_LOG'),
+    ('stale/unverifiable pid; inspect manually', 'STALE_PID'),
+    ('recorded pid is alive; inspect manually', 'LIVE_PID'),
+)
+
+
+def manage_deny_category(stderr_text):
+    for message, category in MANAGE_START_DENY_CATEGORIES:
+        if message in stderr_text:
+            return category
+    return 'OTHER_MANAGE_DENY'
+
+
+def managed_start(guest):
+    """Run the pinned service start; on refusal print a fixed category."""
+    code, _, errors = guest.execute(
+        'sh /opt/etc/init.d/S98kas-control-center start', timeout=60)
+    if code != 0:
+        print('KAS WEB: manage start denied category=' +
+              manage_deny_category(errors or ''), flush=True)
+        raise RuntimeError('web_service_start_denied')
+    return code
+
+
 def test_opt_in_service(guest, mirror, evidence, reboot=None):
     """Native guest installation/stop/remove of ONLY the dedicated Web files."""
     key = 'web/control-center/kas-web-manage.sh'
@@ -140,7 +175,7 @@ def test_opt_in_service(guest, mirror, evidence, reboot=None):
         check(guest.command('sh /opt/etc/init.d/S98kas-control-center status') ==
               'NOT_RUNNING', 'web_service_implicit_start')
         phase = 'SERVICE_START'
-        guest.command('sh /opt/etc/init.d/S98kas-control-center start', timeout=30)
+        managed_start(guest)
         check(guest.command('sh /opt/etc/init.d/S98kas-control-center status') ==
               'RUNNING', 'web_service_start_failed')
         # Stage 4/beta.4: Home-only bind. Beta.5: router-wide IPv4 for KeenDNS.
@@ -239,8 +274,12 @@ def test_opt_in_service(guest, mirror, evidence, reboot=None):
                 password_setup += (
                     "; printf '%s\\n' 'https://kas.lab.keenetic.pro'"
                     " > /opt/etc/kas-control-center.proxy-origin")
-            guest.command(password_setup, timeout=15)
-            guest.command('sh /opt/etc/init.d/S98kas-control-center start', timeout=30)
+            try:
+                guest.command(password_setup, timeout=15)
+            except Exception:
+                print('KAS WEB: password file write failed', flush=True)
+                raise
+            managed_start(guest)
             phase = 'PASSWORD_REQUIRED'
             direct = guest.command(
                 "curl -sS --noproxy '*' --max-time 5 -o /dev/null"
