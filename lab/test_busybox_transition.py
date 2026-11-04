@@ -19,6 +19,22 @@ class NativeBusyboxTransitionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             module.upload(guest, '/opt/etc/mihomo/config.yaml', b'no')
 
+    def test_real_ipk_transfer_reuses_native_accepted_put_helper(self):
+        guest = mock.Mock()
+        payload = b"fixed synthetic IPK bytes\\x00"
+        with mock.patch.object(module, 'put_guest_file') as put:
+            module.upload(guest, '/opt/lab/busybox-1.38.ipk', payload)
+        guest.command.assert_called_once_with('mkdir -p /opt/lab')
+        put.assert_called_once_with(
+            guest, '/opt/lab/busybox-1.38.ipk', payload, mode='600')
+
+    def test_transfer_errors_propagate_to_fail_closed_gate(self):
+        guest = mock.Mock()
+        with mock.patch.object(module, 'put_guest_file',
+                               side_effect=RuntimeError('digest differs')):
+            with self.assertRaises(RuntimeError):
+                module.upload(guest, '/opt/lab/busybox-1.38.ipk', b'bad data')
+
     def test_actual_1_37_and_1_38_opkg_inventory_are_accepted(self):
         guest = mock.Mock()
         guest.command.return_value = (
