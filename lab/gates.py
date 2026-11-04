@@ -34,7 +34,8 @@ REASONS.update({'native_services_duplicate', 'native_services_not_ready', 'nativ
     'legacy_bridge_setup_failed', 'legacy_bridge_changed', 'legacy_bridge_reactivated'})
 CHECKS = ('KAS_LEGACY_RULES', 'KAS_IDEMPOTENCE', 'KAS_INSTALL_INTERRUPTION', 'KAS_UPDATE', 'KAS_FOREIGN_RESOURCES',
           'KAS_UNINSTALL_SNAPSHOT', 'KAS_TRANSACTION_GATE', 'KAS_WAN_RESTART_GUARD', 'KAS_UNINSTALL_GUARD',
-          'KAS_UNINSTALL_PACKAGES_REPEAT', 'KAS_UNINSTALL_PACKAGES_REBOOT')
+          'KAS_UNINSTALL_PACKAGES_REPEAT', 'KAS_UNINSTALL_PACKAGES_REBOOT',
+          'ENTWARE_BUSYBOX_TRANSITION')
 
 
 class Evidence:
