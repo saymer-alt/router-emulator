@@ -13,6 +13,8 @@ import tarfile
 import urllib.request
 from urllib.parse import urlsplit
 
+from lab.kas_lifecycle import put as put_guest_file
+
 VERSION_OLD = "1.37.0-6"
 VERSION_NEW = "1.38.0-3"
 PACKAGE_URL = "https://test.entware.net/aarch64-k3.10/busybox_1.38.0-3_aarch64-3.10.ipk"
@@ -60,11 +62,12 @@ def upload(guest, path, content):
     if path not in ("/opt/lab/busybox-1.38.ipk", "/opt/lab/kas-entware-preflight.sh",
                     "/opt/lab/busybox-transition.sh"):
         raise ValueError("unexpected guest upload path")
-    guest.command("umask 077; /bin/mkdir -p /opt/lab; /bin/cat > " + path,
-                  input_data=content)
-    observed = guest.command("/opt/bin/busybox sha256sum " + path).split()[0]
-    if observed != hashlib.sha256(content).hexdigest():
-        raise RuntimeError("guest transfer SHA mismatch")
+    # Reuse the already native-QEMU-proven KAS transfer. The emulated
+    # firmware does not promise /bin/mkdir or /bin/cat; Entware PATH does.
+    # put_guest_file checks the destination path, writes mode 0600,
+    # and verifies the received file's SHA256 inside the guest.
+    guest.command("mkdir -p /opt/lab")
+    put_guest_file(guest, path, content, mode='600')
 
 
 def phase_script():
