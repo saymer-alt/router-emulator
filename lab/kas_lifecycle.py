@@ -596,11 +596,31 @@ def uninstall(guest, mirror, evidence, foreign, revision):
               'full uninstall not applicable (BLOCKED)', flush=True)
         return True
 
+    import json
+    from pathlib import Path
+
+    lock = json.loads(Path(__file__).with_name('kas-assets.lock.json').read_text())
+    digest = hashlib.sha256(mirror.sources['uninstall.sh']).hexdigest()
+    known_no_remove = digest in (lock['uninstall_no_remove_sha256'], lock['uninstall_inventory_s28_sha256'])
+    transactional = lock.get('uninstall_transactional_sha256', [])
+    if not known_no_remove and (not isinstance(transactional, list) or digest not in transactional):
+        evidence.set('KAS_UNINSTALL', 'BLOCKED', 'uninstall_candidate_unreviewed')
+        evidence.check('KAS_UNINSTALL_GUARD', 'BLOCKED', 'uninstall_candidate_unreviewed')
+        return False
+
+    def guarded_state():
+        return (
+            contract(guest, mirror, foreign),
+            guest.command('opkg list-installed | sort'),
+            plain(guest.command('/bin/ndmc -c "show running-config"')),
+            guest.command('sha256sum /opt/lab/foreign-job') if foreign is not None else None,
+        )
+
     def phase(marker):
         # Public fixed-format progress marker; the controller side owns it.
         print('KAS UNINSTALL PHASE: ' + marker, flush=True)
     phase('contract snapshot')
-    before = contract(guest, mirror, foreign)
+    before = guarded_state()
     phase('read-only --check')
     try:
         guest.command('sh /opt/lab/uninstall.sh --check')
@@ -639,26 +659,24 @@ def uninstall(guest, mirror, evidence, foreign, revision):
                     print('KAS PREPARE GUEST: ' + line, flush=True)
     evidence.check('KAS_TRANSACTION_GATE', 'PASS' if transaction else 'BLOCKED',
                    'native_command_verified' if transaction else 'snapshot_gate_blocked')
-    # The frozen baseline's remove branch has no deletion code. On a changed
-    # candidate, a rejected transaction must prevent invoking --remove at all.
-    from pathlib import Path
-    import json
-    lock = json.loads(Path(__file__).with_name('kas-assets.lock.json').read_text())
-    known_no_remove = hashlib.sha256(mirror.sources['uninstall.sh']).hexdigest() == lock['uninstall_no_remove_sha256']
-    if not transaction and not known_no_remove:
+    # Only the explicitly reviewed read-only scripts reach these commands.
+    if known_no_remove:
+        for option in ('--remove', '--purge'):
+            phase('code-3 guard ' + option)
+            code, output, errors = guest.execute('sh /opt/lab/uninstall.sh ' + option, timeout=900)
+            if code != 3 or '[BLOCKED]' not in output + errors or guarded_state() != before:
+                evidence.set('KAS_UNINSTALL', 'FAIL', 'execution_failed')
+                return False
+        evidence.set('KAS_UNINSTALL', 'BLOCKED', 'native_remove_not_implemented')
+        evidence.check('KAS_UNINSTALL_GUARD', 'PASS', 'native_command_verified')
+        print('KAS UNINSTALL: native code-3 guard verified; no removal implemented by this KAS revision', flush=True)
+        return True
+    if not transaction:
         evidence.set('KAS_UNINSTALL', 'BLOCKED', 'snapshot_gate_blocked')
         return False
-    phase('real --remove' if not known_no_remove else 'code-3 guard --remove')
+    phase('real --remove')
     code, output, errors = guest.execute('sh /opt/lab/uninstall.sh --remove', timeout=900)
     phase('--remove finished with exit %d' % code)
-    if known_no_remove:
-        if code == 3 and '[BLOCKED]' in output + errors and contract(guest, mirror, foreign) == before:
-            evidence.set('KAS_UNINSTALL', 'BLOCKED', 'native_remove_not_implemented')
-            evidence.check('KAS_UNINSTALL_GUARD', 'PASS', 'native_command_verified')
-            print('KAS UNINSTALL: native code-3 guard verified; no removal implemented by this KAS revision', flush=True)
-            return True
-        evidence.set('KAS_UNINSTALL', 'FAIL', 'execution_failed')
-        return False
 
     # Real transactional removal: the journal-bearing engine must complete,
     # leave ONLY ledger-owned resources removed, accept an idempotent re-run,

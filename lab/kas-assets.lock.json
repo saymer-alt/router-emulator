@@ -2,6 +2,7 @@
   "schema": 1,
   "kas_sha": "6dd6438e2b64bad0fe9205ab6575795f808dabd8",
   "uninstall_no_remove_sha256": "0a7cdbc368cb563b75cf6079aa0225818b615d8449e9a7c9e13abaaf3f2b0cfc",
+  "uninstall_inventory_s28_sha256": "1f60e0b037869be973bf96adb25427619f5a533fadebf4f7a084c3c2c76f624c",
   "mihomo_version": "1.19.33-2",
   "magitrickle_version": "0.8.2-1",
   "assets": [

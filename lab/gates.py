@@ -23,7 +23,7 @@ REASONS = {'unattempted', 'prerequisite_blocked', 'boot_stages_observed',
            'native_installer_failed', 'native_doctor_failed', 'doctor_warning', 'verified_tls_source_failed',
            'native_remove_not_implemented', 'snapshot_gate_blocked', 'native_reboot_failed',
            'native_rollback_failed', 'native_update_failed', 'idempotence_failed', 'rollback_not_exercised',
-           'uninstall_not_delivered',
+           'uninstall_not_delivered', 'uninstall_candidate_unreviewed', 'uninstall_candidate_unreviewed',
            'uninstall_packages_passed', 'uninstall_packages_failed', 'watchdog_lock_blocked'}
 REASONS.update({'native_services_duplicate', 'native_services_not_ready', 'native_ownership_invalid',
     'native_proxy_invalid', 'native_policy_invalid', 'native_dns_invalid', 'native_rules_not_ready',
