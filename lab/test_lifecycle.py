@@ -263,6 +263,7 @@ class UninstallPhaseTests(unittest.TestCase):
     delivered and gated -> existing snapshot/transaction gate semantics."""
 
     CHECK = 'sh /opt/lab/uninstall.sh --check'
+    LOCK = json.loads(Path(__file__).with_name('kas-assets.lock.json').read_text())
 
     def test_absent_uninstall_sh_is_blocked_not_applicable(self):
         import lab.kas_lifecycle as lifecycle
@@ -288,7 +289,7 @@ class UninstallPhaseTests(unittest.TestCase):
             # exactly the blocked gate and its guard check, nothing else:
             self.assertEqual(len(root.findall('testcase/skipped')), 2)
 
-    def test_present_broken_uninstall_sh_fails_closed(self):
+    def test_reviewed_but_broken_uninstall_sh_fails_closed(self):
         import lab.kas_lifecycle as lifecycle
         from lab.gates import Evidence
         from unittest import mock
@@ -297,29 +298,52 @@ class UninstallPhaseTests(unittest.TestCase):
                                                  'uninstall.sh': b'#!/bin/sh\nexit 1\n'}})()
         guest = _UninstallGuest(command_plan={self.CHECK: RuntimeError('guest probe returned nonzero')})
         evidence = Evidence()
-        with mock.patch.object(lifecycle, 'contract', return_value={}):
+        with mock.patch.object(lifecycle, 'contract', return_value={}), \
+             mock.patch.object(lifecycle.hashlib, 'sha256') as sha256:
+            sha256.return_value.hexdigest.return_value = self.LOCK['uninstall_no_remove_sha256']
             self.assertFalse(lifecycle.uninstall(guest, mirror, evidence, None, 'f' * 40))
         self.assertEqual(evidence.gates['KAS_UNINSTALL'],
                          {'status': 'FAIL', 'reason': 'execution_failed'})
 
-    def test_present_uninstall_sh_keeps_existing_gate_semantics(self):
+    def test_unknown_uninstall_never_reaches_guest(self):
+        import lab.kas_lifecycle as lifecycle
+        from lab.gates import Evidence
+        mirror = type('Mirror', (), {'sources': {'install.sh': b'#!/bin/sh\n',
+                                                 'uninstall.sh': b'#!/bin/sh\n# synthetic candidate script\n'}})()
+        guest = _UninstallGuest()
+        evidence = Evidence()
+        self.assertFalse(lifecycle.uninstall(guest, mirror, evidence, None, 'f' * 40))
+        self.assertEqual((guest.commands, guest.executes), ([], []))
+        self.assertEqual(evidence.gates['KAS_UNINSTALL'],
+                         {'status': 'BLOCKED', 'reason': 'uninstall_candidate_unreviewed'})
+
+    def test_reviewed_baseline_and_inventory_candidate_preserve_normal_and_foreign(self):
         import lab.kas_lifecycle as lifecycle
         from lab.gates import Evidence
         from unittest import mock
 
-        mirror = type('Mirror', (), {'sources': {'install.sh': b'#!/bin/sh\n',
-                                                 'uninstall.sh': b'#!/bin/sh\n# synthetic candidate script\n'}})()
-        guest = _UninstallGuest(execute_plan={
-            'sh /opt/lab/uninstall.sh --plan': (0, '', ''),
-            'sh /opt/lab/uninstall-snapshot.sh --check': (1, '', ''),  # snapshot gate refuses
-        })
-        evidence = Evidence()
-        with mock.patch.object(lifecycle, 'contract', return_value={}):
-            result = lifecycle.uninstall(guest, mirror, evidence, None, 'f' * 40)
-        self.assertIn(self.CHECK, guest.commands)  # the delivered script was actually exercised
-        self.assertFalse(result)
-        self.assertEqual(evidence.gates['KAS_UNINSTALL'],
-                         {'status': 'BLOCKED', 'reason': 'snapshot_gate_blocked'})
-        self.assertEqual(evidence.checks['KAS_UNINSTALL_SNAPSHOT'],
-                         {'status': 'BLOCKED', 'reason': 'snapshot_gate_blocked'})
+        mirror = type('Mirror', (), {'sources': {
+            'uninstall.sh': b'synthetic fixture',
+            'uninstall-snapshot.sh': b'unreviewed sibling fixture',
+        }})()
+        guard_commands = ['sh /opt/lab/uninstall.sh --remove', 'sh /opt/lab/uninstall.sh --purge']
+        for key in ('uninstall_no_remove_sha256', 'uninstall_inventory_s28_sha256'):
+            for foreign in (None, {'proxy': 'fixture', 'cron': 'fixture'}):
+                for change_state in (False, True):
+                    with self.subTest(key=key, foreign=foreign, change_state=change_state):
+                        guest = _UninstallGuest(execute_plan={
+                            **{command: (3, '', '[BLOCKED]') for command in guard_commands},
+                            'sh /opt/lab/uninstall-snapshot.sh --check': (0, '', ''),
+                        })
+                        evidence = Evidence()
+                        states = [{}, {'changed': True}, {}] if change_state else [{}, {}, {}]
+                        with mock.patch.object(lifecycle, 'contract', side_effect=states), \
+                             mock.patch.object(lifecycle.hashlib, 'sha256') as sha256:
+                            sha256.return_value.hexdigest.return_value = self.LOCK[key]
+                            result = lifecycle.uninstall(guest, mirror, evidence, foreign, 'f' * 40)
+                        self.assertEqual(result, not change_state)
+                        self.assertEqual([command for command in guest.executes if command in guard_commands],
+                                         guard_commands[:1] if change_state else guard_commands)
+                        self.assertFalse(any('uninstall-snapshot' in command
+                                             for command in guest.commands + guest.executes))
 
