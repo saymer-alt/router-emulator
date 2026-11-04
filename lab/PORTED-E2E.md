@@ -198,6 +198,46 @@ a typed contract violation (`foreign_proxy_changed`, `foreign_cron_changed`,
 reasons), or `runner_failure` for a controller defect. Guest text, UART output
 and configuration stay private in every label.
 
+## kas-update stage: the unified updater transaction (Stage 2B)
+
+`stage=kas-update` proves the real `kas-update.sh --apply` transaction before
+any physical-router attempt. After the ordinary install at the pinned KAS
+commit, the guest downloads `kas-update.sh` itself over the verified TLS
+mirror (digest-checked against the pinned blob) and runs the same scenarios
+an operator would, delegating every mutation to the committed
+`update-watchdog.sh`. The historical v1.8.6 watchdog body enters the lab as
+a SHA256-pinned fixture (`63d99cf5…`) served at its real
+raw.githubusercontent.com path through the same CA-verified transport.
+
+Ten checks publish under fixed labels: `KAS_UPDATE_RELEASE_UPGRADE`
+(v1.8.6 body → channel body; `--check` exit 1 with a recognized baseline,
+`--apply` exit 0, `apply verified`, canonical equals the channel digest,
+755, wrapper and crontab intact), `KAS_UPDATE_NOOP` (no-op leaves the
+ls -lidn identity unchanged), `KAS_UPDATE_IDEMPOTENT` (repeat applies run no
+second updater download), `KAS_UPDATE_NETFAIL_REFUSAL` (an unresolvable
+channel ref: `--check` 2/UNKNOWN, `--apply` 1, files byte-identical),
+`KAS_UPDATE_MODIFIED_REFUSAL` (a marker-keeping local edit is UNRECOGNIZED;
+`--apply --yes` refuses, the modified body is preserved, then restored),
+`KAS_UPDATE_FOREIGN_CRON_REVIEW` (an unknown full watchdog at the cron path:
+REVIEW REQUIRED, refusal, wrapper and crontab preserved, then restored),
+`KAS_UPDATE_COMMIT_FAILURE` (an injected unreadable crontab: updater exits 1
+after the binary commit, kas-update reports failure honestly, the committed
+canonical stays valid, recovery completes), `KAS_UPDATE_BUSY_REFUSAL` (a
+live foreign lifecycle-lock owner: refusal, no state change),
+`KAS_UPDATE_INERTNESS` (config.yaml digest, opkg package list, service
+counts, bypass rule count, ownership ledger and wrapper digest unchanged
+across the whole stage) and `KAS_UPDATE_EXITCODES` (the observed guest exit
+codes must equal the published table exactly).
+
+A PASS asserts the measured guest state — digests, permissions, identity
+lines and exit codes — never the presence of a log substring alone. The
+stage gate is `KAS_UPDATE_E2E`; the aggregate stays BLOCKED because the
+unrelated lifecycle gates are not attempted by this stage. TERM/SIGKILL and
+power-loss between the binary commit and the transaction end are NOT TESTED
+here: the ordinary watchdog updater commits each managed file individually
+and has no post-commit rollback; that contract remains with the host
+regression suite. Physical routers are never touched by this stage.
+
 ## GitHub execution and owner operation
 
 The workflow runs on laboratory changes and `workflow_dispatch`, and exposes
