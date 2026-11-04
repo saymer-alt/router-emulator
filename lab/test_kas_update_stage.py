@@ -86,7 +86,8 @@ class ExitCodeContractTests(unittest.TestCase):
             'netfail_check': 2, 'netfail_apply': 1,
             'modified_check': 1, 'modified_apply': 1,
             'foreign_check': 2, 'foreign_apply': 1,
-            'commit_failure_apply': 1, 'commit_recovery_apply': 0,
+            'commit_failure_check': 2, 'commit_failure_frontend_apply': 1,
+            'commit_failure_updater': 1, 'commit_recovery_apply': 0,
             'busy_apply': 1})
 
 

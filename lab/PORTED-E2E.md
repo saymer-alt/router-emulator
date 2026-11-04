@@ -220,9 +220,11 @@ channel ref: `--check` 2/UNKNOWN, `--apply` 1, files byte-identical),
 `--apply --yes` refuses, the modified body is preserved, then restored),
 `KAS_UPDATE_FOREIGN_CRON_REVIEW` (an unknown full watchdog at the cron path:
 REVIEW REQUIRED, refusal, wrapper and crontab preserved, then restored),
-`KAS_UPDATE_COMMIT_FAILURE` (an injected unreadable crontab: updater exits 1
-after the binary commit, kas-update reports failure honestly, the committed
-canonical stays valid, recovery completes), `KAS_UPDATE_BUSY_REFUSAL` (a
+`KAS_UPDATE_COMMIT_FAILURE` (an injected unreadable crontab: the kas-update
+front end itself refuses before any transaction - `--check` 2/REVIEW,
+`--apply` 1 - and the delegated transactional updater driven directly under
+the same fault exits 1 after its own atomic binary commit with the old file
+already replaced; recovery via kas-update completes), `KAS_UPDATE_BUSY_REFUSAL` (a
 live foreign lifecycle-lock owner: refusal, no state change),
 `KAS_UPDATE_INERTNESS` (config.yaml digest, opkg package list, service
 counts, bypass rule count, ownership ledger and wrapper digest unchanged

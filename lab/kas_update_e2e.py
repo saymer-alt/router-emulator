@@ -53,7 +53,9 @@ EXPECTED_EXIT_CODES = {
     'modified_apply': 1,
     'foreign_check': 2,
     'foreign_apply': 1,
-    'commit_failure_apply': 1,
+    'commit_failure_check': 2,
+    'commit_failure_frontend_apply': 1,
+    'commit_failure_updater': 1,
     'commit_recovery_apply': 0,
     'busy_apply': 1,
 }
@@ -368,22 +370,34 @@ def kas_update(guest, mirror, revision, evidence, context, private, phase_box):
     ok = _scenario(evidence, 'KAS_UPDATE_FOREIGN_CRON_REVIEW', 'kas_update_foreign_cron_reviewed',
                    foreign_cron) and ok
 
-    # 7. Failure after the binary commit (crontab unreadable) -> honest
-    #    exit 1, the committed canonical stays valid, recovery completes.
+    # 7. Unreadable crontab: the front end refuses before any transaction
+    #    (route UNKNOWN -> REVIEW), and the delegated transactional updater,
+    #    driven directly under the same fault, commits the binary and then
+    #    fails honestly at cron normalization with the old file already
+    #    replaced by its own atomic rename. Recovery completes via kas-update.
     def commit_failure():
         if not seed_old_body(guest):
             return False
         guest.command('mv ' + CRONTAB + ' /opt/lab/crontab-saved && mkdir ' + CRONTAB)
-        code, out = scenario.run('--apply --yes')
-        codes['commit_failure_apply'] = code
+        code, out = scenario.run('--check')
+        codes['commit_failure_check'] = code
+        code2, out2 = scenario.run('--apply --yes')
+        codes['commit_failure_frontend_apply'] = code2
+        untouched = guest_sha256(guest, CANONICAL) == OLD_BODY_SHA256
+        # The real delegated updater under the same fault (no mocks).
+        code3, out3, _ = probe(guest, 'KEENETIC_AUTO_SETUP_REF=' + revision
+                               + ' sh /opt/lab/update-watchdog.sh', timeout=300)
+        codes['commit_failure_updater'] = code3
         committed = guest_sha256(guest, CANONICAL) == candidate
         wrapper_kept = guest_perm_string(guest, WRAPPER) == EXECUTABLE_PERMS
         guest.command('rmdir ' + CRONTAB + ' && mv /opt/lab/crontab-saved ' + CRONTAB)
-        code2, out2 = scenario.run('--apply --yes')
-        codes['commit_recovery_apply'] = code2
-        return code == 1 and 'watchdog updater reported a failure' in out \
+        code4, out4 = scenario.run('--apply --yes')
+        codes['commit_recovery_apply'] = code4
+        return code == 2 and 'REVIEW REQUIRED' in out \
+            and code2 == 1 and untouched \
+            and code3 == 1 \
             and committed and wrapper_kept \
-            and code2 == 0 and 'nothing to apply' in out2 \
+            and code4 == 0 and 'nothing to apply' in out4 \
             and guest.command('cat ' + CRONTAB) == before['crontab']
     ok = _scenario(evidence, 'KAS_UPDATE_COMMIT_FAILURE', 'kas_update_commit_failure_verified',
                    commit_failure) and ok
