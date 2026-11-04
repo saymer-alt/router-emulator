@@ -6,7 +6,7 @@ import xml.etree.ElementTree as ET
 
 GATES = ('BOOT_READY', 'AUTH_READY', 'ENTWARE_READY', 'KAS_PREFLIGHT',
          'KAS_INSTALL', 'KAS_DOCTOR', 'KAS_REBOOT', 'KAS_ROLLBACK', 'KAS_UNINSTALL',
-         'KAS_UNINSTALL_PACKAGES')
+         'KAS_UNINSTALL_PACKAGES', 'KAS_UPDATE_E2E')
 STATUSES = ('PASS', 'FAIL', 'BLOCKED', 'NOT_TESTED')
 CAPABILITIES = ('ndmc', 'native_rci', 'dns_filter', 'opkg_kmod_netfilter', 'dns_tls_or_https',
                 'proxy_client', 'netfilter_mark', 'netfilter_connmark', 'tun',
@@ -31,11 +31,20 @@ REASONS.update({'native_services_duplicate', 'native_services_not_ready', 'nativ
     'foreign_setup_failed', 'native_socks_not_ready', 'native_command_failed', 'native_command_timed_out',
     'mihomo_config_changed', 'magi_config_changed', 'watchdog_changed', 'hook_changed',
     'crontab_changed', 'ledger_changed', 'proxy_changed', 'policy_changed', 'netfilter_changed',
-    'legacy_bridge_setup_failed', 'legacy_bridge_changed', 'legacy_bridge_reactivated'})
+    'legacy_bridge_setup_failed', 'legacy_bridge_changed', 'legacy_bridge_reactivated',
+    'kas_update_stage_passed', 'kas_update_stage_failed', 'kas_update_release_upgrade_passed',
+    'kas_update_noop_passed', 'kas_update_idempotent_passed', 'kas_update_netfail_refused',
+    'kas_update_modified_refused', 'kas_update_foreign_cron_reviewed',
+    'kas_update_commit_failure_verified', 'kas_update_busy_refused', 'kas_update_inertness_passed',
+    'kas_update_exitcodes_passed', 'kas_update_tls_delivery_failed', 'kas_update_fixture_unavailable',
+    'kas_update_precondition_missing'})
 CHECKS = ('KAS_LEGACY_RULES', 'KAS_IDEMPOTENCE', 'KAS_INSTALL_INTERRUPTION', 'KAS_UPDATE', 'KAS_FOREIGN_RESOURCES',
           'KAS_UNINSTALL_SNAPSHOT', 'KAS_TRANSACTION_GATE', 'KAS_WAN_RESTART_GUARD', 'KAS_UNINSTALL_GUARD',
           'KAS_UNINSTALL_PACKAGES_REPEAT', 'KAS_UNINSTALL_PACKAGES_REBOOT',
-          'ENTWARE_BUSYBOX_TRANSITION')
+          'KAS_UPDATE_RELEASE_UPGRADE', 'KAS_UPDATE_NOOP', 'KAS_UPDATE_IDEMPOTENT',
+          'KAS_UPDATE_NETFAIL_REFUSAL', 'KAS_UPDATE_MODIFIED_REFUSAL', 'KAS_UPDATE_FOREIGN_CRON_REVIEW',
+          'KAS_UPDATE_COMMIT_FAILURE', 'KAS_UPDATE_BUSY_REFUSAL', 'KAS_UPDATE_INERTNESS',
+          'KAS_UPDATE_EXITCODES', 'ENTWARE_BUSYBOX_TRANSITION')
 
 
 class Evidence:

@@ -66,9 +66,12 @@ def run_entware(args, private, credentials, coldboot, evidence):
     if args.stage == 'knvr':
         add_packages(mirror, private / 'cache', Path(__file__).with_name('knvr-packages.lock.json'))
     tls = None
-    if args.stage in ('kas', 'uninstall-packages'):
+    if args.stage in ('kas', 'uninstall-packages', 'kas-update'):
         from lab.kas_mirror import KASMirror
         tls = KASMirror(args.kas_dir, args.kas_ref, private, private / 'cache')
+        if args.stage == 'kas-update':
+            from lab.kas_update_e2e import inject_release_routes
+            inject_release_routes(tls)
     completed = {'ok': True}
     steps = coldboot + [wait('Core::Server: system ready', 240),
         {'action': 'wait_serial', 'pattern': r'\[5/5\] "Entware" installed!',
@@ -115,7 +118,7 @@ def run_entware(args, private, credentials, coldboot, evidence):
                 completed['ok'] = False
                 return
             print('KAS PREFLIGHT: native runtime capabilities verified', flush=True)
-            if args.stage in ('kas', 'uninstall-packages'):
+            if args.stage in ('kas', 'uninstall-packages', 'kas-update'):
                 if args.stage == 'kas' and args.profile == 'legacy-bridge':
                     from lab.kas_lifecycle import legacy_bridge_phase
                     completed['ok'] = legacy_bridge_phase(
@@ -125,6 +128,9 @@ def run_entware(args, private, credentials, coldboot, evidence):
                 if args.stage == 'kas':
                     from lab.kas_lifecycle import lifecycle
                     completed['ok'] = lifecycle(guest, tls, args.kas_ref, evidence, context, private, phase)
+                elif args.stage == 'kas-update':
+                    from lab.kas_update_e2e import kas_update
+                    completed['ok'] = kas_update(guest, tls, args.kas_ref, evidence, context, private, phase)
                 else:
                     from lab.uninstall_packages_e2e import uninstall_packages
                     completed['ok'] = uninstall_packages(guest, tls, args.kas_ref, evidence, context, private, phase)
@@ -167,7 +173,7 @@ def main():
     parser.add_argument('--nand-dir', required=True)
     parser.add_argument('--private-dir', required=True)
     parser.add_argument('--report-dir', required=True)
-    parser.add_argument('--stage', choices=('entware', 'preflight', 'kas', 'uninstall-packages', 'knvr', 'busybox-transition'), default='kas')
+    parser.add_argument('--stage', choices=('entware', 'preflight', 'kas', 'uninstall-packages', 'kas-update', 'knvr', 'busybox-transition'), default='kas')
     parser.add_argument('--legacy-ip-global', choices=('true', 'false'), default='false',
                         help='legacy-bridge profile A/B: pre-seed Proxy0 with '
                              "'ip global auto' as the production create does")
@@ -180,7 +186,7 @@ def main():
     parser.add_argument('--kas-dir')
     parser.add_argument('--kas-ref', default='6dd6438e2b64bad0fe9205ab6575795f808dabd8')
     args = parser.parse_args()
-    if args.stage in ('kas', 'uninstall-packages', 'busybox-transition') and not args.kas_dir:
+    if args.stage in ('kas', 'uninstall-packages', 'kas-update', 'busybox-transition') and not args.kas_dir:
         parser.error('--kas-dir is required for actual KAS execution')
     if args.stage == 'knvr' and not all((args.knvr_dir, args.knvr_ref, args.mediamtx)):
         parser.error('KNVR requires --knvr-dir, --knvr-ref and --mediamtx')
@@ -199,7 +205,7 @@ def main():
     evidence.reference('keenboot_sha256', '8b8615b345d912187853fea6bef6b1868760fd52ed92ba7c3a380ad5533cbf08')
     for name, filename in (('entware_lock_sha256', 'entware.lock.json'), ('kas_assets_lock_sha256', 'kas-assets.lock.json')):
         evidence.reference(name, hashlib.sha256(Path(__file__).with_name(filename).read_bytes()).hexdigest())
-    if args.stage in ('kas', 'uninstall-packages'):
+    if args.stage in ('kas', 'uninstall-packages', 'kas-update'):
         evidence.reference('kas_commit', args.kas_ref)
     try:
         nand = private / 'nand'
