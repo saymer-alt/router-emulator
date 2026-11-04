@@ -102,14 +102,21 @@ printf 'BROKEN_BIN_COUNT=%s\n' "$("$BB" ls /opt/bin | "$BB" wc -l)"
 set +e
 /bin/sh /opt/lab/kas-entware-preflight.sh > /opt/lab/busybox-broken.txt 2>&1
 rc=$?
+"$BB" sh /opt/lab/kas-entware-preflight.sh > /opt/lab/busybox-broken-bb.txt 2>&1
+bbsrc=$?
 set -e
 printf 'AFTER_PREFLIGHT_SH=%s\n' "$([ -e /opt/bin/sh ] && printf present || printf missing)"
 printf 'AFTER_BIN_COUNT=%s\n' "$("$BB" ls /opt/bin | "$BB" wc -l)"
-if [ "$rc" -ne 1 ]; then
+if [ "$rc" -ne 1 ] || [ "$bbsrc" -ne 1 ]; then
     printf 'PREFLIGHT_RC=%s\n' "$rc"
+    printf 'PREFLIGHT_BB_RC=%s\n' "$bbsrc"
     printf 'PREFLIGHT_FAIL_IDS=%s\n' "$("$BB" grep -o '^FAIL: [a-zA-Z-]*' /opt/lab/busybox-broken.txt 2>/dev/null | "$BB" tr '\n' ',')"
     printf 'PREFLIGHT_UNKNOWN_IDS=%s\n' "$("$BB" grep -o '^UNKNOWN: [a-zA-Z-]*' /opt/lab/busybox-broken.txt 2>/dev/null | "$BB" tr '\n' ',')"
     printf 'PREFLIGHT_OUT_SHA=%s\n' "$("$BB" sha256sum /opt/lab/busybox-broken.txt | "$BB" cut -d ' ' -f1)"
+    printf 'PREFLIGHT_BB_OUT_SHA=%s\n' "$("$BB" sha256sum /opt/lab/busybox-broken-bb.txt | "$BB" cut -d ' ' -f1)"
+    printf '%s\n' 'PREFLIGHT_OUTPUT_BEGIN'
+    "$BB" head -n 40 /opt/lab/busybox-broken.txt
+    printf '%s\n' 'PREFLIGHT_OUTPUT_END'
     exit 66
 fi
 "$BB" grep -q '^FAIL: opt-sh:' /opt/lab/busybox-broken.txt || exit 67
@@ -219,8 +226,11 @@ def accept(guest, kas_dir, evidence):
                      if rc in range(61, 71) else "prerm-interruption-recovery-exit-other")
             if rc == 66:
                 rc_token = re.search(r"PREFLIGHT_RC=(\d+)", out)
+                bb_token = re.search(r"PREFLIGHT_BB_RC=(\d+)", out)
                 if rc_token:
                     phase += "-preflight-rc-" + rc_token.group(1)
+                if bb_token:
+                    phase += "-bb-rc-" + bb_token.group(1)
             raise RuntimeError("native scenario refused")
         if "NATIVE_PRERM_INTERRUPTED_PASS" not in out or "NATIVE_POSTINST_RECOVERY_PASS" not in out:
             phase = "prerm-interruption-recovery-markers"
@@ -272,12 +282,17 @@ def accept(guest, kas_dir, evidence):
         # integers, present/missing words and a hex digest of the preflight's
         # own sanitized output; nothing else from the guest is printed.
         tokens = ""
-        if phase.endswith("preflight-rc-0") or phase.endswith("preflight-rc-2"):
+        if rc == 66:
             pairs = re.findall(r"(BROKEN_BIN_COUNT|AFTER_PREFLIGHT_SH|AFTER_BIN_COUNT"
-                               r"|PREFLIGHT_RC|PREFLIGHT_FAIL_IDS|PREFLIGHT_UNKNOWN_IDS"
-                               r"|PREFLIGHT_OUT_SHA)=([0-9a-zA-Z,-]*)", out)
+                               r"|PREFLIGHT_RC|PREFLIGHT_BB_RC|PREFLIGHT_FAIL_IDS"
+                               r"|PREFLIGHT_UNKNOWN_IDS|PREFLIGHT_OUT_SHA"
+                               r"|PREFLIGHT_BB_OUT_SHA)=([0-9a-zA-Z,-]*)", out)
             if pairs:
                 tokens = " " + " ".join("%s=%s" % p for p in pairs)
+            block = re.search(r"PREFLIGHT_OUTPUT_BEGIN\n(.*?)PREFLIGHT_OUTPUT_END",
+                              out, re.DOTALL)
+            if block:
+                tokens += "\nENTWARE BUSYBOX: preflight output (sanitized, issue #356 diagnostic):\n" + block.group(1).strip()
         print("ENTWARE BUSYBOX: FAIL phase=%s class=%s%s (other details redacted)"
               % (phase, type(exc).__name__, tokens), flush=True)
         return False
