@@ -62,7 +62,7 @@ class NativeBusyboxTransitionTests(unittest.TestCase):
         self.assertTrue(src.startswith('#!/bin/sh'))
         self.assertIn(module.PRERM_OLD_SHA, src)
         self.assertIn('OLD_PRERM=/opt/lib/opkg/info/busybox.prerm', src)
-        self.assertIn('/bin/sh /opt/lab/kas-entware-preflight.sh', src)
+        self.assertIn('"$BB" sh /opt/lab/kas-entware-preflight.sh', src)
         self.assertIn('trap ', src)
         self.assertNotIn('ln -sf', src)
         self.assertNotIn('opkg upgrade', src)

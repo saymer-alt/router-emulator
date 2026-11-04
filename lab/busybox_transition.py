@@ -100,20 +100,21 @@ trap '"$BB" sh "$OLD_POSTINST" >/dev/null 2>&1 || :' EXIT
 [ ! -e /opt/bin/chmod ] || exit 65
 printf 'BROKEN_BIN_COUNT=%s\n' "$("$BB" ls /opt/bin | "$BB" wc -l)"
 set +e
-/bin/sh /opt/lab/kas-entware-preflight.sh > /opt/lab/busybox-broken.txt 2>&1
+# The ported guest's /bin/sh itself routes script execution through the
+# Entware shell: with /opt/bin/sh deleted by the prerm it prints
+# Bad interpreter "/opt/bin/sh" and exits 0 (run 41932162970 output).
+# The preflight is therefore executed via the always-present busybox
+# binary, one of the KAS-verified POSIX dialects.
+"$BB" sh /opt/lab/kas-entware-preflight.sh > /opt/lab/busybox-broken.txt 2>&1
 rc=$?
-"$BB" sh /opt/lab/kas-entware-preflight.sh > /opt/lab/busybox-broken-bb.txt 2>&1
-bbsrc=$?
 set -e
 printf 'AFTER_PREFLIGHT_SH=%s\n' "$([ -e /opt/bin/sh ] && printf present || printf missing)"
 printf 'AFTER_BIN_COUNT=%s\n' "$("$BB" ls /opt/bin | "$BB" wc -l)"
-if [ "$rc" -ne 1 ] || [ "$bbsrc" -ne 1 ]; then
+if [ "$rc" -ne 1 ]; then
     printf 'PREFLIGHT_RC=%s\n' "$rc"
-    printf 'PREFLIGHT_BB_RC=%s\n' "$bbsrc"
     printf 'PREFLIGHT_FAIL_IDS=%s\n' "$("$BB" grep -o '^FAIL: [a-zA-Z-]*' /opt/lab/busybox-broken.txt 2>/dev/null | "$BB" tr '\n' ',')"
     printf 'PREFLIGHT_UNKNOWN_IDS=%s\n' "$("$BB" grep -o '^UNKNOWN: [a-zA-Z-]*' /opt/lab/busybox-broken.txt 2>/dev/null | "$BB" tr '\n' ',')"
     printf 'PREFLIGHT_OUT_SHA=%s\n' "$("$BB" sha256sum /opt/lab/busybox-broken.txt | "$BB" cut -d ' ' -f1)"
-    printf 'PREFLIGHT_BB_OUT_SHA=%s\n' "$("$BB" sha256sum /opt/lab/busybox-broken-bb.txt | "$BB" cut -d ' ' -f1)"
     printf '%s\n' 'PREFLIGHT_OUTPUT_BEGIN'
     "$BB" head -n 40 /opt/lab/busybox-broken.txt
     printf '%s\n' 'PREFLIGHT_OUTPUT_END'
@@ -123,7 +124,7 @@ fi
 "$BB" sh "$OLD_POSTINST" >/dev/null 2>&1 || exit 68
 [ -x /opt/bin/sh ] && [ -x /opt/bin/chmod ] || exit 69
 set +e
-/bin/sh /opt/lab/kas-entware-preflight.sh > /opt/lab/busybox-restored.txt 2>&1
+"$BB" sh /opt/lab/kas-entware-preflight.sh > /opt/lab/busybox-restored.txt 2>&1
 rc=$?
 set -e
 [ "$rc" -eq 0 ] || exit 70
@@ -228,11 +229,8 @@ def accept(guest, kas_dir, evidence):
                      if rc in range(61, 71) else "prerm-interruption-recovery-exit-other")
             if rc == 66:
                 rc_token = re.search(r"PREFLIGHT_RC=(\d+)", out)
-                bb_token = re.search(r"PREFLIGHT_BB_RC=(\d+)", out)
                 if rc_token:
                     phase += "-preflight-rc-" + rc_token.group(1)
-                if bb_token:
-                    phase += "-bb-rc-" + bb_token.group(1)
             raise RuntimeError("native scenario refused")
         if "NATIVE_PRERM_INTERRUPTED_PASS" not in out or "NATIVE_POSTINST_RECOVERY_PASS" not in out:
             phase = "prerm-interruption-recovery-markers"
@@ -286,9 +284,9 @@ def accept(guest, kas_dir, evidence):
         tokens = ""
         if transition_rc == 66:
             pairs = re.findall(r"(BROKEN_BIN_COUNT|AFTER_PREFLIGHT_SH|AFTER_BIN_COUNT"
-                               r"|PREFLIGHT_RC|PREFLIGHT_BB_RC|PREFLIGHT_FAIL_IDS"
+                               r"|PREFLIGHT_RC|PREFLIGHT_FAIL_IDS"
                                r"|PREFLIGHT_UNKNOWN_IDS|PREFLIGHT_OUT_SHA"
-                               r"|PREFLIGHT_BB_OUT_SHA)=([0-9a-zA-Z,-]*)", transition_out)
+                               r")=([0-9a-zA-Z,-]*)", transition_out)
             if pairs:
                 tokens = " " + " ".join("%s=%s" % p for p in pairs)
             block = re.search(r"PREFLIGHT_OUTPUT_BEGIN\n(.*?)PREFLIGHT_OUTPUT_END",
