@@ -1,5 +1,7 @@
 """#356 unit contracts: no hardware, feed changes, or host /opt writes."""
 from pathlib import Path
+from contextlib import redirect_stdout
+import io
 import unittest
 from unittest import mock
 
@@ -39,6 +41,17 @@ class NativeBusyboxTransitionTests(unittest.TestCase):
         self.assertEqual(evidence.checks['ENTWARE_BUSYBOX_TRANSITION'],
                          {'status': 'FAIL', 'reason': 'native_command_failed'})
         self.assertEqual(guest.command.call_count, 1)
+
+    def test_failure_phase_is_public_and_private_exception_text_is_hidden(self):
+        guest = mock.Mock()
+        guest.command.return_value = 'SECRET_PRIVATE_GUEST_OUTPUT'
+        evidence = Evidence()
+        stream = io.StringIO()
+        with redirect_stdout(stream):
+            self.assertFalse(module.accept(guest, Path('/nonexistent'), evidence))
+        printed = stream.getvalue()
+        self.assertIn('FAIL phase=baseline-opkg class=RuntimeError', printed)
+        self.assertNotIn('SECRET_PRIVATE_GUEST_OUTPUT', printed)
 
     def test_lab_checks_do_not_mark_kas_release_gates_pass(self):
         evidence = Evidence()
