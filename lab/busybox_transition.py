@@ -146,8 +146,15 @@ def accept(guest, kas_dir, evidence):
 
         phase = "prerm-interruption-recovery"
         rc, out, err = guest.execute("/bin/sh /opt/lab/busybox-transition.sh", timeout=120)
-        if rc != 0 or "NATIVE_PRERM_INTERRUPTED_PASS" not in out or "NATIVE_POSTINST_RECOVERY_PASS" not in out:
-            raise RuntimeError("native prerm/postinst interruption scenario failed")
+        if rc != 0:
+            # The guest script uses only synthetic, fixed exit codes 61-70.
+            # Never print or parse its private stdout/stderr.
+            phase = ("prerm-interruption-recovery-exit-" + str(rc)
+                     if rc in range(61, 71) else "prerm-interruption-recovery-exit-other")
+            raise RuntimeError("native scenario refused")
+        if "NATIVE_PRERM_INTERRUPTED_PASS" not in out or "NATIVE_POSTINST_RECOVERY_PASS" not in out:
+            phase = "prerm-interruption-recovery-markers"
+            raise RuntimeError("native phase markers missing")
         phase = "foreign-grep-post-recovery"
         if guest.command("/opt/bin/busybox sha256sum /opt/bin/grep").split()[0] != grep_before:
             raise RuntimeError("foreign GNU grep changed during maintainer scripts")
