@@ -187,6 +187,7 @@ def accept(guest, kas_dir, evidence):
     evidence.check("ENTWARE_BUSYBOX_TRANSITION", "NOT_TESTED", "unattempted")
     # Public log includes fixed phase + exception class only, never guest data.
     phase = "baseline-opkg"
+    transition_rc, transition_out = -1, ""
     try:
         # The disposable VM already has real, pinned 1.37 and native opkg.
         require_busybox_version(guest, VERSION_OLD)
@@ -217,6 +218,7 @@ def accept(guest, kas_dir, evidence):
 
         phase = "prerm-interruption-recovery"
         rc, out, err = guest.execute("/bin/sh /opt/lab/busybox-transition.sh", timeout=120)
+        transition_rc, transition_out = rc, out
         if rc != 0:
             # The guest script uses only synthetic, fixed exit codes 61-70.
             # Never print or parse its private stdout/stderr; the PREFLIGHT_*
@@ -282,15 +284,15 @@ def accept(guest, kas_dir, evidence):
         # integers, present/missing words and a hex digest of the preflight's
         # own sanitized output; nothing else from the guest is printed.
         tokens = ""
-        if rc == 66:
+        if transition_rc == 66:
             pairs = re.findall(r"(BROKEN_BIN_COUNT|AFTER_PREFLIGHT_SH|AFTER_BIN_COUNT"
                                r"|PREFLIGHT_RC|PREFLIGHT_BB_RC|PREFLIGHT_FAIL_IDS"
                                r"|PREFLIGHT_UNKNOWN_IDS|PREFLIGHT_OUT_SHA"
-                               r"|PREFLIGHT_BB_OUT_SHA)=([0-9a-zA-Z,-]*)", out)
+                               r"|PREFLIGHT_BB_OUT_SHA)=([0-9a-zA-Z,-]*)", transition_out)
             if pairs:
                 tokens = " " + " ".join("%s=%s" % p for p in pairs)
             block = re.search(r"PREFLIGHT_OUTPUT_BEGIN\n(.*?)PREFLIGHT_OUTPUT_END",
-                              out, re.DOTALL)
+                              transition_out, re.DOTALL)
             if block:
                 tokens += "\nENTWARE BUSYBOX: preflight output (sanitized, issue #356 diagnostic):\n" + block.group(1).strip()
         print("ENTWARE BUSYBOX: FAIL phase=%s class=%s%s (other details redacted)"
