@@ -9,6 +9,7 @@ interrupting an opkg transaction; the latter remains NOT TESTED.
 import hashlib
 import io
 from pathlib import Path
+import re
 import tarfile
 import urllib.request
 from urllib.parse import urlsplit
@@ -101,7 +102,13 @@ set +e
 /bin/sh /opt/lab/kas-entware-preflight.sh > /opt/lab/busybox-broken.txt 2>&1
 rc=$?
 set -e
-[ "$rc" -eq 1 ] || exit 66
+if [ "$rc" -ne 1 ]; then
+    printf 'PREFLIGHT_RC=%s\n' "$rc"
+    printf 'PREFLIGHT_FAIL_IDS=%s\n' "$("$BB" grep -o '^FAIL: [a-zA-Z-]*' /opt/lab/busybox-broken.txt 2>/dev/null | "$BB" tr '\n' ',')"
+    printf 'PREFLIGHT_UNKNOWN_IDS=%s\n' "$("$BB" grep -o '^UNKNOWN: [a-zA-Z-]*' /opt/lab/busybox-broken.txt 2>/dev/null | "$BB" tr '\n' ',')"
+    printf 'PREFLIGHT_OUT_SHA=%s\n' "$("$BB" sha256sum /opt/lab/busybox-broken.txt | "$BB" cut -d ' ' -f1)"
+    exit 66
+fi
 "$BB" grep -q '^FAIL: opt-sh:' /opt/lab/busybox-broken.txt || exit 67
 "$BB" sh "$OLD_POSTINST" >/dev/null 2>&1 || exit 68
 [ -x /opt/bin/sh ] && [ -x /opt/bin/chmod ] || exit 69
@@ -202,9 +209,15 @@ def accept(guest, kas_dir, evidence):
         rc, out, err = guest.execute("/bin/sh /opt/lab/busybox-transition.sh", timeout=120)
         if rc != 0:
             # The guest script uses only synthetic, fixed exit codes 61-70.
-            # Never print or parse its private stdout/stderr.
+            # Never print or parse its private stdout/stderr; the PREFLIGHT_*
+            # tokens below are fixed-vocabulary check ids / a hex digest of the
+            # preflight's own sanitized output, used only to label the failure.
             phase = ("prerm-interruption-recovery-exit-" + str(rc)
                      if rc in range(61, 71) else "prerm-interruption-recovery-exit-other")
+            if rc == 66:
+                rc_token = re.search(r"PREFLIGHT_RC=(\d+)", out)
+                if rc_token:
+                    phase += "-preflight-rc-" + rc_token.group(1)
             raise RuntimeError("native scenario refused")
         if "NATIVE_PRERM_INTERRUPTED_PASS" not in out or "NATIVE_POSTINST_RECOVERY_PASS" not in out:
             phase = "prerm-interruption-recovery-markers"
