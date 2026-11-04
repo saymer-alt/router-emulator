@@ -187,13 +187,29 @@ class KasUpdateScenario:
             raise ScenarioBlocked('kas_update_tls_delivery_failed')
 
     def run(self, args, timeout=300):
-        """One real kas-update invocation with the lab channel reference."""
-        code, out, _ = probe(self.guest, 'KEENETIC_AUTO_SETUP_REF=' + self.revision
-                             + ' sh ' + self.script + ' ' + args, timeout=timeout)
-        return code, plain(out)
+        """One real kas-update invocation with the lab channel reference.
+        Both output streams are merged for substring assertions: refusals and
+        errors are printed to stderr by design (warn/ok go to stdout), and
+        the exit code stays the primary machine evidence."""
+        code, out, errors = probe(self.guest, 'KEENETIC_AUTO_SETUP_REF=' + self.revision
+                                  + ' sh ' + self.script + ' ' + args, timeout=timeout)
+        return code, plain(out + '\n' + errors)
+
+    def run_raw(self, args, timeout=300):
+        """Same invocation for a caller that needs both streams separately."""
+        return probe(self.guest, 'KEENETIC_AUTO_SETUP_REF=' + self.revision
+                     + ' sh ' + self.script + ' ' + args, timeout=timeout)
 
     def candidate_digest(self):
         return hashlib.sha256(self.mirror.sources['mihomo-watchdog.sh']).hexdigest()
+
+
+def _diag(label, **fields):
+    """Public fixed-format counters for failure localization; guest text and
+    digests are never printed, only booleans and recorded exit codes."""
+    print('KAS UPDATE SCENARIO DIAGNOSTIC: ' + label + ' '
+          + ' '.join(k + '=' + str(1 if v else 0) if isinstance(v, bool)
+                     else k + '=' + str(v) for k, v in fields.items()), flush=True)
 
 
 def _scenario(evidence, label, pass_reason, body):
@@ -364,6 +380,10 @@ def kas_update(guest, mirror, revision, evidence, context, private, phase_box):
         guest.command('cat /opt/tmp/wrapper-restore > ' + WRAPPER
                       + ' && chmod 755 ' + WRAPPER)
         restored = guest_sha256(guest, WRAPPER) == before['wrapper_sha']
+        _diag('foreign_cron', check_code=code, apply_code=code2,
+              review_check='REVIEW REQUIRED' in out,
+              review_apply='REVIEW REQUIRED' in out2,
+              preserved=preserved, crontab_kept=crontab_kept, restored=restored)
         return code == 2 and 'REVIEW REQUIRED' in out \
             and code2 == 1 and 'REVIEW REQUIRED' in out2 \
             and preserved and crontab_kept and restored
@@ -402,7 +422,9 @@ def kas_update(guest, mirror, revision, evidence, context, private, phase_box):
     ok = _scenario(evidence, 'KAS_UPDATE_COMMIT_FAILURE', 'kas_update_commit_failure_verified',
                    commit_failure) and ok
 
-    # 8. Busy lifecycle lock -> refusal without any state change.
+    # 8. Busy lifecycle lock -> refusal without any state change. The holder
+    #    must be observed ALIVE with its owner file in place before the run,
+    #    otherwise kas-update legitimately sees the lock as unknown.
     def busy():
         put(guest, '/opt/lab/lock-holder.sh',
             b'#!/bin/sh\nmkdir -p /tmp/mihomo-lifecycle.lock.d\n'
@@ -414,8 +436,20 @@ def kas_update(guest, mirror, revision, evidence, context, private, phase_box):
         holder = guest.command('nohup sh /opt/lab/lock-holder.sh >/dev/null 2>&1 & echo $!')
         holder_pid = holder.strip().splitlines()[-1].strip()
         try:
+            owner = ''
+            for _ in range(20):
+                time.sleep(0.5)
+                code, owner, _ = probe(guest, 'cat /tmp/mihomo-lifecycle.lock.d/owner 2>/dev/null')
+                if code == 0 and re.fullmatch(r'[0-9]+ [0-9]+', owner.strip() or ''):
+                    break
+            alive = guest.command('kill -0 ' + holder_pid + ' && echo alive')
+            if owner.strip() == '' or 'alive' not in alive:
+                _diag('busy', owner_ready=bool(owner.strip()), holder_alive='alive' in alive)
+                raise ScenarioBlocked('native_command_failed')
             code, out = scenario.run('--apply --yes')
             codes['busy_apply'] = code
+            _diag('busy', apply_code=code, refused='busy' in out,
+                  unchanged=guest_sha256(guest, CANONICAL) == candidate)
             return code == 1 and 'busy' in out \
                 and guest_sha256(guest, CANONICAL) == candidate
         finally:
