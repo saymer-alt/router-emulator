@@ -102,15 +102,27 @@ printf 'NATIVE_PRERM_INTERRUPTED_PASS\\nNATIVE_POSTINST_RECOVERY_PASS\\n'
 """)
 
 
+def require_busybox_version(guest, expected):
+    """Use the proven native guest inventory API, not opkg status formatting.
+
+    Guest.entware() already establishes the complete package versions from
+    `opkg list-installed`. Reject zero or duplicate busybox entries and any
+    unexpected version. Never publish the full (potentially sensitive) list.
+    """
+    rows = [line for line in guest.command("/opt/bin/opkg list-installed").splitlines()
+            if line.startswith("busybox - ")]
+    if rows != ["busybox - " + expected]:
+        raise RuntimeError("unexpected installed BusyBox package version")
+    return expected
+
+
 def accept(guest, kas_dir, evidence):
     evidence.check("ENTWARE_BUSYBOX_TRANSITION", "NOT_TESTED", "unattempted")
     # Public log includes fixed phase + exception class only, never guest data.
     phase = "baseline-opkg"
     try:
         # The disposable VM already has real, pinned 1.37 and native opkg.
-        installed = guest.command("/opt/bin/opkg status busybox")
-        if ("Version: " + VERSION_OLD) not in installed or "Status: install ok installed" not in installed:
-            raise RuntimeError("unexpected base Entware package state")
+        require_busybox_version(guest, VERSION_OLD)
         phase = "baseline-abi"
         if guest.command("uname -m") != "aarch64":
             raise RuntimeError("unsupported guest ABI")
@@ -147,10 +159,8 @@ def accept(guest, kas_dir, evidence):
             "/opt/bin/opkg install /opt/lab/busybox-1.38.ipk", timeout=300)
         if rc != 0:
             raise RuntimeError("native offline-local-IPK opkg upgrade failed")
-        phase = "post-upgrade-opkg-status"
-        after = guest.command("/opt/bin/opkg status busybox")
-        if ("Version: " + VERSION_NEW) not in after or "Status: install ok installed" not in after:
-            raise RuntimeError("package database did not record completed upgrade")
+        phase = "post-upgrade-opkg-inventory"
+        require_busybox_version(guest, VERSION_NEW)
         phase = "post-upgrade-applets"
         if guest.command("/bin/sh -c '/opt/bin/sh -c \"exit 0\"; /opt/bin/chmod --help >/dev/null 2>&1; echo $?'") != "0":
             raise RuntimeError("installed 1.38 shell/applets unusable")
