@@ -611,7 +611,7 @@ def uninstall(guest, mirror, evidence, foreign, revision):
     def guarded_state():
         return (
             contract(guest, mirror, foreign),
-            guest.command('opkg list-installed | sort'),
+            sorted(guest.command('opkg list-installed').splitlines()),
             plain(guest.command('/bin/ndmc -c "show running-config"')),
             guest.command('sha256sum /opt/lab/foreign-job') if foreign is not None else None,
         )
