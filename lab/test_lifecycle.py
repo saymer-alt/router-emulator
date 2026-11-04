@@ -322,7 +322,10 @@ class UninstallPhaseTests(unittest.TestCase):
         from lab.gates import Evidence
         from unittest import mock
 
-        mirror = type('Mirror', (), {'sources': {'uninstall.sh': b'synthetic fixture'}})()
+        mirror = type('Mirror', (), {'sources': {
+            'uninstall.sh': b'synthetic fixture',
+            'uninstall-snapshot.sh': b'unreviewed sibling fixture',
+        }})()
         guard_commands = ['sh /opt/lab/uninstall.sh --remove', 'sh /opt/lab/uninstall.sh --purge']
         for key in ('uninstall_no_remove_sha256', 'uninstall_inventory_s28_sha256'):
             for foreign in (None, {'proxy': 'fixture', 'cron': 'fixture'}):
@@ -330,7 +333,7 @@ class UninstallPhaseTests(unittest.TestCase):
                     with self.subTest(key=key, foreign=foreign, change_state=change_state):
                         guest = _UninstallGuest(execute_plan={
                             **{command: (3, '', '[BLOCKED]') for command in guard_commands},
-                            'sh /opt/lab/uninstall-snapshot.sh --check': (1, '', ''),
+                            'sh /opt/lab/uninstall-snapshot.sh --check': (0, '', ''),
                         })
                         evidence = Evidence()
                         states = [{}, {'changed': True}, {}] if change_state else [{}, {}, {}]
@@ -341,4 +344,6 @@ class UninstallPhaseTests(unittest.TestCase):
                         self.assertEqual(result, not change_state)
                         self.assertEqual([command for command in guest.executes if command in guard_commands],
                                          guard_commands[:1] if change_state else guard_commands)
+                        self.assertFalse(any('uninstall-snapshot' in command
+                                             for command in guest.commands + guest.executes))
 

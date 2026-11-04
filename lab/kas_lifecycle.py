@@ -88,7 +88,7 @@ def install(guest, mirror, revision, evidence, foreign=None, legacy=None):
         ' sh /opt/lab/install.sh disk', timeout=900)
     # Fixed public categories over the private guest output: counts and
     # marker presence only, never installer or guest text. Emitted for both
-    # outcomes — the legacy profile needs the markers even on PASS.
+    # outcomes вЂ” the legacy profile needs the markers even on PASS.
     out = plain(output)
     print('KAS INSTALL DIAGNOSTIC: exit=%d ok_done=%s skip_activation=%s '
           'policy_bound=%s bind_failed=%s policy_absent=%s '
@@ -587,7 +587,7 @@ def uninstall(guest, mirror, evidence, foreign, revision):
         # Some legitimate candidates (the stable channel today) intentionally
         # ship no transactional uninstall.sh (KAS #179/#192): full removal is
         # then NOT APPLICABLE to this revision. Report it honestly as BLOCKED
-        # with the delivery reason — never a PASS, never a phase failure, and
+        # with the delivery reason вЂ” never a PASS, never a phase failure, and
         # never an anonymous controller crash. The rest of the lifecycle still
         # gates install/doctor/idempotence/reboot/rollback for the candidate.
         evidence.set('KAS_UNINSTALL', 'BLOCKED', 'uninstall_not_delivered')
@@ -631,7 +631,25 @@ def uninstall(guest, mirror, evidence, foreign, revision):
         evidence.set('KAS_UNINSTALL', 'FAIL', 'execution_failed')
         return False
     phase('read-only --plan')
-    guest.execute('sh /opt/lab/uninstall.sh --plan')
+    code, _, _ = guest.execute('sh /opt/lab/uninstall.sh --plan')
+    if code != 0:
+        evidence.set('KAS_UNINSTALL', 'FAIL', 'execution_failed')
+        return False
+    # Only the explicitly reviewed read-only scripts reach these commands.
+    if known_no_remove:
+        evidence.check('KAS_UNINSTALL_SNAPSHOT', 'BLOCKED', 'native_remove_not_implemented')
+        evidence.check('KAS_TRANSACTION_GATE', 'BLOCKED', 'native_remove_not_implemented')
+        for option in ('--remove', '--purge'):
+            phase('code-3 guard ' + option)
+            code, output, errors = guest.execute('sh /opt/lab/uninstall.sh ' + option, timeout=900)
+            if code != 3 or '[BLOCKED]' not in output + errors or guarded_state() != before:
+                evidence.set('KAS_UNINSTALL', 'FAIL', 'execution_failed')
+                return False
+        evidence.set('KAS_UNINSTALL', 'BLOCKED', 'native_remove_not_implemented')
+        evidence.check('KAS_UNINSTALL_GUARD', 'PASS', 'native_command_verified')
+        print('KAS UNINSTALL: native code-3 guard verified; no removal implemented by this KAS revision', flush=True)
+        return True
+
     ready = False
     snapshot_name = None
     phase('snapshot --check')
@@ -659,18 +677,6 @@ def uninstall(guest, mirror, evidence, foreign, revision):
                     print('KAS PREPARE GUEST: ' + line, flush=True)
     evidence.check('KAS_TRANSACTION_GATE', 'PASS' if transaction else 'BLOCKED',
                    'native_command_verified' if transaction else 'snapshot_gate_blocked')
-    # Only the explicitly reviewed read-only scripts reach these commands.
-    if known_no_remove:
-        for option in ('--remove', '--purge'):
-            phase('code-3 guard ' + option)
-            code, output, errors = guest.execute('sh /opt/lab/uninstall.sh ' + option, timeout=900)
-            if code != 3 or '[BLOCKED]' not in output + errors or guarded_state() != before:
-                evidence.set('KAS_UNINSTALL', 'FAIL', 'execution_failed')
-                return False
-        evidence.set('KAS_UNINSTALL', 'BLOCKED', 'native_remove_not_implemented')
-        evidence.check('KAS_UNINSTALL_GUARD', 'PASS', 'native_command_verified')
-        print('KAS UNINSTALL: native code-3 guard verified; no removal implemented by this KAS revision', flush=True)
-        return True
     if not transaction:
         evidence.set('KAS_UNINSTALL', 'BLOCKED', 'snapshot_gate_blocked')
         return False
@@ -906,7 +912,7 @@ def legacy_bridge_phase(guest, mirror, revision, evidence, phase,
         # 41251973752): KeeneticOS 5.1.8 ported refuses 'permit global' for a
         # bridge that predates the policy (retry_rc=122), while production
         # KeeneticOS accepts it (baseline/foreign profiles pass). The
-        # KAS_INSTALL gate stays FAIL — nothing is hidden. The remaining
+        # KAS_INSTALL gate stays FAIL вЂ” nothing is hidden. The remaining
         # field-shape proof is reported separately, read-only: the live rule
         # chain and the real Doctor verdict.
         evidence.check('KAS_LEGACY_RULES', 'NOT_TESTED', 'unattempted')
