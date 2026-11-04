@@ -98,10 +98,13 @@ trap '"$BB" sh "$OLD_POSTINST" >/dev/null 2>&1 || :' EXIT
 "$BB" sh "$OLD_PRERM" >/dev/null 2>&1 || exit 63
 [ ! -e /opt/bin/sh ] || exit 64
 [ ! -e /opt/bin/chmod ] || exit 65
+printf 'BROKEN_BIN_COUNT=%s\n' "$("$BB" ls /opt/bin | "$BB" wc -l)"
 set +e
 /bin/sh /opt/lab/kas-entware-preflight.sh > /opt/lab/busybox-broken.txt 2>&1
 rc=$?
 set -e
+printf 'AFTER_PREFLIGHT_SH=%s\n' "$([ -e /opt/bin/sh ] && printf present || printf missing)"
+printf 'AFTER_BIN_COUNT=%s\n' "$("$BB" ls /opt/bin | "$BB" wc -l)"
 if [ "$rc" -ne 1 ]; then
     printf 'PREFLIGHT_RC=%s\n' "$rc"
     printf 'PREFLIGHT_FAIL_IDS=%s\n' "$("$BB" grep -o '^FAIL: [a-zA-Z-]*' /opt/lab/busybox-broken.txt 2>/dev/null | "$BB" tr '\n' ',')"
@@ -265,6 +268,16 @@ def accept(guest, kas_dir, evidence):
     except (RuntimeError, ValueError, OSError, TimeoutError) as exc:
         evidence.check("ENTWARE_BUSYBOX_TRANSITION", "FAIL", "native_command_failed")
         # Never emit exception messages: SSH errors can contain sensitive data.
-        print("ENTWARE BUSYBOX: FAIL phase=%s class=%s (private details redacted)"
-              % (phase, type(exc).__name__), flush=True)
+        # The diagnostic tokens below are fixed-vocabulary check ids, small
+        # integers, present/missing words and a hex digest of the preflight's
+        # own sanitized output; nothing else from the guest is printed.
+        tokens = ""
+        if phase.endswith("preflight-rc-0") or phase.endswith("preflight-rc-2"):
+            pairs = re.findall(r"(BROKEN_BIN_COUNT|AFTER_PREFLIGHT_SH|AFTER_BIN_COUNT"
+                               r"|PREFLIGHT_RC|PREFLIGHT_FAIL_IDS|PREFLIGHT_UNKNOWN_IDS"
+                               r"|PREFLIGHT_OUT_SHA)=([0-9a-zA-Z,-]*)", out)
+            if pairs:
+                tokens = " " + " ".join("%s=%s" % p for p in pairs)
+        print("ENTWARE BUSYBOX: FAIL phase=%s class=%s%s (other details redacted)"
+              % (phase, type(exc).__name__, tokens), flush=True)
         return False
