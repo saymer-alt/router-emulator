@@ -19,6 +19,28 @@ class NativeBusyboxTransitionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             module.upload(guest, '/opt/etc/mihomo/config.yaml', b'no')
 
+    def test_actual_1_37_and_1_38_opkg_inventory_are_accepted(self):
+        guest = mock.Mock()
+        guest.command.return_value = (
+            'libgcc - 8.4.0-12\n'
+            'busybox - 1.37.0-6\n'
+            'grep - 3.11-3\n')
+        self.assertEqual(module.require_busybox_version(guest, module.VERSION_OLD),
+                         module.VERSION_OLD)
+        self.assertEqual(guest.command.call_args.args[0],
+                         '/opt/bin/opkg list-installed')
+        guest.command.return_value = 'busybox - 1.38.0-3\n'
+        self.assertEqual(module.require_busybox_version(guest, module.VERSION_NEW),
+                         module.VERSION_NEW)
+
+    def test_missing_duplicate_and_unexpected_busybox_versions_fail_closed(self):
+        guest = mock.Mock()
+        for listing in ('', 'busybox - 1.38.0-3\n', 'busybox - 1.37.0-6\n'
+                        'busybox - 1.37.0-6\n', 'busybox - 1.37.0-6-other\n'):
+            guest.command.return_value = listing
+            with self.assertRaisesRegex(RuntimeError, 'unexpected installed'):
+                module.require_busybox_version(guest, module.VERSION_OLD)
+
     def test_phase_uses_real_old_prerm_and_system_shell(self):
         src = module.phase_script()
         self.assertTrue(src.startswith('#!/bin/sh'))
@@ -33,7 +55,7 @@ class NativeBusyboxTransitionTests(unittest.TestCase):
 
     def test_mismatched_native_baseline_fails_before_fetch_or_guest_write(self):
         guest = mock.Mock()
-        guest.command.return_value = 'Package: busybox\nVersion: 0.0\nStatus: install ok installed'
+        guest.command.return_value = 'busybox - 0.0\n'
         evidence = Evidence()
         with mock.patch.object(module, 'fetch_verified') as fetch:
             self.assertFalse(module.accept(guest, Path('/nonexistent'), evidence))
