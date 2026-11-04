@@ -32,7 +32,7 @@ on:
         required: false
         type: string
       stage:
-        description: 'Laboratory stage: kas (full lifecycle) or uninstall-packages (minimal package uninstall)'
+        description: 'Laboratory stage: kas (full lifecycle), uninstall-packages (minimal package uninstall) or kas-update (unified updater transaction)'
         required: false
         default: kas
         type: string
