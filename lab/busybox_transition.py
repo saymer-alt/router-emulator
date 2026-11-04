@@ -104,42 +104,57 @@ printf 'NATIVE_PRERM_INTERRUPTED_PASS\\nNATIVE_POSTINST_RECOVERY_PASS\\n'
 
 def accept(guest, kas_dir, evidence):
     evidence.check("ENTWARE_BUSYBOX_TRANSITION", "NOT_TESTED", "unattempted")
+    # Public log includes fixed phase + exception class only, never guest data.
+    phase = "baseline-opkg"
     try:
         # The disposable VM already has real, pinned 1.37 and native opkg.
         installed = guest.command("/opt/bin/opkg status busybox")
         if ("Version: " + VERSION_OLD) not in installed or "Status: install ok installed" not in installed:
             raise RuntimeError("unexpected base Entware package state")
+        phase = "baseline-abi"
         if guest.command("uname -m") != "aarch64":
             raise RuntimeError("unsupported guest ABI")
+        phase = "download-verified-ipk"
         raw = fetch_verified()
+        phase = "preflight-source"
         source = Path(kas_dir, "kas-entware-preflight.sh")
         if not source.is_file():
             raise RuntimeError("read-only preflight missing from KAS checkout")
+        phase = "upload-ipk"
         upload(guest, "/opt/lab/busybox-1.38.ipk", raw)
+        phase = "upload-preflight"
         upload(guest, "/opt/lab/kas-entware-preflight.sh", source.read_bytes())
+        phase = "upload-scenario"
         upload(guest, "/opt/lab/busybox-transition.sh", phase_script().encode())
         # Capture a separate real foreign GNU grep binary; preserve its hash.
+        phase = "foreign-grep-baseline"
         if guest.command("test -f /opt/bin/grep && test ! -L /opt/bin/grep; echo $?").strip() != "0":
             raise RuntimeError("expected separate GNU grep not present")
         grep_before = guest.command("/opt/bin/busybox sha256sum /opt/bin/grep").split()[0]
 
+        phase = "prerm-interruption-recovery"
         rc, out, err = guest.execute("/bin/sh /opt/lab/busybox-transition.sh", timeout=120)
         if rc != 0 or "NATIVE_PRERM_INTERRUPTED_PASS" not in out or "NATIVE_POSTINST_RECOVERY_PASS" not in out:
             raise RuntimeError("native prerm/postinst interruption scenario failed")
+        phase = "foreign-grep-post-recovery"
         if guest.command("/opt/bin/busybox sha256sum /opt/bin/grep").split()[0] != grep_before:
             raise RuntimeError("foreign GNU grep changed during maintainer scripts")
 
         # Actual upgrade with the real package manager, no feed mutation:
         # native opkg runs the ORIGINAL maintainer scripts, not a shell model.
+        phase = "native-opkg-upgrade"
         rc, out, err = guest.execute(
             "/opt/bin/opkg install /opt/lab/busybox-1.38.ipk", timeout=300)
         if rc != 0:
             raise RuntimeError("native offline-local-IPK opkg upgrade failed")
+        phase = "post-upgrade-opkg-status"
         after = guest.command("/opt/bin/opkg status busybox")
         if ("Version: " + VERSION_NEW) not in after or "Status: install ok installed" not in after:
             raise RuntimeError("package database did not record completed upgrade")
+        phase = "post-upgrade-applets"
         if guest.command("/bin/sh -c '/opt/bin/sh -c \"exit 0\"; /opt/bin/chmod --help >/dev/null 2>&1; echo $?'") != "0":
             raise RuntimeError("installed 1.38 shell/applets unusable")
+        phase = "foreign-grep-post-upgrade"
         if guest.command("/opt/bin/busybox sha256sum /opt/bin/grep").split()[0] != grep_before:
             raise RuntimeError("foreign GNU grep changed during actual upgrade")
         evidence.check("ENTWARE_BUSYBOX_TRANSITION", "PASS", "native_command_verified")
@@ -147,7 +162,9 @@ def accept(guest, kas_dir, evidence):
         print("ENTWARE BUSYBOX: real guest opkg local-IPK upgrade 1.37 -> 1.38 PASS", flush=True)
         print("ENTWARE BUSYBOX: actual interrupted opkg transaction NOT TESTED", flush=True)
         return True
-    except (RuntimeError, ValueError, OSError, TimeoutError):
+    except (RuntimeError, ValueError, OSError, TimeoutError) as exc:
         evidence.check("ENTWARE_BUSYBOX_TRANSITION", "FAIL", "native_command_failed")
-        print("ENTWARE BUSYBOX: native transition failed (private guest details redacted)", flush=True)
+        # Never emit exception messages: SSH errors can contain sensitive data.
+        print("ENTWARE BUSYBOX: FAIL phase=%s class=%s (private details redacted)"
+              % (phase, type(exc).__name__), flush=True)
         return False
