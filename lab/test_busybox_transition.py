@@ -69,6 +69,36 @@ class NativeBusyboxTransitionTests(unittest.TestCase):
         self.assertNotIn('opkg update', src)
         self.assertIn('NATIVE_POSTINST_RECOVERY_PASS', src)
 
+    def test_upgrade_script_tracks_real_foreign_grep_and_observed_shell_state(self):
+        src = module.upgrade_script()
+        self.assertTrue(src.startswith('#!/bin/sh'))
+        # The digest target is the real package-owned GNU grep ELF; the
+        # Alternatives symlink /opt/bin/grep must never be asserted as a file.
+        self.assertNotIn('/opt/bin/grep', src)
+        self.assertIn(module.POSTINST_OLD_SHA, src)
+        self.assertIn('/opt/lib/opkg/info/busybox.postinst', src)
+        self.assertIn('install /opt/lab/busybox-1.38.ipk', src)
+        self.assertIn('NATIVE_UPGRADE_SH_MISSING_REPRODUCED', src)
+        self.assertIn('NATIVE_UPGRADE_SH_RESTORED_BY_POSTINST', src)
+        self.assertIn('NATIVE_UPGRADE_RECOVERY_PASS', src)
+        self.assertNotIn('ln -sf', src)
+        self.assertNotIn('opkg upgrade', src)
+        self.assertNotIn('opkg update', src)
+
+    def test_foreign_grep_digest_targets_the_real_libexec_file(self):
+        # grep 3.12-1 exposes GNU grep via opkg Alternatives: /opt/bin/grep is
+        # a symlink, so the baseline must assert the real ELF instead (the
+        # previous head failed run 41910981207 exactly at foreign-grep-baseline).
+        self.assertEqual(module.FOREIGN_GREP, '/opt/libexec/grep-gnu')
+
+    def test_upgrade_script_is_in_the_upload_allowlist(self):
+        guest = mock.Mock()
+        with mock.patch.object(module, 'put_guest_file') as put:
+            module.upload(guest, '/opt/lab/busybox-upgrade.sh', b'#!/bin/sh\n')
+        guest.command.assert_called_once_with('mkdir -p /opt/lab')
+        put.assert_called_once_with(
+            guest, '/opt/lab/busybox-upgrade.sh', b'#!/bin/sh\n', mode='600')
+
     def test_mismatched_native_baseline_fails_before_fetch_or_guest_write(self):
         guest = mock.Mock()
         guest.command.return_value = 'busybox - 0.0\n'

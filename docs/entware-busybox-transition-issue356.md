@@ -16,7 +16,14 @@
 2. Transfer pin-checked 1.38 IPK and the read-only KAS preflight through authenticated loopback SSH; verify hashes in guest.
 3. In a **single persistent native `/bin/sh` session**, run the genuinely installed 1.37 `busybox.prerm`, confirm missing `/opt/bin/sh` and `/opt/bin/chmod`, and check the preflight emits a `FAIL`.
 4. Run the genuinely installed 1.37 `busybox.postinst` and verify it restores those paths and preflight returns zero. The script has an emergency `EXIT` trap to try restoring links inside the disposable guest after failures.
-5. Execute a **real local-file** `opkg install /opt/lab/busybox-1.38.ipk` in the same throwaway QEMU VM. Verify opkg reports `1.38.0-3` installed and native shell/applets are executable. Check that a separate GNU `grep` file's digest is unchanged.
+5. Execute a **real local-file** `opkg install /opt/lab/busybox-1.38.ipk` in the same throwaway QEMU VM, inside **one persistent `/bin/sh` session together with every post-install observation**: the old 1.37 `prerm` deletes `/opt/bin/sh` and a new SSH exec cannot start until links are restored. The guest script reports which post-install state was actually observed (`NATIVE_UPGRADE_SH_MISSING_REPRODUCED` or `NATIVE_UPGRADE_SH_RESTORED_BY_POSTINST`), verifies opkg reports `1.38.0-3`, then restores the links with the **pinned old 1.37 postinst** copied aside before the install, and only afterwards does the host re-check the inventory and the GNU `grep` digest.
+
+## Static-analysis correction (2026-11-05, real IPK bytes, no execution)
+
+Two baseline assumptions of the previous head were wrong and are fixed here:
+
+- **Foreign GNU grep lives at `/opt/libexec/grep-gnu`, not `/opt/bin/grep`.** Entware `grep 3.12-1` ships only `/opt/libexec/{grep,egrep,fgrep}-gnu` and exposes them via the opkg `Alternatives:` field (`300:/opt/bin/grep:/opt/libexec/grep-gnu`). `/opt/bin/grep` is therefore always a *symlink*, never a regular file; `test ! -L /opt/bin/grep` can never pass and was the exact `phase=foreign-grep-baseline` failure of run 41910981207. The digest now tracks `/opt/libexec/grep-gnu` (real ELF, package-owned).
+- **The 1.38.0-3 `postinst` is an OpenWrt-style wrapper, and stock Entware has no `/opt/lib/functions.sh`.** Verified from the real test-feed IPK: `postinst` (SHA-256 `479b2ad3…`) is `#!/bin/sh` + `default_postinst $0 $@` guarded by `[ -s /opt/lib/functions.sh ] || exit 0`; the actual link-restore logic moved to `postinst-pkg` (byte-identical to the 1.37 postinst, SHA-256 `cb8c4963…`). None of the 21 pinned bootstrap packages or the official installer archive contains `functions.sh`, so on stock Entware the wrapper exits 0 **without restoring links**. Consequently the stage no longer asserts that `/opt/bin/sh` is executable after the real opkg install: the disappearance of `/opt/bin/sh` is the phenomenon under research and is observed, recorded, and then recovered with the pinned old postinst — never with a `ln -sf` loop.
 
 ## Evidence limits and stop conditions
 

@@ -21,6 +21,16 @@ PACKAGE_URL = "https://test.entware.net/aarch64-k3.10/busybox_1.38.0-3_aarch64-3
 PACKAGE_SHA = "4d69a41404abd5df0aaf55633331d43e28b90b4446ca5b53ae987a9f04b5a381"
 PRERM_OLD_SHA = "d9d1c4e7d81a5b46c39f22cded480c75e8b8d2849744a4cb84ca494b1dd407e4"
 POSTINST_NEW_SHA = "479b2ad3cc2256e1ab537b85d6435282d658d3efdc9813253acafffad6647541"
+# Digest of the pinned 1.37.0-6 monolithic postinst (verified against the real
+# IPK bytes; identical to 1.38.0-3 postinst-pkg). opkg install of 1.38 replaces
+# /opt/lib/opkg/info/busybox.postinst with the new functions.sh wrapper, so the
+# upgrade script copies the old script aside BEFORE the real opkg install and
+# re-verifies this digest before using it for the disposable-guest recovery.
+POSTINST_OLD_SHA = "cb8c496360d70ac7581941cc397cfb059cc1e683e521e8b63360b2fe9f3671c7"
+# Real foreign GNU grep binary: Entware grep 3.12-1 ships /opt/libexec/grep-gnu
+# and exposes it through the opkg Alternatives symlink /opt/bin/grep, so
+# /opt/bin/grep is NEVER a regular file and must not be digest-tracked itself.
+FOREIGN_GREP = "/opt/libexec/grep-gnu"
 
 
 def verify_package(raw):
@@ -60,7 +70,7 @@ def fetch_verified():
 
 def upload(guest, path, content):
     if path not in ("/opt/lab/busybox-1.38.ipk", "/opt/lab/kas-entware-preflight.sh",
-                    "/opt/lab/busybox-transition.sh"):
+                    "/opt/lab/busybox-transition.sh", "/opt/lab/busybox-upgrade.sh"):
         raise ValueError("unexpected guest upload path")
     # Reuse the already native-QEMU-proven KAS transfer. The emulated
     # firmware does not promise /bin/mkdir or /bin/cat; Entware PATH does.
@@ -105,6 +115,43 @@ printf 'NATIVE_PRERM_INTERRUPTED_PASS\\nNATIVE_POSTINST_RECOVERY_PASS\\n'
 """)
 
 
+def upgrade_script():
+    # Same persistent-session rule as phase_script(): the real `opkg install`
+    # runs the old 1.37 prerm, which deletes /opt/bin/sh. A *new* SSH exec
+    # would then be impossible, so every post-install observation and the
+    # sanctioned recovery must happen inside this one command. The 1.38
+    # postinst is an OpenWrt-style wrapper requiring /opt/lib/functions.sh,
+    # which no Entware package ships (static-analysis finding, 2026-11-05),
+    # so the wrapper exits 0 without restoring links: whether /opt/bin/sh
+    # survives is therefore OBSERVED and reported, never assumed.
+    return ("""#!/bin/sh
+set -eu
+BB=/opt/bin/busybox
+OPKG=/opt/bin/opkg
+OLD_POSTINST=/opt/lib/opkg/info/busybox.postinst
+SAVED_POSTINST=/opt/lab/busybox-old.postinst
+[ -f "$OLD_POSTINST" ] || exit 71
+"$BB" cp "$OLD_POSTINST" "$SAVED_POSTINST"
+set -- $("$BB" sha256sum "$SAVED_POSTINST")
+[ "$1" = """ + POSTINST_OLD_SHA + """ ] || exit 72
+set +e
+"$OPKG" install /opt/lab/busybox-1.38.ipk > /opt/lab/opkg-install.log 2>&1
+rc=$?
+set -e
+[ "$rc" -eq 0 ] || exit 73
+"$OPKG" list-installed > /opt/lab/installed-after.txt
+"$BB" grep -q '^busybox - 1\\.38\\.0-3$' /opt/lab/installed-after.txt || exit 74
+if [ -e /opt/bin/sh ] && [ -e /opt/bin/chmod ]; then
+    printf 'NATIVE_UPGRADE_SH_RESTORED_BY_POSTINST\\n'
+else
+    printf 'NATIVE_UPGRADE_SH_MISSING_REPRODUCED\\n'
+fi
+"$BB" sh "$SAVED_POSTINST" >/dev/null 2>&1 || exit 75
+[ -x /opt/bin/sh ] && [ -x /opt/bin/chmod ] || exit 76
+printf 'NATIVE_UPGRADE_RECOVERY_PASS\\n'
+""")
+
+
 def require_busybox_version(guest, expected):
     """Use the proven native guest inventory API, not opkg status formatting.
 
@@ -141,11 +188,15 @@ def accept(guest, kas_dir, evidence):
         upload(guest, "/opt/lab/kas-entware-preflight.sh", source.read_bytes())
         phase = "upload-scenario"
         upload(guest, "/opt/lab/busybox-transition.sh", phase_script().encode())
-        # Capture a separate real foreign GNU grep binary; preserve its hash.
+        # Capture the real foreign GNU grep binary. Entware grep 3.12-1 ships
+        # /opt/libexec/grep-gnu (real ELF) and exposes it via the opkg
+        # Alternatives symlink /opt/bin/grep, so the digest must track the
+        # real file, not the symlink path (previous run failed exactly here).
         phase = "foreign-grep-baseline"
-        if guest.command("test -f /opt/bin/grep && test ! -L /opt/bin/grep; echo $?").strip() != "0":
+        if guest.command("test -f " + FOREIGN_GREP + " && test ! -L " + FOREIGN_GREP
+                         + "; echo $?").strip() != "0":
             raise RuntimeError("expected separate GNU grep not present")
-        grep_before = guest.command("/opt/bin/busybox sha256sum /opt/bin/grep").split()[0]
+        grep_before = guest.command("/opt/bin/busybox sha256sum " + FOREIGN_GREP).split()[0]
 
         phase = "prerm-interruption-recovery"
         rc, out, err = guest.execute("/bin/sh /opt/lab/busybox-transition.sh", timeout=120)
@@ -159,25 +210,41 @@ def accept(guest, kas_dir, evidence):
             phase = "prerm-interruption-recovery-markers"
             raise RuntimeError("native phase markers missing")
         phase = "foreign-grep-post-recovery"
-        if guest.command("/opt/bin/busybox sha256sum /opt/bin/grep").split()[0] != grep_before:
+        if guest.command("/opt/bin/busybox sha256sum " + FOREIGN_GREP).split()[0] != grep_before:
             raise RuntimeError("foreign GNU grep changed during maintainer scripts")
 
+        phase = "upload-upgrade-script"
+        upload(guest, "/opt/lab/busybox-upgrade.sh", upgrade_script().encode())
         # Actual upgrade with the real package manager, no feed mutation:
         # native opkg runs the ORIGINAL maintainer scripts, not a shell model.
         phase = "native-opkg-upgrade"
-        rc, out, err = guest.execute(
-            "/opt/bin/opkg install /opt/lab/busybox-1.38.ipk", timeout=300)
+        rc, out, err = guest.execute("/bin/sh /opt/lab/busybox-upgrade.sh", timeout=300)
         if rc != 0:
-            raise RuntimeError("native offline-local-IPK opkg upgrade failed")
+            # The guest script uses only synthetic, fixed exit codes 71-76.
+            # Never print or parse its private stdout/stderr.
+            phase = ("native-opkg-upgrade-exit-" + str(rc)
+                     if rc in range(71, 77) else "native-opkg-upgrade-exit-other")
+            raise RuntimeError("native offline-local-IPK opkg upgrade refused")
+        if "NATIVE_UPGRADE_RECOVERY_PASS" not in out:
+            phase = "native-opkg-upgrade-markers"
+            raise RuntimeError("native upgrade markers missing")
+        reproduced = "NATIVE_UPGRADE_SH_MISSING_REPRODUCED" in out
+        restored = "NATIVE_UPGRADE_SH_RESTORED_BY_POSTINST" in out
+        if reproduced == restored:
+            phase = "native-opkg-upgrade-observed-state"
+            raise RuntimeError("exactly one post-install shell state must be reported")
         phase = "post-upgrade-opkg-inventory"
         require_busybox_version(guest, VERSION_NEW)
-        phase = "post-upgrade-applets"
-        if guest.command("/bin/sh -c '/opt/bin/sh -c \"exit 0\"; /opt/bin/chmod --help >/dev/null 2>&1; echo $?'") != "0":
-            raise RuntimeError("installed 1.38 shell/applets unusable")
         phase = "foreign-grep-post-upgrade"
-        if guest.command("/opt/bin/busybox sha256sum /opt/bin/grep").split()[0] != grep_before:
+        if guest.command("/opt/bin/busybox sha256sum " + FOREIGN_GREP).split()[0] != grep_before:
             raise RuntimeError("foreign GNU grep changed during actual upgrade")
-        evidence.check("ENTWARE_BUSYBOX_TRANSITION", "PASS", "native_command_verified")
+        if reproduced:
+            evidence.check("ENTWARE_BUSYBOX_TRANSITION", "PASS",
+                           "native_sh_disappearance_reproduced")
+            print("ENTWARE BUSYBOX: native 1.38 upgrade left /opt/bin/sh and applets "
+                  "missing; recovered in-guest with the pinned old postinst", flush=True)
+        else:
+            evidence.check("ENTWARE_BUSYBOX_TRANSITION", "PASS", "native_command_verified")
         print("ENTWARE BUSYBOX: native 1.37 prerm interruption + postinst recovery PASS", flush=True)
         print("ENTWARE BUSYBOX: real guest opkg local-IPK upgrade 1.37 -> 1.38 PASS", flush=True)
         print("ENTWARE BUSYBOX: actual interrupted opkg transaction NOT TESTED", flush=True)
