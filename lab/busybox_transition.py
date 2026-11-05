@@ -175,6 +175,35 @@ if [ "$rc" -ne 0 ]; then
             _rows=list_failed
         fi
         printf 'RESTORED_OPKG_BUSYBOX_ROWS=%s\n' "$_rows"
+        # Decompose the Status line of the saved record into its three fixed
+        # fields (want/flag/state) so the exact wording that failed the
+        # preflight's literal match is known without printing guest text.
+        _want=unknown; _flag=unknown; _state=unknown
+        while IFS= read -r _l; do
+            case "$_l" in
+                "Status: install ok installed")
+                    _want=install; _flag=ok; _state=installed ;;
+                "Status: install hold installed")
+                    _want=install; _flag=hold; _state=installed ;;
+                "Status: deinstall ok installed")
+                    _want=deinstall; _flag=ok; _state=installed ;;
+                "Status: install ok half-configured")
+                    _want=install; _flag=ok; _state=half-configured ;;
+            esac
+        done < /opt/lab/opkg-status.txt
+        printf 'RESTORED_OPKG_STATUS_WANT=%s\n' "$_want"
+        printf 'RESTORED_OPKG_STATUS_FLAG=%s\n' "$_flag"
+        printf 'RESTORED_OPKG_STATUS_STATE=%s\n' "$_state"
+        if "$BB" grep -q 'install ok installed' /opt/lab/opkg-status.txt; then
+            printf 'RESTORED_OPKG_STATUS_HAS_OK=1\n'
+        else
+            printf 'RESTORED_OPKG_STATUS_HAS_OK=0\n'
+        fi
+        if "$BB" grep -q 'hold' /opt/lab/opkg-status.txt; then
+            printf 'RESTORED_OPKG_STATUS_HAS_HOLD=1\n'
+        else
+            printf 'RESTORED_OPKG_STATUS_HAS_HOLD=0\n'
+        fi
     else
         printf 'RESTORED_OPKG_BIN=missing\n'
     fi
@@ -372,9 +401,22 @@ def accept(guest, kas_dir, evidence):
                             "RESTORED_OPKG_BUSYBOX_ROWS=one",
                             "RESTORED_OPKG_BUSYBOX_ROWS=nover",
                             "RESTORED_OPKG_BUSYBOX_ROWS=many",
-                            "RESTORED_OPKG_BUSYBOX_ROWS=list_failed"):
+                            "RESTORED_OPKG_BUSYBOX_ROWS=list_failed",
+                            "RESTORED_OPKG_STATUS_HAS_OK=1",
+                            "RESTORED_OPKG_STATUS_HAS_OK=0",
+                            "RESTORED_OPKG_STATUS_HAS_HOLD=1",
+                            "RESTORED_OPKG_STATUS_HAS_HOLD=0"):
                 if literal in output_lines:
                     tokens += " " + literal
+            for prefix, allowed_words in (
+                    ("RESTORED_OPKG_STATUS_WANT=", ("install", "deinstall", "unknown")),
+                    ("RESTORED_OPKG_STATUS_FLAG=", ("ok", "hold", "unknown")),
+                    ("RESTORED_OPKG_STATUS_STATE=",
+                     ("installed", "half-configured", "unknown"))):
+                for line in output_lines:
+                    if line.startswith(prefix) and line[len(prefix):] in allowed_words:
+                        tokens += " " + line
+                        break
         print("ENTWARE BUSYBOX: FAIL phase=%s class=%s%s (other details redacted)"
               % (phase, type(exc).__name__, tokens), flush=True)
         return False

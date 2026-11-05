@@ -168,9 +168,14 @@ class NativeBusyboxTransitionTests(unittest.TestCase):
                 'RESTORED_PREFLIGHT_RC=2\n'
                 'RESTORED_UNKNOWN_opkg-view=1\n'
                 'RESTORED_OPKG_STATUS_EXIT=0\n'
-                'RESTORED_OPKG_STATUS_OUT=empty\n'
+                'RESTORED_OPKG_STATUS_OUT=nonempty\n'
                 'RESTORED_OPKG_LIST_EXIT=0\n'
-                'RESTORED_OPKG_BUSYBOX_ROWS=many\n'
+                'RESTORED_OPKG_BUSYBOX_ROWS=one\n'
+                'RESTORED_OPKG_STATUS_WANT=install\n'
+                'RESTORED_OPKG_STATUS_FLAG=hold\n'
+                'RESTORED_OPKG_STATUS_STATE=installed\n'
+                'RESTORED_OPKG_STATUS_HAS_OK=0\n'
+                'RESTORED_OPKG_STATUS_HAS_HOLD=1\n'
                 'RESTORED_OPKG_STATUS_EXIT=drop-me\n'
                 'RESTORED_OPKG_BUSYBOX_ROWS=WHATEVER\n', '')
             with redirect_stdout(stream):
@@ -180,8 +185,14 @@ class NativeBusyboxTransitionTests(unittest.TestCase):
         self.assertIn('RESTORED_OPKG_STATUS_OUT=empty', printed)
         self.assertIn('RESTORED_OPKG_LIST_EXIT=0', printed)
         self.assertIn('RESTORED_OPKG_BUSYBOX_ROWS=many', printed)
+        self.assertIn('RESTORED_OPKG_STATUS_WANT=install', printed)
+        self.assertIn('RESTORED_OPKG_STATUS_FLAG=hold', printed)
+        self.assertIn('RESTORED_OPKG_STATUS_STATE=installed', printed)
+        self.assertIn('RESTORED_OPKG_STATUS_HAS_OK=0', printed)
+        self.assertIn('RESTORED_OPKG_STATUS_HAS_HOLD=1', printed)
         self.assertNotIn('drop-me', printed)
         self.assertNotIn('WHATEVER', printed)
+        self.assertNotIn('EXPLOIT', printed)
 
     def test_phase_script_classifies_opkg_results_with_builtins_only(self):
         src = module.phase_script()
@@ -191,6 +202,9 @@ class NativeBusyboxTransitionTests(unittest.TestCase):
         self.assertIn("RESTORED_OPKG_STATUS_OUT=", src)
         self.assertIn("RESTORED_OPKG_LIST_EXIT=", src)
         self.assertIn("RESTORED_OPKG_BUSYBOX_ROWS=", src)
+        self.assertIn("RESTORED_OPKG_STATUS_WANT=", src)
+        self.assertIn("RESTORED_OPKG_STATUS_FLAG=", src)
+        self.assertIn("RESTORED_OPKG_STATUS_STATE=", src)
         classify_tail = src.split("RESTORED_OPKG_STATUS_EXIT=")[1]
         self.assertIn('case "$_l" in', classify_tail)
         self.assertNotIn('grep -o', classify_tail)
