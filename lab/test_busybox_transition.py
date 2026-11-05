@@ -176,6 +176,11 @@ class NativeBusyboxTransitionTests(unittest.TestCase):
                 'RESTORED_OPKG_STATUS_STATE=installed\n'
                 'RESTORED_OPKG_STATUS_HAS_OK=0\n'
                 'RESTORED_OPKG_STATUS_HAS_HOLD=1\n'
+                'RESTORED_OPKG_STATUS_LINE=1\n'
+                'RESTORED_OPKG_STATUS_WORDS=3\n'
+                'RESTORED_OPKG_STATUS_W1=install\n'
+                'RESTORED_OPKG_STATUS_W2=other\n'
+                'RESTORED_OPKG_STATUS_W3=installed\n'
                 'RESTORED_OPKG_STATUS_EXIT=drop-me\n'
                 'RESTORED_OPKG_BUSYBOX_ROWS=WHATEVER\n', '')
             with redirect_stdout(stream):
@@ -190,6 +195,11 @@ class NativeBusyboxTransitionTests(unittest.TestCase):
         self.assertIn('RESTORED_OPKG_STATUS_STATE=installed', printed)
         self.assertIn('RESTORED_OPKG_STATUS_HAS_OK=0', printed)
         self.assertIn('RESTORED_OPKG_STATUS_HAS_HOLD=1', printed)
+        self.assertIn('RESTORED_OPKG_STATUS_LINE=1', printed)
+        self.assertIn('RESTORED_OPKG_STATUS_WORDS=3', printed)
+        self.assertIn('RESTORED_OPKG_STATUS_W1=install', printed)
+        self.assertIn('RESTORED_OPKG_STATUS_W2=other', printed)
+        self.assertIn('RESTORED_OPKG_STATUS_W3=installed', printed)
         self.assertNotIn('drop-me', printed)
         self.assertNotIn('WHATEVER', printed)
         self.assertNotIn('EXPLOIT', printed)

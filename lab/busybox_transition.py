@@ -204,6 +204,39 @@ if [ "$rc" -ne 0 ]; then
         else
             printf 'RESTORED_OPKG_STATUS_HAS_HOLD=0\n'
         fi
+        # Structure of the Status line itself: presence, word count and the
+        # class of each of the first three words against the opkg status
+        # vocabulary. Unknown words collapse to a fixed `other` class, so the
+        # record shape is measurable without printing any guest text.
+        _sl_present=0; _sl_words=0
+        _w1=none; _w2=none; _w3=none
+        while IFS= read -r _l; do
+            case "$_l" in
+                "Status: "*)
+                    _sl_present=1
+                    _rest=${_l#"Status: "}
+                    _n=0
+                    for _w in $_rest; do
+                        _n=$((_n+1))
+                        case "$_w" in
+                            install|deinstall|hold|ok|installed|unpacked|not-installed|half-configured|config-files|post-inst-failed|reinst-required|unknown) _cls=$_w ;;
+                            *) _cls=other ;;
+                        esac
+                        case $_n in
+                            1) _w1=$_cls ;;
+                            2) _w2=$_cls ;;
+                            3) _w3=$_cls ;;
+                        esac
+                    done
+                    _sl_words=$_n
+                    ;;
+            esac
+        done < /opt/lab/opkg-status.txt
+        printf 'RESTORED_OPKG_STATUS_LINE=%s\n' "$_sl_present"
+        printf 'RESTORED_OPKG_STATUS_WORDS=%s\n' "$_sl_words"
+        printf 'RESTORED_OPKG_STATUS_W1=%s\n' "$_w1"
+        printf 'RESTORED_OPKG_STATUS_W2=%s\n' "$_w2"
+        printf 'RESTORED_OPKG_STATUS_W3=%s\n' "$_w3"
     else
         printf 'RESTORED_OPKG_BIN=missing\n'
     fi
@@ -415,6 +448,25 @@ def accept(guest, kas_dir, evidence):
                      ("installed", "half-configured", "unknown"))):
                 for line in output_lines:
                     if line.startswith(prefix) and line[len(prefix):] in allowed_words:
+                        tokens += " " + line
+                        break
+            if "RESTORED_OPKG_STATUS_LINE=0" in output_lines:
+                tokens += " RESTORED_OPKG_STATUS_LINE=0"
+            if "RESTORED_OPKG_STATUS_LINE=1" in output_lines:
+                tokens += " RESTORED_OPKG_STATUS_LINE=1"
+            for prefix in ("RESTORED_OPKG_STATUS_WORDS=",):
+                for line in output_lines:
+                    if line.startswith(prefix) and line[len(prefix):].isdigit():
+                        tokens += " " + line
+                        break
+            word_classes = ("install", "deinstall", "hold", "ok", "installed",
+                            "unpacked", "not-installed", "half-configured",
+                            "config-files", "post-inst-failed", "reinst-required",
+                            "unknown", "other", "none")
+            for prefix in ("RESTORED_OPKG_STATUS_W1=", "RESTORED_OPKG_STATUS_W2=",
+                           "RESTORED_OPKG_STATUS_W3="):
+                for line in output_lines:
+                    if line.startswith(prefix) and line[len(prefix):] in word_classes:
                         tokens += " " + line
                         break
         print("ENTWARE BUSYBOX: FAIL phase=%s class=%s%s (other details redacted)"
