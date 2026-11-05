@@ -21,5 +21,5 @@ jobs:
     with:
       emulator_ref: ${{ github.event.pull_request.head.sha || github.sha }}
       # Fixed known KAS source containing read-only Entware preflight.
-      kas_ref: 2ae4a29121f6c7124895d3ece7cf496c74abad54
+      kas_ref: efdb859eeb13e5cffbda9fdd0d4d88fcc5cf9875
       stage: busybox-transition
