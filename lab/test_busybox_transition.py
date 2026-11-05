@@ -135,7 +135,8 @@ class NativeBusyboxTransitionTests(unittest.TestCase):
         stream = io.StringIO()
         with mock.patch.object(module, 'fetch_verified', return_value=b'fixture'), \
              mock.patch.object(module, 'upload'), \
-             mock.patch.object(module.Path, 'is_file', return_value=True):
+             mock.patch.object(module.Path, 'is_file', return_value=True), \
+             mock.patch.object(module.Path, 'read_bytes', return_value=b'preflight'):
             # The fingerprint/foreign-baseline stage is already isolated by
             # the mocked inventory; do not rely on the actual fixture layout.
             guest.execute.return_value = (
