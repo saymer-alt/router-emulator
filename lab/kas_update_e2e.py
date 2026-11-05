@@ -200,6 +200,32 @@ class KasUpdateScenario:
         return probe(self.guest, 'KEENETIC_AUTO_SETUP_REF=' + self.revision
                      + ' sh ' + self.script + ' ' + args, timeout=timeout)
 
+    def run_busy(self, timeout=300):
+        """The busy-lock refusal in ONE SSH session: the lock holder is a
+        child of the same session, so nothing has to survive a channel
+        teardown. Returns (kas-update exit code, combined output,
+        owner_ready, holder_alive)."""
+        session = (
+            'sh /opt/lab/lock-holder.sh >/dev/null 2>&1 & holder=$!\n'
+            'i=0\n'
+            'while [ "$i" -lt 20 ]; do\n'
+            '  [ -f /tmp/mihomo-lifecycle.lock.d/owner ] && break\n'
+            '  sleep 0.5\n'
+            '  i=$((i+1))\n'
+            'done\n'
+            'if [ -f /tmp/mihomo-lifecycle.lock.d/owner ]; then echo OWNER_READY; fi\n'
+            'if kill -0 "$holder" 2>/dev/null; then echo HOLDER_ALIVE; fi\n'
+            'KEENETIC_AUTO_SETUP_REF=' + self.revision + ' sh ' + self.script
+            + ' --apply --yes\n'
+            'echo KAS_UPDATE_APPLY_EXIT=$?\n'
+            'kill "$holder" 2>/dev/null\n'
+            'true\n')
+        code, data, errors = probe(self.guest, session, timeout=timeout)
+        text = plain(data + '\n' + errors)
+        match = re.search(r'KAS_UPDATE_APPLY_EXIT=(\d+)', text)
+        return (int(match.group(1)) if match else -1), text, \
+            'OWNER_READY' in text, 'HOLDER_ALIVE' in text
+
     def candidate_digest(self):
         return hashlib.sha256(self.mirror.sources['mihomo-watchdog.sh']).hexdigest()
 
@@ -423,8 +449,8 @@ def kas_update(guest, mirror, revision, evidence, context, private, phase_box):
                    commit_failure) and ok
 
     # 8. Busy lifecycle lock -> refusal without any state change. The holder
-    #    must be observed ALIVE with its owner file in place before the run,
-    #    otherwise kas-update legitimately sees the lock as unknown.
+    #    lives inside the same SSH session as the refusal run, so session
+    #    teardown cannot kill it before the lock is observed busy.
     def busy():
         put(guest, '/opt/lab/lock-holder.sh',
             b'#!/bin/sh\nmkdir -p /tmp/mihomo-lifecycle.lock.d\n'
@@ -433,27 +459,14 @@ def kas_update(guest, mirror, revision, evidence, context, private, phase_box):
             b'{ print $20; ok=1 } END { if (!ok) exit 1 }\') || exit 3\n'
             b'printf \'%s %s\\n\' "$$" "$start" > /tmp/mihomo-lifecycle.lock.d/owner\n'
             b'sleep 180\n', '700')
-        holder = guest.command('nohup sh /opt/lab/lock-holder.sh >/dev/null 2>&1 & echo $!')
-        holder_pid = holder.strip().splitlines()[-1].strip()
-        try:
-            owner = ''
-            for _ in range(20):
-                time.sleep(0.5)
-                code, owner, _ = probe(guest, 'cat /tmp/mihomo-lifecycle.lock.d/owner 2>/dev/null')
-                if code == 0 and re.fullmatch(r'[0-9]+ [0-9]+', owner.strip() or ''):
-                    break
-            alive = guest.command('kill -0 ' + holder_pid + ' && echo alive')
-            if owner.strip() == '' or 'alive' not in alive:
-                _diag('busy', owner_ready=bool(owner.strip()), holder_alive='alive' in alive)
-                raise ScenarioBlocked('native_command_failed')
-            code, out = scenario.run('--apply --yes')
-            codes['busy_apply'] = code
-            _diag('busy', apply_code=code, refused='busy' in out,
-                  unchanged=guest_sha256(guest, CANONICAL) == candidate)
-            return code == 1 and 'busy' in out \
-                and guest_sha256(guest, CANONICAL) == candidate
-        finally:
-            probe(guest, 'kill ' + holder_pid + ' 2>/dev/null; true')
+        code, out, owner_ready, holder_alive = scenario.run_busy()
+        codes['busy_apply'] = code
+        _diag('busy', apply_code=code, refused='busy' in out,
+              unchanged=guest_sha256(guest, CANONICAL) == candidate,
+              owner_ready=owner_ready, holder_alive=holder_alive)
+        return owner_ready and holder_alive \
+            and code == 1 and 'busy' in out \
+            and guest_sha256(guest, CANONICAL) == candidate
     ok = _scenario(evidence, 'KAS_UPDATE_BUSY_REFUSAL', 'kas_update_busy_refused', busy) and ok
 
     # 9. Nothing outside the watchdog pair changed during the whole stage.
