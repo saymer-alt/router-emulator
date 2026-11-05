@@ -9,7 +9,6 @@ interrupting an opkg transaction; the latter remains NOT TESTED.
 import hashlib
 import io
 from pathlib import Path
-import re
 import tarfile
 import urllib.request
 from urllib.parse import urlsplit
@@ -115,9 +114,6 @@ if [ "$rc" -ne 1 ]; then
     printf 'PREFLIGHT_FAIL_IDS=%s\n' "$("$BB" grep -o '^FAIL: [a-zA-Z-]*' /opt/lab/busybox-broken.txt 2>/dev/null | "$BB" tr '\n' ',')"
     printf 'PREFLIGHT_UNKNOWN_IDS=%s\n' "$("$BB" grep -o '^UNKNOWN: [a-zA-Z-]*' /opt/lab/busybox-broken.txt 2>/dev/null | "$BB" tr '\n' ',')"
     printf 'PREFLIGHT_OUT_SHA=%s\n' "$("$BB" sha256sum /opt/lab/busybox-broken.txt | "$BB" cut -d ' ' -f1)"
-    printf '%s\n' 'PREFLIGHT_OUTPUT_BEGIN'
-    "$BB" head -n 40 /opt/lab/busybox-broken.txt
-    printf '%s\n' 'PREFLIGHT_OUTPUT_END'
     exit 66
 fi
 "$BB" grep -q '^FAIL: opt-sh:' /opt/lab/busybox-broken.txt || exit 67
@@ -127,7 +123,23 @@ set +e
 "$BB" sh /opt/lab/kas-entware-preflight.sh > /opt/lab/busybox-restored.txt 2>&1
 rc=$?
 set -e
-[ "$rc" -eq 0 ] || exit 70
+if [ "$rc" -ne 0 ]; then
+    # Strictly fixed-vocabulary diagnostics, never print actual preflight
+    # descriptions, guest paths, command stderr or raw package output.
+    case "$rc" in 1|2) printf 'RESTORED_PREFLIGHT_RC=%s\n' "$rc" ;;
+                     *) printf 'RESTORED_PREFLIGHT_RC=OTHER\n' ;; esac
+    for _id in busybox-binary busybox-applets opt-sh \
+        applet-chmod applet-ln applet-rm applet-cp applet-mv applet-ls \
+        applet-cat applet-grep applet-sed applet-awk applet-wget \
+        wget-capability opkg-view; do
+        for _severity in FAIL UNKNOWN; do
+            if "$BB" grep -q "^$_severity: $_id:" /opt/lab/busybox-restored.txt; then
+                printf 'RESTORED_%s_%s=1\n' "$_severity" "$_id"
+            fi
+        done
+    done
+    exit 70
+fi
 trap - EXIT
 printf 'NATIVE_PRERM_INTERRUPTED_PASS\\nNATIVE_POSTINST_RECOVERY_PASS\\n'
 """)
@@ -282,17 +294,28 @@ def accept(guest, kas_dir, evidence):
         # integers, present/missing words and a hex digest of the preflight's
         # own sanitized output; nothing else from the guest is printed.
         tokens = ""
-        if transition_rc == 66:
-            pairs = re.findall(r"(BROKEN_BIN_COUNT|AFTER_PREFLIGHT_SH|AFTER_BIN_COUNT"
-                               r"|PREFLIGHT_RC|PREFLIGHT_FAIL_IDS"
-                               r"|PREFLIGHT_UNKNOWN_IDS|PREFLIGHT_OUT_SHA"
-                               r")=([0-9a-zA-Z,-]*)", transition_out)
-            if pairs:
-                tokens = " " + " ".join("%s=%s" % p for p in pairs)
-            block = re.search(r"PREFLIGHT_OUTPUT_BEGIN\n(.*?)PREFLIGHT_OUTPUT_END",
-                              transition_out, re.DOTALL)
-            if block:
-                tokens += "\nENTWARE BUSYBOX: preflight output (sanitized, issue #356 diagnostic):\n" + block.group(1).strip()
+        if transition_rc == 70:
+            # Whitelist literal preflight IDs and strict return-code tokens.
+            # Do not emit arbitrary guest output, even on an assumed
+            # "sanitized" diagnostic channel.
+            allowed_ids = (
+                "busybox-binary", "busybox-applets", "opt-sh",
+                "applet-chmod", "applet-ln", "applet-rm", "applet-cp",
+                "applet-mv", "applet-ls", "applet-cat", "applet-grep",
+                "applet-sed", "applet-awk", "applet-wget",
+                "wget-capability", "opkg-view",
+            )
+            for literal in ("RESTORED_PREFLIGHT_RC=1",
+                            "RESTORED_PREFLIGHT_RC=2",
+                            "RESTORED_PREFLIGHT_RC=OTHER"):
+                if literal in transition_out.splitlines():
+                    tokens += " " + literal
+            output_lines = set(transition_out.splitlines())
+            for _severity in ("FAIL", "UNKNOWN"):
+                for _id in allowed_ids:
+                    literal = "RESTORED_%s_%s=1" % (_severity, _id)
+                    if literal in output_lines:
+                        tokens += " " + literal
         print("ENTWARE BUSYBOX: FAIL phase=%s class=%s%s (other details redacted)"
               % (phase, type(exc).__name__, tokens), flush=True)
         return False

@@ -41,3 +41,21 @@ After the real old 1.37 `prerm` deletes `/opt/bin/sh`, the ported guest's own `/
 ## Follow-up
 
 After successful review, define a separate QEMU experiment with a real opkg interruption/forced termination while preserving the package database, plus ownership-preserving manual recovery on a clean disposable snapshot. This requires additional proof and is not implied by this test.
+
+
+## Recovery-preflight evidence gate (native run 41934514912)
+
+The last nightly research run confirmed authentic Entware boot/reboot, the
+actual pinned 1.37 `prerm` deleting /opt applet links, native KAS preflight
+failing in that broken state, and recovery script reaching **exit 70**:
+the old `postinst` restored executable `sh` and `chmod`, but the
+*full read-only preflight* did not exit 0. The exact issue can be a FAIL
+or UNKNOWN (for example `opkg-view` formatting); **not yet known**. No
+native 1.38 opkg upgrade was run, and this is not PASS.
+
+The next run reports only the restored preflight's exit code and fixed
+FAIL/UNKNOWN check IDs. Previous experimental code echoed a segment of the
+preflight's diagnostic text, incorrectly assuming it was sanitized. That
+echo is removed; arbitrary guest stdout/stderr is never exposed by this
+research controller. No accepted check is relaxed: exit 70 stays FAIL
+until the actual failing/unknown check is explained with evidence.

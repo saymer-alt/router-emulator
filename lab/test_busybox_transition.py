@@ -68,6 +68,10 @@ class NativeBusyboxTransitionTests(unittest.TestCase):
         self.assertNotIn('opkg upgrade', src)
         self.assertNotIn('opkg update', src)
         self.assertIn('NATIVE_POSTINST_RECOVERY_PASS', src)
+        self.assertIn('RESTORED_PREFLIGHT_RC=', src)
+        self.assertIn('RESTORED_%s_%s=1', src)
+        self.assertNotIn('PREFLIGHT_OUTPUT_BEGIN', src)
+        self.assertNotIn('head -n 40', src)
 
     def test_upgrade_script_tracks_real_foreign_grep_and_observed_shell_state(self):
         src = module.upgrade_script()
@@ -120,6 +124,34 @@ class NativeBusyboxTransitionTests(unittest.TestCase):
         printed = stream.getvalue()
         self.assertIn('FAIL phase=baseline-opkg class=RuntimeError', printed)
         self.assertNotIn('SECRET_PRIVATE_GUEST_OUTPUT', printed)
+
+    def test_post_restore_diagnostics_do_not_reflect_guest_free_text(self):
+        guest = mock.Mock()
+        guest.command.side_effect = [
+            'busybox - 1.37.0-6', 'aarch64', '0',
+            'f' * 64,
+        ]
+        evidence = Evidence()
+        stream = io.StringIO()
+        with mock.patch.object(module, 'fetch_verified', return_value=b'fixture'), \
+             mock.patch.object(module, 'upload'), \
+             mock.patch.object(module.Path, 'is_file', return_value=True):
+            # The fingerprint/foreign-baseline stage is already isolated by
+            # the mocked inventory; do not rely on the actual fixture layout.
+            guest.execute.return_value = (
+                70,
+                'RESTORED_PREFLIGHT_RC=2\n'
+                'RESTORED_UNKNOWN_opkg-view=1\n'
+                'RESTORED_FAIL_opt-sh=1\n'
+                'SECRET_PRIVATE_GUEST_OUTPUT=please-leak\n', '')
+            with redirect_stdout(stream):
+                self.assertFalse(module.accept(guest, Path('/nonexistent'), evidence))
+        printed = stream.getvalue()
+        self.assertIn('RESTORED_PREFLIGHT_RC=2', printed)
+        self.assertIn('RESTORED_UNKNOWN_opkg-view=1', printed)
+        self.assertIn('RESTORED_FAIL_opt-sh=1', printed)
+        self.assertNotIn('SECRET_PRIVATE_GUEST_OUTPUT', printed)
+        self.assertEqual(evidence.checks['ENTWARE_BUSYBOX_TRANSITION']['status'], 'FAIL')
 
     def test_lab_checks_do_not_mark_kas_release_gates_pass(self):
         evidence = Evidence()
