@@ -154,6 +154,51 @@ class NativeBusyboxTransitionTests(unittest.TestCase):
         self.assertNotIn('SECRET_PRIVATE_GUEST_OUTPUT', printed)
         self.assertEqual(evidence.checks['ENTWARE_BUSYBOX_TRANSITION']['status'], 'FAIL')
 
+    def test_opkg_view_subcategory_tokens_forwarded_and_arbitrary_values_dropped(self):
+        guest = mock.Mock()
+        guest.command.side_effect = ['busybox - 1.37.0-6', 'aarch64', '0', 'f' * 64]
+        evidence = Evidence()
+        stream = io.StringIO()
+        with mock.patch.object(module, 'fetch_verified', return_value=b'fixture'), \
+             mock.patch.object(module, 'upload'), \
+             mock.patch.object(module.Path, 'is_file', return_value=True), \
+             mock.patch.object(module.Path, 'read_bytes', return_value=b'preflight'):
+            guest.execute.return_value = (
+                70,
+                'RESTORED_PREFLIGHT_RC=2\n'
+                'RESTORED_UNKNOWN_opkg-view=1\n'
+                'RESTORED_OPKG_STATUS_EXIT=0\n'
+                'RESTORED_OPKG_STATUS_OUT=empty\n'
+                'RESTORED_OPKG_LIST_EXIT=0\n'
+                'RESTORED_OPKG_BUSYBOX_ROWS=many\n'
+                'RESTORED_OPKG_STATUS_EXIT=drop-me\n'
+                'RESTORED_OPKG_BUSYBOX_ROWS=WHATEVER\n', '')
+            with redirect_stdout(stream):
+                self.assertFalse(module.accept(guest, Path('/nonexistent'), evidence))
+        printed = stream.getvalue()
+        self.assertIn('RESTORED_OPKG_STATUS_EXIT=0', printed)
+        self.assertIn('RESTORED_OPKG_STATUS_OUT=empty', printed)
+        self.assertIn('RESTORED_OPKG_LIST_EXIT=0', printed)
+        self.assertIn('RESTORED_OPKG_BUSYBOX_ROWS=many', printed)
+        self.assertNotIn('drop-me', printed)
+        self.assertNotIn('WHATEVER', printed)
+
+    def test_phase_script_classifies_opkg_results_with_builtins_only(self):
+        src = module.phase_script()
+        # The fixed sub-category block exists and classifies the busybox rows
+        # with a shell builtin case, not with external text tools.
+        self.assertIn("RESTORED_OPKG_STATUS_EXIT=", src)
+        self.assertIn("RESTORED_OPKG_STATUS_OUT=", src)
+        self.assertIn("RESTORED_OPKG_LIST_EXIT=", src)
+        self.assertIn("RESTORED_OPKG_BUSYBOX_ROWS=", src)
+        classify_tail = src.split("RESTORED_OPKG_STATUS_EXIT=")[1]
+        self.assertIn('case "$_l" in', classify_tail)
+        self.assertNotIn('grep -o', classify_tail)
+        self.assertNotIn('awk', classify_tail)
+        # Read-only: the classification never mutates package state.
+        for forbidden in ('opkg install', 'opkg remove', 'opkg upgrade'):
+            self.assertNotIn(forbidden, classify_tail)
+
     def test_lab_checks_do_not_mark_kas_release_gates_pass(self):
         evidence = Evidence()
         evidence.check('ENTWARE_BUSYBOX_TRANSITION', 'PASS', 'native_command_verified')

@@ -138,6 +138,46 @@ if [ "$rc" -ne 0 ]; then
             fi
         done
     done
+    # Fixed-vocabulary classification of the ACTUAL opkg results behind an
+    # opkg-view UNKNOWN (issue #356): which preflight branch fired. Shell
+    # builtins only; exit codes and fixed category words, never raw output.
+    OPKG_BIN=""
+    if [ -x /opt/bin/opkg ]; then OPKG_BIN=/opt/bin/opkg
+    elif [ -x /opt/sbin/opkg ]; then OPKG_BIN=/opt/sbin/opkg; fi
+    if [ -n "$OPKG_BIN" ]; then
+        set +e
+        "$OPKG_BIN" status busybox > /opt/lab/opkg-status.txt 2>/dev/null
+        _st=$?
+        "$OPKG_BIN" list-installed > /opt/lab/opkg-list.txt 2>/dev/null
+        _li=$?
+        set -e
+        printf 'RESTORED_OPKG_STATUS_EXIT=%s\n' "$_st"
+        if [ "$_st" -eq 0 ]; then
+            if [ -s /opt/lab/opkg-status.txt ]; then
+                printf 'RESTORED_OPKG_STATUS_OUT=nonempty\n'
+            else
+                printf 'RESTORED_OPKG_STATUS_OUT=empty\n'
+            fi
+        else
+            printf 'RESTORED_OPKG_STATUS_OUT=failed\n'
+        fi
+        printf 'RESTORED_OPKG_LIST_EXIT=%s\n' "$_li"
+        _rows=none
+        if [ "$_li" -eq 0 ]; then
+            _rows=none
+            while IFS= read -r _l; do
+                case "$_l" in
+                    "busybox - "?*) if [ "$_rows" = "one" ]; then _rows=many; else _rows=one; fi ;;
+                    "busybox - ") _rows=nover ;;
+                esac
+            done < /opt/lab/opkg-list.txt
+        else
+            _rows=list_failed
+        fi
+        printf 'RESTORED_OPKG_BUSYBOX_ROWS=%s\n' "$_rows"
+    else
+        printf 'RESTORED_OPKG_BIN=missing\n'
+    fi
     exit 70
 fi
 trap - EXIT
@@ -316,6 +356,25 @@ def accept(guest, kas_dir, evidence):
                     literal = "RESTORED_%s_%s=1" % (_severity, _id)
                     if literal in output_lines:
                         tokens += " " + literal
+            # Fixed opkg-view sub-category (issue #356): exact result class of
+            # opkg status / list-installed. Only strict digits or one of the
+            # fixed category words are forwarded; anything else stays redacted.
+            for prefix in ("RESTORED_OPKG_STATUS_EXIT=", "RESTORED_OPKG_LIST_EXIT="):
+                for line in output_lines:
+                    if line.startswith(prefix) and line[len(prefix):].isdigit():
+                        tokens += " " + line
+                        break
+            for literal in ("RESTORED_OPKG_STATUS_OUT=nonempty",
+                            "RESTORED_OPKG_STATUS_OUT=empty",
+                            "RESTORED_OPKG_STATUS_OUT=failed",
+                            "RESTORED_OPKG_BIN=missing",
+                            "RESTORED_OPKG_BUSYBOX_ROWS=none",
+                            "RESTORED_OPKG_BUSYBOX_ROWS=one",
+                            "RESTORED_OPKG_BUSYBOX_ROWS=nover",
+                            "RESTORED_OPKG_BUSYBOX_ROWS=many",
+                            "RESTORED_OPKG_BUSYBOX_ROWS=list_failed"):
+                if literal in output_lines:
+                    tokens += " " + literal
         print("ENTWARE BUSYBOX: FAIL phase=%s class=%s%s (other details redacted)"
               % (phase, type(exc).__name__, tokens), flush=True)
         return False
