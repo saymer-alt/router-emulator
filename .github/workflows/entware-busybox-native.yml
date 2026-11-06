@@ -1,0 +1,26 @@
+name: Entware BusyBox native transition research (non-release)
+
+on:
+  pull_request:
+    paths:
+      - 'lab/busybox_transition.py'
+      - 'lab/ported_e2e.py'
+      - 'lab/gates.py'
+      - 'lab/test_busybox_transition.py'
+      - '.github/workflows/entware-busybox-native.yml'
+      - '.github/workflows/ported-entware-kas.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-busybox:
+    name: Disposable QEMU BusyBox 1.37 to 1.38
+    uses: ./.github/workflows/ported-entware-kas.yml
+    with:
+      emulator_ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      # Fixed known KAS source containing read-only Entware preflight
+      # (keenetic-auto-setup#421, incl. Entware user/auto opkg-view wording).
+      kas_ref: ca63bad7c3971d24fb674e8e44ccc3b4f570b106
+      stage: busybox-transition

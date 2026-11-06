@@ -37,14 +37,15 @@ REASONS.update({'native_services_duplicate', 'native_services_not_ready', 'nativ
     'kas_update_modified_refused', 'kas_update_foreign_cron_reviewed',
     'kas_update_commit_failure_verified', 'kas_update_busy_refused', 'kas_update_inertness_passed',
     'kas_update_exitcodes_passed', 'kas_update_tls_delivery_failed', 'kas_update_fixture_unavailable',
-    'kas_update_precondition_missing'})
+    'kas_update_precondition_missing',
+    'native_sh_disappearance_reproduced'})
 CHECKS = ('KAS_LEGACY_RULES', 'KAS_IDEMPOTENCE', 'KAS_INSTALL_INTERRUPTION', 'KAS_UPDATE', 'KAS_FOREIGN_RESOURCES',
           'KAS_UNINSTALL_SNAPSHOT', 'KAS_TRANSACTION_GATE', 'KAS_WAN_RESTART_GUARD', 'KAS_UNINSTALL_GUARD',
           'KAS_UNINSTALL_PACKAGES_REPEAT', 'KAS_UNINSTALL_PACKAGES_REBOOT',
           'KAS_UPDATE_RELEASE_UPGRADE', 'KAS_UPDATE_NOOP', 'KAS_UPDATE_IDEMPOTENT',
           'KAS_UPDATE_NETFAIL_REFUSAL', 'KAS_UPDATE_MODIFIED_REFUSAL', 'KAS_UPDATE_FOREIGN_CRON_REVIEW',
           'KAS_UPDATE_COMMIT_FAILURE', 'KAS_UPDATE_BUSY_REFUSAL', 'KAS_UPDATE_INERTNESS',
-          'KAS_UPDATE_EXITCODES')
+          'KAS_UPDATE_EXITCODES', 'ENTWARE_BUSYBOX_TRANSITION')
 
 
 class Evidence:

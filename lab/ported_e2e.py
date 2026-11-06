@@ -61,7 +61,7 @@ def run_entware(args, private, credentials, coldboot, evidence):
     write_at(files, CONFIG_OFFSET, config_image(synthetic_config(secret['username'], secret['password'], entware_config())))
     image, mirror = private / 'opt.img', private / 'mirror'
     build(image, mirror, private / 'cache', credentials)
-    if args.stage not in ('entware', 'knvr'):
+    if args.stage not in ('entware', 'knvr', 'busybox-transition'):
         add_packages(mirror, private / 'cache', Path(__file__).with_name('kas-packages.lock.json'))
     if args.stage == 'knvr':
         add_packages(mirror, private / 'cache', Path(__file__).with_name('knvr-packages.lock.json'))
@@ -102,6 +102,10 @@ def run_entware(args, private, credentials, coldboot, evidence):
             if args.stage == 'knvr':
                 from lab.knvr_e2e import lifecycle
                 completed['ok'] = lifecycle(guest, args, evidence, context, private, cameras)
+                return
+            if args.stage == 'busybox-transition':
+                from lab.busybox_transition import accept
+                completed['ok'] = accept(guest, args.kas_dir, evidence)
                 return
             phase['name'] = 'KAS_PREFLIGHT'
             evidence.set('KAS_PREFLIGHT', 'NOT_TESTED', 'unattempted')
@@ -169,7 +173,7 @@ def main():
     parser.add_argument('--nand-dir', required=True)
     parser.add_argument('--private-dir', required=True)
     parser.add_argument('--report-dir', required=True)
-    parser.add_argument('--stage', choices=('entware', 'preflight', 'kas', 'uninstall-packages', 'kas-update', 'knvr'), default='kas')
+    parser.add_argument('--stage', choices=('entware', 'preflight', 'kas', 'uninstall-packages', 'kas-update', 'knvr', 'busybox-transition'), default='kas')
     parser.add_argument('--legacy-ip-global', choices=('true', 'false'), default='false',
                         help='legacy-bridge profile A/B: pre-seed Proxy0 with '
                              "'ip global auto' as the production create does")
@@ -182,7 +186,7 @@ def main():
     parser.add_argument('--kas-dir')
     parser.add_argument('--kas-ref', default='6dd6438e2b64bad0fe9205ab6575795f808dabd8')
     args = parser.parse_args()
-    if args.stage in ('kas', 'uninstall-packages', 'kas-update') and not args.kas_dir:
+    if args.stage in ('kas', 'uninstall-packages', 'kas-update', 'busybox-transition') and not args.kas_dir:
         parser.error('--kas-dir is required for actual KAS execution')
     if args.stage == 'knvr' and not all((args.knvr_dir, args.knvr_ref, args.mediamtx)):
         parser.error('KNVR requires --knvr-dir, --knvr-ref and --mediamtx')
