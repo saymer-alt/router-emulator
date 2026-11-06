@@ -183,6 +183,10 @@ if [ "$rc" -ne 0 ]; then
             case "$_l" in
                 "Status: install ok installed")
                     _want=install; _flag=ok; _state=installed ;;
+                "Status: install user installed")
+                    _want=install; _flag=user; _state=installed ;;
+                "Status: install auto installed")
+                    _want=install; _flag=auto; _state=installed ;;
                 "Status: install hold installed")
                     _want=install; _flag=hold; _state=installed ;;
                 "Status: deinstall ok installed")
@@ -219,7 +223,7 @@ if [ "$rc" -ne 0 ]; then
                     for _w in $_rest; do
                         _n=$((_n+1))
                         case "$_w" in
-                            install|deinstall|hold|ok|installed|unpacked|not-installed|half-configured|config-files|post-inst-failed|reinst-required|unknown) _cls=$_w ;;
+                            install|deinstall|hold|ok|user|auto|installed|unpacked|not-installed|half-configured|config-files|post-inst-failed|reinst-required|unknown) _cls=$_w ;;
                             *) _cls=other ;;
                         esac
                         case $_n in
@@ -443,7 +447,7 @@ def accept(guest, kas_dir, evidence):
                     tokens += " " + literal
             for prefix, allowed_words in (
                     ("RESTORED_OPKG_STATUS_WANT=", ("install", "deinstall", "unknown")),
-                    ("RESTORED_OPKG_STATUS_FLAG=", ("ok", "hold", "unknown")),
+                    ("RESTORED_OPKG_STATUS_FLAG=", ("ok", "user", "auto", "hold", "unknown")),
                     ("RESTORED_OPKG_STATUS_STATE=",
                      ("installed", "half-configured", "unknown"))):
                 for line in output_lines:
@@ -459,10 +463,10 @@ def accept(guest, kas_dir, evidence):
                     if line.startswith(prefix) and line[len(prefix):].isdigit():
                         tokens += " " + line
                         break
-            word_classes = ("install", "deinstall", "hold", "ok", "installed",
-                            "unpacked", "not-installed", "half-configured",
-                            "config-files", "post-inst-failed", "reinst-required",
-                            "unknown", "other", "none")
+            word_classes = ("install", "deinstall", "hold", "ok", "user", "auto",
+                            "installed", "unpacked", "not-installed",
+                            "half-configured", "config-files", "post-inst-failed",
+                            "reinst-required", "unknown", "other", "none")
             for prefix in ("RESTORED_OPKG_STATUS_W1=", "RESTORED_OPKG_STATUS_W2=",
                            "RESTORED_OPKG_STATUS_W3="):
                 for line in output_lines:

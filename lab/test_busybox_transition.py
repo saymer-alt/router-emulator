@@ -223,6 +223,47 @@ class NativeBusyboxTransitionTests(unittest.TestCase):
         for forbidden in ('opkg install', 'opkg remove', 'opkg upgrade'):
             self.assertNotIn(forbidden, classify_tail)
 
+    def test_phase_script_enumerates_entware_user_auto_flag_wording(self):
+        # Run 42094270507 measured the restored Entware record as a 3-word
+        # Status line `install <X> installed` where X is outside the dpkg
+        # vocabulary: Entware's opkg fork reuses the middle slot for the
+        # user/auto install-type marker. The classification must name both.
+        src = module.phase_script()
+        self.assertIn('"Status: install user installed")', src)
+        self.assertIn('"Status: install auto installed")', src)
+        self.assertIn('|user|auto|', src)
+
+    def test_entware_user_auto_flag_classes_are_forwarded(self):
+        guest = mock.Mock()
+        guest.command.side_effect = ['busybox - 1.37.0-6', 'aarch64', '0', 'f' * 64]
+        evidence = Evidence()
+        stream = io.StringIO()
+        with mock.patch.object(module, 'fetch_verified', return_value=b'fixture'), \
+             mock.patch.object(module, 'upload'), \
+             mock.patch.object(module.Path, 'is_file', return_value=True), \
+             mock.patch.object(module.Path, 'read_bytes', return_value=b'preflight'):
+            guest.execute.return_value = (
+                70,
+                'RESTORED_PREFLIGHT_RC=2\n'
+                'RESTORED_OPKG_STATUS_EXIT=0\n'
+                'RESTORED_OPKG_STATUS_OUT=nonempty\n'
+                'RESTORED_OPKG_STATUS_LINE=1\n'
+                'RESTORED_OPKG_STATUS_WORDS=3\n'
+                'RESTORED_OPKG_STATUS_W1=install\n'
+                'RESTORED_OPKG_STATUS_W2=user\n'
+                'RESTORED_OPKG_STATUS_W3=installed\n'
+                'RESTORED_OPKG_STATUS_WANT=install\n'
+                'RESTORED_OPKG_STATUS_FLAG=user\n'
+                'RESTORED_OPKG_STATUS_STATE=installed\n', '')
+            with redirect_stdout(stream):
+                self.assertFalse(module.accept(guest, Path('/nonexistent'), evidence))
+        printed = stream.getvalue()
+        self.assertIn('RESTORED_OPKG_STATUS_W2=user', printed)
+        self.assertIn('RESTORED_OPKG_STATUS_FLAG=user', printed)
+        self.assertIn('RESTORED_OPKG_STATUS_WANT=install', printed)
+        self.assertIn('RESTORED_OPKG_STATUS_STATE=installed', printed)
+        self.assertNotIn('SECRET', printed)
+
     def test_lab_checks_do_not_mark_kas_release_gates_pass(self):
         evidence = Evidence()
         evidence.check('ENTWARE_BUSYBOX_TRANSITION', 'PASS', 'native_command_verified')

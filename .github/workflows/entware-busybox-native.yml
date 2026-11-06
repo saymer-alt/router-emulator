@@ -20,6 +20,7 @@ jobs:
     uses: ./.github/workflows/ported-entware-kas.yml
     with:
       emulator_ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      # Fixed known KAS source containing read-only Entware preflight.
-      kas_ref: efdb859eeb13e5cffbda9fdd0d4d88fcc5cf9875
+      # Fixed known KAS source containing read-only Entware preflight
+      # (keenetic-auto-setup#421, incl. Entware user/auto opkg-view wording).
+      kas_ref: ca63bad7c3971d24fb674e8e44ccc3b4f570b106
       stage: busybox-transition
