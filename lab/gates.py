@@ -37,7 +37,8 @@ REASONS.update({'native_services_duplicate', 'native_services_not_ready', 'nativ
     'kas_update_modified_refused', 'kas_update_foreign_cron_reviewed',
     'kas_update_commit_failure_verified', 'kas_update_busy_refused', 'kas_update_inertness_passed',
     'kas_update_exitcodes_passed', 'kas_update_tls_delivery_failed', 'kas_update_fixture_unavailable',
-    'kas_update_precondition_missing'})
+    'kas_update_precondition_missing',
+    'native_sh_disappearance_reproduced'})
 CHECKS = ('KAS_LEGACY_RULES', 'KAS_IDEMPOTENCE', 'KAS_INSTALL_INTERRUPTION', 'KAS_UPDATE', 'KAS_FOREIGN_RESOURCES',
           'KAS_UNINSTALL_SNAPSHOT', 'KAS_TRANSACTION_GATE', 'KAS_WAN_RESTART_GUARD', 'KAS_UNINSTALL_GUARD',
           'KAS_UNINSTALL_PACKAGES_REPEAT', 'KAS_UNINSTALL_PACKAGES_REBOOT',
