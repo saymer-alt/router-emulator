@@ -131,15 +131,66 @@ def monitor_wait(path, command):
             raise RuntimeError('monitor command rejected')
 
 
-def drain_serial(reader):
-    """Keep socket TX flowing; evidence is stored by QEMU's private logfile."""
+class SerialRxProgress:
+    """Count guest-to-host socket bytes, never store/print serial contents.
+
+    This is diagnostic-only: observing new RX bytes does not prove that the
+    NDM login prompt is ready, and observing none does not locate the stall.
+    """
+
+    def __init__(self):
+        self._guard = threading.Lock()
+        self._received = 0
+        self._state = "NOT_CONNECTED"
+
+    def connected(self):
+        with self._guard:
+            self._state = "OPEN"
+
+    def received(self, count):
+        with self._guard:
+            self._received += count
+
+    def closed(self, status):
+        if status not in ("EOF", "SOCKET_ERROR"):
+            raise ValueError("unrecognized socket state")
+        with self._guard:
+            self._state = status
+
+    def snapshot(self):
+        with self._guard:
+            return self._received, self._state
+
+
+def uart_login_timeout_category(rx_before, rx_after, socket_state, qemu_running):
+    """Render fixed public labels only; no guest log, auth, or input bytes."""
+    if (type(rx_before) is not int or type(rx_after) is not int
+            or rx_before < 0 or rx_after < rx_before
+            or socket_state not in ("OPEN", "EOF", "SOCKET_ERROR", "NOT_CONNECTED")
+            or type(qemu_running) is not bool):
+        return "UART LOGIN DIAG: UNAVAILABLE"
+    activity = "SOME" if rx_after > rx_before else "NONE"
+    process = "RUNNING" if qemu_running else "EXITED"
+    return ("UART LOGIN DIAG: guest_rx_after_enter=%s socket=%s qemu=%s"
+            % (activity, socket_state, process))
+
+
+def drain_serial(reader, progress=None):
+    """Drain guest UART without retaining output; optional thread-safe counters."""
     while True:
         try:
-            if not reader.recv(65536):
+            payload = reader.recv(65536)
+            if not payload:
+                if progress is not None:
+                    progress.closed("EOF")
                 return
+            if progress is not None:
+                progress.received(len(payload))
         except socket.timeout:
             continue
         except OSError:
+            if progress is not None:
+                progress.closed("SOCKET_ERROR")
             return
 
 
@@ -221,6 +272,8 @@ def run(args):
     app_log = out / "emulator.log"
     proc = None
     conn = None
+    serial_progress = SerialRxProgress()
+    login_enter_rx_count = None
     rows = []
     failure = None
     begin = time.monotonic()
@@ -299,7 +352,9 @@ def run(args):
                 conn = socket.socket(socket.AF_UNIX)
                 conn.settimeout(2)
                 conn.connect(str(serial))
-                threading.Thread(target=drain_serial, args=(conn,), daemon=True).start()
+                serial_progress.connected()
+                threading.Thread(target=drain_serial, args=(conn, serial_progress),
+                                 daemon=True).start()
                 return
             except OSError:
                 if conn:
@@ -371,7 +426,17 @@ def run(args):
                 elif action == "send_serial":
                     if conn is None:
                         ensure_serial()
-                    conn.sendall(serial_payload(step, credentials))
+                    payload = serial_payload(step, credentials)
+                    # The next stage is specifically the first NDM login
+                    # prompt; snapshot guest RX *before* sending an empty CR.
+                    # No credential, serial text, or command is logged.
+                    following = (scenario["steps"][index]
+                                 if index < len(scenario["steps"]) else {})
+                    if (payload == b"\r"
+                            and following.get("action") == "wait_serial"
+                            and following.get("pattern") == "Login:"):
+                        login_enter_rx_count = serial_progress.snapshot()[0]
+                    conn.sendall(payload)
                 elif action == "reset":
                     # Mark the log EOF BEFORE reset, so BL2 from first boot
                     # cannot be mistaken for a second boot.
@@ -386,6 +451,16 @@ def run(args):
                 rows.append({"action": action, "outcome": "PASS",
                              "elapsed_seconds": round(time.monotonic() - start, 2)})
             except Exception as error:
+                # A missing Login prompt is NOT proof of an NDM/firmware bug.
+                # Report only socket RX activity since the empty Enter, plus
+                # non-sensitive endpoint/process states. No raw UART/credentials.
+                if (action == "wait_serial" and step.get("pattern") == "Login:"
+                        and isinstance(error, TimeoutError)
+                        and login_enter_rx_count is not None):
+                    current_rx, socket_state = serial_progress.snapshot()
+                    print(uart_login_timeout_category(
+                        login_enter_rx_count, current_rx, socket_state,
+                        proc is not None and proc.poll() is None), flush=True)
                 # Do not echo guest console, commands, URL or firmware content
                 # into the structured report or status line.
                 reason = type(error).__name__ + ": " + (
