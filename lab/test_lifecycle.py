@@ -1,4 +1,5 @@
 import hashlib
+import io
 import json
 from pathlib import Path
 from contextlib import redirect_stdout
