@@ -453,12 +453,21 @@ def idempotence(guest, mirror, revision, evidence, foreign, legacy=None):
 
 
 def reboot(guest, mirror, evidence, context, foreign):
+    # Fixed, sanitized phase markers only for the foreign-resource scenario.
+    # These distinguish pre-reset and post-reset contract failures in public
+    # native E2E logs without leaking guest output or weakening any check.
+    if foreign is not None:
+        print('FOREIGN_REBOOT_PRE_CONTRACT', flush=True)
     before = contract(guest, mirror, foreign)
     guest.command('/bin/ndmc -c "system configuration save"; sync')
     guest.close()
     send_monitor(context['monitor'], 'system_reset')
+    if foreign is not None:
+        print('FOREIGN_REBOOT_RESET_SENT', flush=True)
     time.sleep(5)
     guest.connect(300)
+    if foreign is not None:
+        print('FOREIGN_REBOOT_POST_CONTRACT', flush=True)
     after = contract(guest, mirror, foreign)
     if before != after:
         evidence.set('KAS_REBOOT', 'FAIL', 'native_reboot_failed')
