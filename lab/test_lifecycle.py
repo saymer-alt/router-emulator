@@ -1,6 +1,8 @@
 import hashlib
 import json
 from pathlib import Path
+from contextlib import redirect_stdout
+from unittest import mock
 import tempfile
 import unittest
 import xml.etree.ElementTree as ET
@@ -347,3 +349,94 @@ class UninstallPhaseTests(unittest.TestCase):
                         self.assertFalse(any('uninstall-snapshot' in command
                                              for command in guest.commands + guest.executes))
 
+
+
+
+class RebootPhaseMarkerTests(unittest.TestCase):
+    """Safe phase classification in foreign-profile; never change reboot contract."""
+
+    def _run(self, foreign, contracts):
+        from lab import kas_lifecycle as lifecycle
+
+        guest = mock.Mock()
+        evidence = mock.Mock()
+        output = io.StringIO()
+        with mock.patch.object(lifecycle, 'contract', side_effect=contracts) as contract, \
+             mock.patch.object(lifecycle, 'send_monitor') as send_monitor, \
+             mock.patch.object(lifecycle.time, 'sleep') as sleep, \
+             redirect_stdout(output):
+            result = lifecycle.reboot(guest, None, evidence,
+                                      {'monitor': 'test-monitor'}, foreign)
+        return result, output.getvalue(), contract, send_monitor, guest, evidence, sleep
+
+    def test_foreign_success_has_three_ordered_public_markers(self):
+        result, out, contract, send, guest, evidence, sleep = self._run(
+            {'proxy': 'PRIVATE-CONTENT'}, [{'safe': True}, {'safe': True}])
+        self.assertTrue(result)
+        expected = ('FOREIGN_REBOOT_PRE_CONTRACT',
+                    'FOREIGN_REBOOT_RESET_SENT',
+                    'FOREIGN_REBOOT_POST_CONTRACT')
+        for marker in expected:
+            self.assertEqual(out.count(marker), 1)
+        self.assertLess(out.index(expected[0]), out.index(expected[1]))
+        self.assertLess(out.index(expected[1]), out.index(expected[2]))
+        self.assertNotIn('PRIVATE-CONTENT', out)
+        self.assertEqual(contract.call_count, 2)
+        send.assert_called_once_with('test-monitor', 'system_reset')
+        guest.connect.assert_called_once_with(300)
+        sleep.assert_called_once_with(5)
+        evidence.set.assert_called_once_with('KAS_REBOOT', 'PASS',
+                                             'services_restored_after_reboot')
+
+    def test_regular_reboot_has_no_foreign_markers(self):
+        result, out, _, _, _, evidence, _ = self._run(
+            None, [{'safe': True}, {'safe': True}])
+        self.assertTrue(result)
+        self.assertNotIn('FOREIGN_REBOOT_', out)
+        evidence.set.assert_called_once_with('KAS_REBOOT', 'PASS',
+                                             'services_restored_after_reboot')
+
+    def test_pre_reset_contract_failure_only_pre_marker(self):
+        from lab import kas_lifecycle as lifecycle
+        guest = mock.Mock()
+        evidence = mock.Mock()
+        out = io.StringIO()
+        with mock.patch.object(lifecycle, 'contract',
+                               side_effect=RuntimeError('PRIVATE-GUEST-DETAIL')), \
+             mock.patch.object(lifecycle, 'send_monitor') as monitor, \
+             redirect_stdout(out):
+            with self.assertRaisesRegex(RuntimeError, 'PRIVATE-GUEST-DETAIL'):
+                lifecycle.reboot(guest, None, evidence,
+                                 {'monitor': 'monitor'}, {'cron': 'PRIVATE'})
+        self.assertIn('FOREIGN_REBOOT_PRE_CONTRACT', out.getvalue())
+        self.assertNotIn('FOREIGN_REBOOT_RESET_SENT', out.getvalue())
+        self.assertNotIn('FOREIGN_REBOOT_POST_CONTRACT', out.getvalue())
+        self.assertNotIn('PRIVATE', out.getvalue())
+        monitor.assert_not_called()
+        guest.close.assert_not_called()
+
+    def test_post_reset_contract_failure_includes_post_marker(self):
+        from lab import kas_lifecycle as lifecycle
+        guest = mock.Mock()
+        evidence = mock.Mock()
+        out = io.StringIO()
+        with mock.patch.object(lifecycle, 'contract', side_effect=[
+                {'ok': True}, RuntimeError('PRIVATE-POST-DETAIL')]), \
+             mock.patch.object(lifecycle, 'send_monitor') as monitor, \
+             mock.patch.object(lifecycle.time, 'sleep'), \
+             redirect_stdout(out):
+            with self.assertRaisesRegex(RuntimeError, 'PRIVATE-POST-DETAIL'):
+                lifecycle.reboot(guest, None, evidence,
+                                 {'monitor': 'monitor'}, {'cron': 'PRIVATE'})
+        self.assertEqual(out.getvalue().count('FOREIGN_REBOOT_'), 3)
+        self.assertNotIn('PRIVATE', out.getvalue())
+        monitor.assert_called_once_with('monitor', 'system_reset')
+        guest.connect.assert_called_once_with(300)
+
+    def test_unequal_contract_still_fails_without_changing_acceptance(self):
+        result, out, _, _, _, evidence, _ = self._run(
+            {'cron': 'PRIVATE'}, [{'ok': True}, {'ok': False}])
+        self.assertFalse(result)
+        self.assertEqual(out.count('FOREIGN_REBOOT_'), 3)
+        evidence.set.assert_called_once_with('KAS_REBOOT', 'FAIL',
+                                             'native_reboot_failed')
