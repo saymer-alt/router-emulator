@@ -2,7 +2,9 @@
 """Local stdlib tests: no QEMU, firmware, network or GitHub credentials."""
 import json
 from pathlib import Path
+import socket
 import tempfile
+import threading
 import unittest
 from unittest.mock import patch
 import urllib.error
@@ -24,6 +26,65 @@ class LabRunnerTests(unittest.TestCase):
                          {"action": "send_serial", "credential": "host_token"}):
                 with self.assertRaises(ValueError):
                     runner.load_scenario(self.scenario(Path(td), step))
+
+    def test_empty_enter_for_login_is_single_cr(self):
+        self.assertEqual(runner.serial_payload({"text": ""}), b"\r")
+
+    def test_uart_login_diagnostic_no_guest_output(self):
+        line = runner.uart_login_timeout_category(120, 120, "OPEN", True)
+        self.assertEqual(
+            line, "UART LOGIN DIAG: guest_rx_after_enter=NONE socket=OPEN qemu=RUNNING")
+
+    def test_uart_login_diagnostic_activity_without_prompt(self):
+        line = runner.uart_login_timeout_category(120, 400, "OPEN", True)
+        self.assertEqual(
+            line, "UART LOGIN DIAG: guest_rx_after_enter=SOME socket=OPEN qemu=RUNNING")
+
+    def test_uart_login_diagnostic_socket_disconnect(self):
+        line = runner.uart_login_timeout_category(17, 17, "EOF", True)
+        self.assertEqual(
+            line, "UART LOGIN DIAG: guest_rx_after_enter=NONE socket=EOF qemu=RUNNING")
+
+    def test_uart_login_diagnostic_qemu_exit(self):
+        self.assertEqual(
+            runner.uart_login_timeout_category(0, 0, "SOCKET_ERROR", False),
+            "UART LOGIN DIAG: guest_rx_after_enter=NONE socket=SOCKET_ERROR qemu=EXITED")
+
+    def test_uart_login_diagnostic_invalid_snapshot_fails_closed(self):
+        for args in ((0, -1, "OPEN", True), (1, 0, "OPEN", True),
+                     (0, 1, "unexpected", True), (True, 4, "OPEN", True),
+                     (0, 4, "OPEN", "true")):
+            with self.subTest(args=args):
+                self.assertEqual(
+                    runner.uart_login_timeout_category(*args),
+                    "UART LOGIN DIAG: UNAVAILABLE")
+
+    def test_serial_drain_counts_bytes_without_retaining_guest_content(self):
+        client, server = socket.socketpair()
+        client.settimeout(0.1)
+        telemetry = runner.SerialRxProgress()
+        telemetry.connected()
+        thread = threading.Thread(target=runner.drain_serial, args=(client, telemetry))
+        thread.start()
+        try:
+            private_bytes = b"password=private-should-never-be-printed"
+            server.sendall(private_bytes)
+            server.shutdown(socket.SHUT_WR)
+            thread.join(timeout=2)
+            self.assertFalse(thread.is_alive())
+            received, state = telemetry.snapshot()
+            self.assertEqual(received, len(private_bytes))
+            self.assertEqual(state, "EOF")
+            public = runner.uart_login_timeout_category(
+                0, received, state, True)
+            self.assertNotIn("private", public)
+            self.assertNotIn("password", public)
+            self.assertNotIn("should", public)
+        finally:
+            server.close()
+            client.close()
+            if thread.is_alive():
+                thread.join(timeout=2)
 
     def test_serial_menu_key_does_not_submit_default(self):
         self.assertEqual(runner.serial_payload({"text": "0", "enter": False}), b"0")
