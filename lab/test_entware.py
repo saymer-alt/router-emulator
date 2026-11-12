@@ -15,7 +15,13 @@ class EntwareTests(unittest.TestCase):
             source, target = pathlib.Path(td) / 'source.tar.gz', pathlib.Path(td) / 'target.tar.gz'
             members = {'etc/dropbear/dropbear_rsa_host_key': b'public-reused-private-key',
                        'etc/opkg.conf': b'upstream-feed',
-                       'bin/install': b'opkg install dropbear\n/opt/etc/init.d/S51dropbear start\nif grep -q "222"; then\necho default-secret\nfi\n'}
+                       # Mirror the real pinned installer tail: the saving RCI
+                       # POST, the dropbear-port hint block and the completion
+                       # marker must all be present for the lab reorder patch.
+                       'bin/install': b'opkg install dropbear\n/opt/etc/init.d/S51dropbear start\n'
+                                      b"wget -qO - --post-data='[{\"system\":{\"configuration\":{\"save\":true}}}]' localhost:79/rci/ >/dev/null 2>&1\n"
+                                      b'if grep -q "222"; then\necho default-secret\nfi\n'
+                                      b"echo '[5/5] \"Entware\" installed!'\nrm /opt/etc/init.d/doinstall\nrm \"$0\"\n"}
             with tarfile.open(source, 'w:gz') as archive:
                 for name, data in members.items():
                     item = tarfile.TarInfo(name)
@@ -122,3 +128,45 @@ class EntwareTests(unittest.TestCase):
             self._fetch_from_script([(200, b'tampered')])
         self.assertIn('download digest mismatch', str(raised.exception))
         self.assertIn('/payload.bin', str(raised.exception))
+
+    def test_completion_markers_precede_the_saving_rci_post(self):
+        """The 2026-11-09 installer's final RCI POST carries
+        system.configuration.save=true; ndm's doinstaller console bridge stops
+        relaying stdout while that save runs, so post-POST echoes never reach
+        the UART even though the script completes (local reproduction
+        2026-11-12 and run 43283357131: opkg database populated, both rm's
+        executed, no [5/5] on console, 600s gate wait timed out). The lab must
+        print the completion markers and drop the auto-install hook before the
+        POST, keep the POST itself verbatim, and keep self-deletion last."""
+        with tempfile.TemporaryDirectory() as td:
+            source, target = pathlib.Path(td) / 'source.tar.gz', pathlib.Path(td) / 'target.tar.gz'
+            install = (b'#!/bin/sh\n'
+                       b'/opt/etc/init.d/S51dropbear start\n'
+                       b'\n'
+                       b"wget -qO - --post-data='[{\"opkg\":{\"initrc\":{\"path\":\"/opt/etc/init.d/rc.unslung\"}},{\"system\":{\"configuration\":{\"save\":true}}}]' localhost:79/rci/ >/dev/null 2>&1\n"
+                       b'\n'
+                       b'if grep -q "222" /opt/etc/config/dropbear.conf; then\n'
+                       b"\techo 'Log on to start an SSH session using login - root, password - keenetic, port - 222.'\n"
+                       b'  else\n'
+                       b"\techo 'Log on to start an SSH session using login - root, password - keenetic.'\n"
+                       b'fi\n'
+                       b'\n'
+                       b"echo '[5/5] \"Entware\" installed!'\n"
+                       b'\n'
+                       b'rm /opt/etc/init.d/doinstall\n'
+                       b'\n'
+                       b'rm "$0"\n')
+            with tarfile.open(source, 'w:gz') as archive:
+                item = tarfile.TarInfo('bin/install')
+                item.size = len(install)
+                archive.addfile(item, io.BytesIO(install))
+            with patch.object(entware.subprocess, 'run', return_value=SimpleNamespace(stdout=b'$6$synthetic-hash\n')):
+                entware.bootstrap_archive(source, target, 'PrivateSyntheticToken0123456789')
+            with tarfile.open(target) as archive:
+                script = archive.extractfile('bin/install').read()
+            post = script.index(b'wget -qO - --post-data=')
+            self.assertLess(script.index(b"echo '[5/5]"), post)
+            self.assertLess(script.index(b'rm /opt/etc/init.d/doinstall'), post)
+            self.assertIn(b"save\":true}}}]' localhost:79/rci/ >/dev/null 2>&1", script)
+            self.assertGreater(script.index(b'rm "$0"'), post)
+            self.assertNotIn(b'if grep -q "222"', script)
