@@ -19,6 +19,7 @@ import time
 import urllib.request
 
 LOCK = Path(__file__).with_name("entware.lock.json")
+TRUSTED_ORIGIN = "https://bin.entware.net/aarch64-k3.10/"
 MIRROR = "http://192.168.1.100"
 FS_OFFSET = 1024 * 1024
 FS_SIZE = 256 * 1024 * 1024
@@ -27,23 +28,33 @@ FS_UUID = "11111111-2222-4333-8444-555555555555"  # synthetic, never a real driv
 
 def fetch(url, digest, destination):
     destination = Path(destination)
-    if not url.startswith("https://bin.entware.net/aarch64-k3.10/"):
+    if not url.startswith(TRUSTED_ORIGIN):
         raise ValueError("unexpected bootstrap origin")
     if not destination.exists():
         # bin.entware.net intermittently answers 503 to runner IPs; three
-        # bounded attempts for 502/503/504 only. Every downloaded byte is
-        # still pinned by the digest check below.
+        # bounded attempts for 502/503/504 only. Mid-wave feed rotation also
+        # briefly answers 404 for files that verify live minutes before and
+        # after the failure (run 43250106154): at most two bounded 404
+        # retries. Failures name the URL; every downloaded byte is still
+        # pinned by the digest check below.
+        missing = 0
         for attempt in (1, 2, 3, 4, 5):
             try:
                 with urllib.request.urlopen(url, timeout=90) as response:
                     data = response.read()
                 break
             except urllib.error.HTTPError as error:
-                if attempt == 5 or error.code not in (502, 503, 504):
-                    raise
+                if error.code == 404:
+                    missing += 1
+                    if missing > 2:
+                        raise ValueError(f"trusted origin answered 404 after two retries: {url}") from error
+                elif attempt == 5 or error.code not in (502, 503, 504):
+                    raise ValueError(f"trusted origin fetch failed: HTTP {error.code}: {url}") from error
                 time.sleep(min(15, 3 * attempt))
+        else:
+            raise ValueError(f"trusted origin fetch failed after bounded attempts: {url}")
         if hashlib.sha256(data).hexdigest() != digest:
-            raise ValueError("download digest mismatch")
+            raise ValueError(f"download digest mismatch: {url}")
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(data)
     if destination.is_symlink() or hashlib.sha256(destination.read_bytes()).hexdigest() != digest:
