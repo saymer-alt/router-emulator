@@ -170,3 +170,6 @@ class EntwareTests(unittest.TestCase):
             self.assertIn(b"save\":true}}}]' localhost:79/rci/ >/dev/null 2>&1", script)
             self.assertGreater(script.index(b'rm "$0"'), post)
             self.assertNotIn(b'if grep -q "222"', script)
+            # The relay bridge swallows stdout in the tail section, so the
+            # gate marker must also land on the console device itself.
+            self.assertIn(b"echo '[5/5] \"Entware\" installed!' > /dev/console", script)
