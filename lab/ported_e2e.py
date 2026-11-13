@@ -103,6 +103,11 @@ def run_entware(args, private, credentials, coldboot, evidence):
                 from lab.knvr_e2e import lifecycle
                 completed['ok'] = lifecycle(guest, args, evidence, context, private, cameras)
                 return
+            if args.stage == 'telemt-ipk':
+                from lab.telemt_ipk_e2e import lifecycle
+                completed['ok'] = lifecycle(
+                    guest, evidence, Path(args.telemt_dir), Path(args.telemt_ipk_dir))
+                return
             phase['name'] = 'KAS_PREFLIGHT'
             evidence.set('KAS_PREFLIGHT', 'NOT_TESTED', 'unattempted')
             guest.command('opkg update && opkg install ca-bundle curl jq iptables ip-full nano cron socat', timeout=240)
@@ -231,7 +236,7 @@ def main():
     parser.add_argument('--nand-dir', required=True)
     parser.add_argument('--private-dir', required=True)
     parser.add_argument('--report-dir', required=True)
-    parser.add_argument('--stage', choices=('entware', 'preflight', 'kas', 'uninstall-packages', 'kas-update', 'knvr', 'web', 'web-filter'), default='kas')
+    parser.add_argument('--stage', choices=('entware', 'preflight', 'kas', 'uninstall-packages', 'kas-update', 'knvr', 'web', 'web-filter', 'telemt-ipk'), default='kas')
     parser.add_argument('--legacy-ip-global', choices=('true', 'false'), default='false',
                         help='legacy-bridge profile A/B: pre-seed Proxy0 with '
                              "'ip global auto' as the production create does")
@@ -242,6 +247,8 @@ def main():
     parser.add_argument('--knvr-dir')
     parser.add_argument('--knvr-ref')
     parser.add_argument('--mediamtx')
+    parser.add_argument('--telemt-dir', help='Pinned entware-go telemt/ source scripts')
+    parser.add_argument('--telemt-ipk-dir', help='Private SHA256-pinned IPK inputs')
     parser.add_argument('--kas-dir')
     parser.add_argument('--kas-ref', default='6dd6438e2b64bad0fe9205ab6575795f808dabd8')
     args = parser.parse_args()
@@ -251,6 +258,8 @@ def main():
         parser.error('Web stages require --web-bin for the pinned ARM64 binary')
     if args.stage == 'knvr' and not all((args.knvr_dir, args.knvr_ref, args.mediamtx)):
         parser.error('KNVR requires --knvr-dir, --knvr-ref and --mediamtx')
+    if args.stage == 'telemt-ipk' and not (args.telemt_dir and args.telemt_ipk_dir):
+        parser.error('telemt-ipk stage requires --telemt-dir and --telemt-ipk-dir')
     private = Path(args.private_dir).resolve()
     if private.exists():
         parser.error('private workspace must be new')
