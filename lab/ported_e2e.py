@@ -225,7 +225,17 @@ def run_entware(args, private, credentials, coldboot, evidence):
         evidence.set('ENTWARE_READY', 'FAIL', 'entware_install_failed')
         return 1
     if result != 0:
-        phase_failure(evidence, phase['name'])
+        if args.stage == 'telemt-ipk':
+            # The native IPK suite owns its own phase/check outcome. Do not
+            # convert NOT_TESTED panel buttons / service health into FAIL,
+            # and never report unattempted later scenarios as executed.
+            if not any(evidence.checks.get(name, {}).get('status') == 'FAIL'
+                       for name in ('TELEMT_IPK_INSTALL', 'TELEMT_IPK_REFUSALS',
+                                    'TELEMT_IPK_STAGE', 'TELEMT_IPK_UPGRADE',
+                                    'TELEMT_IPK_RESTORE', 'TELEMT_IPK_REMOVE_REINSTALL')):
+                evidence.check('TELEMT_IPK_INSTALL', 'BLOCKED', 'runner_failure')
+        else:
+            phase_failure(evidence, phase['name'])
         return 1
     return 0 if completed['ok'] else 1
 
