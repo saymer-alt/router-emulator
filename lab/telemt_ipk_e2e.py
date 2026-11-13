@@ -349,6 +349,9 @@ def lifecycle(guest, evidence, source: Path, ipk_dir: Path) -> bool:
 
         phase = 'REMOVE_REINSTALL'
         print('TELEMT_IPK_E2E: PHASE=' + phase, flush=True)
+        # Switch fixture catalog BACK to original published versions. Otherwise
+        # reinstall after remove would accidentally install synthetic rc.4/3.5.18.
+        upload(guest, release_json(current), MANIFEST)
         # Removal must not delete user-created config or panel state.
         for fam, (pkg, oldver, _, oldname, _, _, binary) in PKGS.items():
             cmd(guest, 'opkg remove ' + pkg, timeout=120)
