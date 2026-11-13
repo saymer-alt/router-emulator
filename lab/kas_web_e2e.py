@@ -97,6 +97,26 @@ def managed_service_port(guest):
     return port
 
 
+def check_managed_loopback(guest, port):
+    """Router-local reverse proxy may reach wildcard LAN listener over loopback.
+
+    Assert the HTTP outcome (not merely curl exit=0) and reject invalid Host.
+    This is not a substitute for the router-owned WAN/firewall acceptance.
+    """
+    check(type(port) is int and 18080 <= port <= 18090,
+          'web_unexpected_service_port')
+    ready = guest.command(
+        "curl -sS --noproxy '*' --connect-timeout 2 --max-time 5"
+        " -o /dev/null -w '%{http_code}' "
+        "http://127.0.0.1:" + str(port) + "/api/status", timeout=10)
+    check(ready == '200', 'web_local_proxy_not_ready')
+    malformed_host = guest.command(
+        "curl -sS --noproxy '*' --connect-timeout 2 --max-time 5"
+        " -H 'Host: invalid-host' -o /dev/null -w '%{http_code}' "
+        "http://127.0.0.1:" + str(port) + "/api/status", timeout=10)
+    check(malformed_host == '403', 'web_invalid_host_accepted')
+
+
 def test_opt_in_service(guest, mirror, evidence, reboot=None):
     """Native guest installation/stop/remove of ONLY the dedicated Web files."""
     key = 'web/control-center/kas-web-manage.sh'
@@ -182,19 +202,7 @@ def test_opt_in_service(guest, mirror, evidence, reboot=None):
             # retain a negative Host guard; old 'connection must fail'
             # asserted an obsolete bind policy and used curl without -f.
             phase = 'LOOPBACK_ROUTER_PROXY'
-            proxy_ready = guest.command(
-                "curl -sS --noproxy '*' --connect-timeout 2 --max-time 5"
-                " -o /dev/null -w '%{http_code}' "
-                "http://127.0.0.1:" + str(managed_port) + "/api/status",
-                timeout=10)
-            check(proxy_ready == '200', 'web_local_proxy_not_ready')
-            phase = 'LOOPBACK_HOST_GUARD'
-            malformed_host = guest.command(
-                "curl -sS --noproxy '*' --connect-timeout 2 --max-time 5"
-                " -H 'Host: invalid-host' -o /dev/null -w '%{http_code}' "
-                "http://127.0.0.1:" + str(managed_port) + "/api/status",
-                timeout=10)
-            check(malformed_host == '403', 'web_invalid_host_accepted')
+            check_managed_loopback(guest, managed_port)
         else:
             guest.command("curl -fSs --noproxy '*' --max-time 5 "
                           "http://127.0.0.1:18081/api/status >/dev/null")
