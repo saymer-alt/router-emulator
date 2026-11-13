@@ -24,7 +24,10 @@ REASONS = {'unattempted', 'prerequisite_blocked', 'boot_stages_observed',
            'native_remove_not_implemented', 'snapshot_gate_blocked', 'native_reboot_failed',
            'native_rollback_failed', 'native_update_failed', 'idempotence_failed', 'rollback_not_exercised',
            'uninstall_not_delivered', 'uninstall_candidate_unreviewed',
-           'uninstall_packages_passed', 'uninstall_packages_failed', 'watchdog_lock_blocked'}
+           'uninstall_packages_passed', 'uninstall_packages_failed', 'watchdog_lock_blocked',
+           'native_web_import_passed', 'native_web_import_failed',
+           'native_web_lifecycle_passed', 'native_web_lifecycle_failed',
+           'native_filter_apply_passed', 'native_filter_apply_failed'}
 REASONS.update({'native_services_duplicate', 'native_services_not_ready', 'native_ownership_invalid',
     'native_proxy_invalid', 'native_policy_invalid', 'native_dns_invalid', 'native_rules_not_ready',
     'native_file_digest_invalid', 'foreign_proxy_changed', 'foreign_cron_changed',
@@ -44,7 +47,8 @@ CHECKS = ('KAS_LEGACY_RULES', 'KAS_IDEMPOTENCE', 'KAS_INSTALL_INTERRUPTION', 'KA
           'KAS_UPDATE_RELEASE_UPGRADE', 'KAS_UPDATE_NOOP', 'KAS_UPDATE_IDEMPOTENT',
           'KAS_UPDATE_NETFAIL_REFUSAL', 'KAS_UPDATE_MODIFIED_REFUSAL', 'KAS_UPDATE_FOREIGN_CRON_REVIEW',
           'KAS_UPDATE_COMMIT_FAILURE', 'KAS_UPDATE_BUSY_REFUSAL', 'KAS_UPDATE_INERTNESS',
-          'KAS_UPDATE_EXITCODES')
+          'KAS_UPDATE_EXITCODES', 'KAS_WEB_IMPORT', 'KAS_WEB_LIFECYCLE',
+          'KAS_FILTER_APPLY')
 
 
 class Evidence:
