@@ -21,6 +21,10 @@ on:
         type: boolean
         required: false
         default: false
+      telemt_ref:
+        type: string
+        required: false
+        default: 0fd4c129a5d1fcb515fb8aa94b8d81da938641b1
   workflow_dispatch:
     inputs:
       emulator_ref:
@@ -32,7 +36,7 @@ on:
         required: false
         type: string
       stage:
-        description: 'Laboratory stage: kas, uninstall-packages, kas-update, web, web-filter'
+        description: 'Lab stage: kas, uninstall-packages, kas-update, web, web-filter, telemt-ipk'
         required: false
         default: kas
         type: string
@@ -40,6 +44,11 @@ on:
         description: 'kas profile: baseline (full lifecycle) or legacy-bridge (issue #50 fresh Entware + surviving legacy-compatible Proxy0)'
         required: false
         default: baseline
+        type: string
+      telemt_ref:
+        description: 'Exact 40-hex entware-go commit for TeleMT package manager (required by telemt-ipk stage)'
+        required: false
+        default: '0fd4c129a5d1fcb515fb8aa94b8d81da938641b1'
         type: string
       legacy_ip_global:
         description: 'legacy-bridge A/B: pre-seed Proxy0 with ip global auto as production create does'
@@ -77,12 +86,43 @@ jobs:
           [[ "$EMULATOR_REF" =~ ^[a-f0-9]{40}$ ]]
           [[ "$KAS_REF" =~ ^[a-f0-9]{40}$ ]]
       - name: Pinned KAS source as guest input
+        if: ${{ inputs.stage != 'telemt-ipk' }}
         uses: actions/checkout@v4
         with:
           repository: saymer-alt/keenetic-auto-setup
           ref: ${{ inputs.kas_ref || '6dd6438e2b64bad0fe9205ab6575795f808dabd8' }}
           path: kas-source
           persist-credentials: false
+      - name: Pinned Entware TeleMT script source (QEMU only)
+        if: ${{ inputs.stage == 'telemt-ipk' }}
+        uses: actions/checkout@v4
+        with:
+          repository: saymer-alt/entware-go
+          ref: ${{ inputs.telemt_ref || '0fd4c129a5d1fcb515fb8aa94b8d81da938641b1' }}
+          path: telemt-source
+          persist-credentials: false
+      - name: Verify pinned input and download current published TeleMT IPKs
+        if: ${{ inputs.stage == 'telemt-ipk' }}
+        shell: bash
+        env:
+          TELEMT_REF: ${{ inputs.telemt_ref || '0fd4c129a5d1fcb515fb8aa94b8d81da938641b1' }}
+        run: |
+          set -euo pipefail
+          [[ "$TELEMT_REF" =~ ^[a-f0-9]{40}$ ]]
+          test "$(git -C telemt-source rev-parse HEAD)" = "$TELEMT_REF"
+          mkdir -p "$RUNNER_TEMP/telemt-ipks"
+          base=https://github.com/saymer-alt/entware-go/releases/download/latest
+          curl --fail --location --retry 2 --connect-timeout 15 --max-time 180 \
+            "$base/telemt_3.5.17-1_aarch64-3.10.ipk" \
+            -o "$RUNNER_TEMP/telemt-ipks/telemt_3.5.17-1_aarch64-3.10.ipk"
+          curl --fail --location --retry 2 --connect-timeout 15 --max-time 180 \
+            "$base/telemt-panel-lite_1.0.0.rc.3-1_aarch64-3.10.ipk" \
+            -o "$RUNNER_TEMP/telemt-ipks/telemt-panel-lite_1.0.0.rc.3-1_aarch64-3.10.ipk"
+          printf '%s\n' \
+            'ccab455710761f236f5da6f2f2a852de575e5db164f59b8157c30e270110e509  telemt_3.5.17-1_aarch64-3.10.ipk' \
+            'e649a14fe0bfb670d620116fa4d503a96285a085f89fa328e4612ccedbb4fdaa  telemt-panel-lite_1.0.0.rc.3-1_aarch64-3.10.ipk' |
+            (cd "$RUNNER_TEMP/telemt-ipks" && sha256sum --check --status)
+          echo 'TELEMT_IPK_INPUTS: verified immutable SHA256 pins'
       - name: Setup Go for optional Web ARM64 guest stage
         if: ${{ inputs.stage == 'web' || inputs.stage == 'web-filter' }}
         uses: actions/setup-go@v5
@@ -155,6 +195,8 @@ jobs:
             --profile "${{ inputs.profile || 'baseline' }}" \
             --legacy-ip-global "${{ inputs.legacy_ip_global || 'false' }}" \
             --kas-dir "$GITHUB_WORKSPACE/kas-source" \
+            --telemt-dir "$GITHUB_WORKSPACE/telemt-source/telemt" \
+            --telemt-ipk-dir "$RUNNER_TEMP/telemt-ipks" \
             --web-bin "$GITHUB_WORKSPACE/kas-source/web/control-center/kas-control-center-arm64" \
             --kas-ref "${{ inputs.kas_ref || '6dd6438e2b64bad0fe9205ab6575795f808dabd8' }}"
       - name: Public fixed-label summary
@@ -190,4 +232,4 @@ jobs:
       - name: Destroy private firmware, USB, credentials and UART
         if: always()
         run: |
-          rm -rf "$RUNNER_TEMP/ported-assets" "$RUNNER_TEMP/ported-nand" "$RUNNER_TEMP/ported-private" "$RUNNER_TEMP/ported-openwrt-private"
+          rm -rf "$RUNNER_TEMP/ported-assets" "$RUNNER_TEMP/ported-nand" "$RUNNER_TEMP/ported-private" "$RUNNER_TEMP/ported-openwrt-private" "$RUNNER_TEMP/telemt-ipks"
