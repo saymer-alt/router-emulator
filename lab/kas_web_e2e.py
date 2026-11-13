@@ -176,11 +176,25 @@ def test_opt_in_service(guest, mirror, evidence, reboot=None):
             phase = 'HOME_HTTP'
             guest.command("curl -fSs --noproxy '*' --max-time 5 "
                           "http://" + str(home_ip) + ":" + str(managed_port) + "/api/status >/dev/null")
-            phase = 'LOOPBACK_NOT_EXPOSED'
-            deny, _, _ = guest.execute(
-                "curl -sS --noproxy '*' --connect-timeout 2 --max-time 5 "
-                "http://127.0.0.1:" + str(managed_port) + "/api/status >/dev/null", timeout=10)
-            check(deny != 0, 'web_home_listener_exposed_on_loopback')
+            # LAN mode deliberately binds all router IPv4 addresses to
+            # support the router-owned KeenDNS reverse proxy over loopback.
+            # This is not a WAN firewall test. Verify the local route AND
+            # retain a negative Host guard; old 'connection must fail'
+            # asserted an obsolete bind policy and used curl without -f.
+            phase = 'LOOPBACK_ROUTER_PROXY'
+            proxy_ready = guest.command(
+                "curl -sS --noproxy '*' --connect-timeout 2 --max-time 5"
+                " -o /dev/null -w '%{http_code}' "
+                "http://127.0.0.1:" + str(managed_port) + "/api/status",
+                timeout=10)
+            check(proxy_ready == '200', 'web_local_proxy_not_ready')
+            phase = 'LOOPBACK_HOST_GUARD'
+            malformed_host = guest.command(
+                "curl -sS --noproxy '*' --connect-timeout 2 --max-time 5"
+                " -H 'Host: invalid-host' -o /dev/null -w '%{http_code}' "
+                "http://127.0.0.1:" + str(managed_port) + "/api/status",
+                timeout=10)
+            check(malformed_host == '403', 'web_invalid_host_accepted')
         else:
             guest.command("curl -fSs --noproxy '*' --max-time 5 "
                           "http://127.0.0.1:18081/api/status >/dev/null")
