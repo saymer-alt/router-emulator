@@ -36,6 +36,22 @@ class WebImporterContractTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 kas_web_e2e.managed_service_port(guest)
 
+    def test_managed_loopback_proxy_and_host_guard(self):
+        guest = Mock()
+        guest.command.side_effect = ['200', '403']
+        kas_web_e2e.check_managed_loopback(guest, 18080)
+        self.assertEqual(guest.command.call_count, 2)
+        first, second = [call.args[0] for call in guest.command.call_args_list]
+        self.assertIn('127.0.0.1:18080/api/status', first)
+        self.assertIn("Host: invalid-host", second)
+        for responses in (['403'], ['200', '200'], ['200', '401']):
+            guest = Mock()
+            guest.command.side_effect = responses
+            with self.assertRaises(RuntimeError):
+                kas_web_e2e.check_managed_loopback(guest, 18080)
+        with self.assertRaises(RuntimeError):
+            kas_web_e2e.check_managed_loopback(Mock(), 18091)
+
     def test_opt_in_native_lifecycle_is_not_run_without_managed_script(self):
         evidence = Evidence()
         mirror = Mock()
