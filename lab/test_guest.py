@@ -10,12 +10,20 @@ import pathlib
 import re
 import unittest
 
-from lab.guest import Guest
+try:
+    from lab.guest import Guest
+except ModuleNotFoundError as error:
+    if error.name != 'paramiko':
+        raise
+    # This minimal QEMU contract runner intentionally has no SSH dependency;
+    # full Ported Native E2E installs paramiko and exercises this test.
+    Guest = None
 
 MARKER_PATH = 'cat /opt/.lab-persistence'
 MARKER_WRITE = re.compile(r"printf '%s' '([0-9a-f]{32})' > /opt/\.lab-persistence; sync")
 
 
+@unittest.skipIf(Guest is None, 'paramiko only available in full native E2E runner')
 class GuestMarkerContractTests(unittest.TestCase):
     def setUp(self):
         lock = json.loads(pathlib.Path(__file__).with_name('entware.lock.json').read_text())
