@@ -231,7 +231,7 @@ def main():
     parser.add_argument('--nand-dir', required=True)
     parser.add_argument('--private-dir', required=True)
     parser.add_argument('--report-dir', required=True)
-    parser.add_argument('--stage', choices=('entware', 'preflight', 'kas', 'uninstall-packages', 'kas-update', 'knvr'), default='kas')
+    parser.add_argument('--stage', choices=('entware', 'preflight', 'kas', 'uninstall-packages', 'kas-update', 'knvr', 'web', 'web-filter'), default='kas')
     parser.add_argument('--legacy-ip-global', choices=('true', 'false'), default='false',
                         help='legacy-bridge profile A/B: pre-seed Proxy0 with '
                              "'ip global auto' as the production create does")
