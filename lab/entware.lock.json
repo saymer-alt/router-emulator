@@ -3,7 +3,7 @@
   "architecture": "aarch64-3.10",
   "installer": {
     "url": "https://bin.entware.net/aarch64-k3.10/installer/EN_aarch64-installer.tar.gz",
-    "sha256": "aa2e5850c47bf54360a74bab2092f5c2db01c9f001c2038c44d0559bfb3d7531"
+    "sha256": "50f0ead4ef223a5a4d5c88755068fd8d4f175636e1f42be7f43b175083f9ace3"
   },
   "packages": [
     {
