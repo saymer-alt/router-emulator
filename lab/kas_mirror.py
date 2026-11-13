@@ -18,6 +18,7 @@ import time
 import urllib.request
 
 DOMAINS = ('raw.githubusercontent.com', 'api.github.com', 'github.com', 'bin.magitrickle.dev')
+APPROVED_ASSET_HOSTS = ('github.com', 'bin.magitrickle.dev')
 
 
 def load_sources(repository, revision):
@@ -47,7 +48,7 @@ def assets(cache):
             data = Path(__file__).parent.joinpath(record['fixture']).read_bytes()
         else:
             url = urllib.parse.urlsplit(record['fetch_url'])
-            if url.scheme != 'https' or url.hostname not in ('github.com', 'bin.magitrickle.dev'):
+            if url.scheme != 'https' or url.hostname not in APPROVED_ASSET_HOSTS:
                 raise ValueError('unapproved pinned dependency origin')
             path = Path(cache) / record['filename']
             if path.is_symlink():
@@ -56,6 +57,9 @@ def assets(cache):
                 # Pinned origins intermittently answer 503 to runner IPs;
                 # three bounded attempts before giving up (the digest check
                 # below still rejects any wrong bytes unconditionally).
+                # Every terminal failure names the URL, mirroring the
+                # build_entware.fetch contract (run 43270179009 died on an
+                # anonymous 404 that cost a manual bisect to attribute).
                 for attempt in (1, 2, 3, 4, 5):
                     try:
                         with urllib.request.urlopen(record['fetch_url'], timeout=120) as response:
@@ -63,7 +67,9 @@ def assets(cache):
                         break
                     except urllib.error.HTTPError as error:
                         if attempt == 5 or error.code not in (503, 502, 504):
-                            raise
+                            raise ValueError(
+                                'pinned KAS dependency fetch failed: HTTP %d: %s'
+                                % (error.code, record['fetch_url'])) from error
                         time.sleep(min(15, 3 * attempt))
             data = path.read_bytes()
         if hashlib.sha256(data).hexdigest() != record['sha256']:

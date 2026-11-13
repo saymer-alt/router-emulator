@@ -91,7 +91,36 @@ def bootstrap_archive(source, destination, password):
                                     "printf '%s\\n' 'PORT=222' 'PIDFILE=\"/var/run/lab-dropbear.pid\"' > /opt/etc/config/dropbear.conf\n" + needle)
                 start = text.index('if grep -q "222"')
                 end = text.index("\nfi", start) + 3
-                text = text[:start] + "echo 'Lab SSH uses private per-run credentials.'" + text[end:]
+                text = text[:start] + text[end:]
+                # ndm's doinstaller console bridge stops relaying the script's
+                # stdout during the tail section (observed from the timezone
+                # RCI GET onward: even a pre-POST echo never reaches the UART,
+                # local reproduction 2026-11-12), so the completion markers
+                # would time out the 600s gate wait over a *successful*
+                # install (both rm's execute, opkg database populated, no
+                # wget alive). Move the markers and the auto-install hook
+                # removal before the POST, and re-emit the gate marker
+                # directly to the guest console device, bypassing the relay:
+                # a UART write from the live guest lands in the same serial
+                # log the wait reads (verified with a live /dev/console and
+                # /dev/ttyS0 probe during a stalled gate). The SSH probes stay
+                # the authoritative install-success gate; reject patterns are
+                # unchanged.
+                text = text.replace("\n\necho '[5/5] \"Entware\" installed!'\n", "\n", 1)
+                text = text.replace("\nrm /opt/etc/init.d/doinstall\n", "\n", 1)
+                text = text.replace(
+                    "wget -qO - --post-data=",
+                    "echo 'Lab SSH uses private per-run credentials.'\n\n"
+                    "echo '[5/5] \"Entware\" installed!'\n"
+                    "echo '[5/5] \"Entware\" installed!' > /dev/console 2>/dev/null\n\n"
+                    "rm /opt/etc/init.d/doinstall\n\n"
+                    "wget -qO - --post-data=", 1)
+                # A silent no-op replace would reintroduce the swallowed [5/5]
+                # after the next upstream installer rotation; fail loudly
+                # instead so the lab refuses to build a mis-patched bootstrap.
+                if text.index("echo '[5/5] \"Entware\" installed!'") > text.index('wget -qO - --post-data=') \
+                        or text.index('rm /opt/etc/init.d/doinstall') > text.index('wget -qO - --post-data='):
+                    raise ValueError('unexpected native Entware bootstrap tail')
                 data = text.encode()
             if data is not None:
                 member.size = len(data)

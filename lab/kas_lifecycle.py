@@ -1,10 +1,21 @@
 """Run the real committed KAS scripts inside the authenticated disposable OS."""
 import hashlib
+import json
 import re
 import time
+from pathlib import Path
 
 from lab.kas_mirror import DOMAINS
 from lab.run import send_monitor
+
+
+def pinned_package_versions():
+    """The exact MT/Trickle versions the lab mirror pins, single-sourced from
+    kas-assets.lock.json: the mihomo release rotates upstream (1.19.33-2 was
+    deleted from entware-go on 2026-11-11), so the installed-version check
+    must not hardcode a string that the mirror cannot serve anymore."""
+    lock = json.loads(Path(__file__).with_name('kas-assets.lock.json').read_text(encoding='utf8'))
+    return 'mihomo - %s' % lock['mihomo_version'], 'magitrickle - %s' % lock['magitrickle_version']
 
 
 def put(guest, path, data, mode='600'):
@@ -105,7 +116,8 @@ def install(guest, mirror, revision, evidence, foreign=None, legacy=None):
         evidence.set('KAS_INSTALL', 'FAIL', 'native_installer_failed')
         return False
     installed = guest.command('opkg list-installed')
-    if 'mihomo - 1.19.33-2' not in installed or 'magitrickle - 0.8.2-1' not in installed:
+    mihomo_pin, magitrickle_pin = pinned_package_versions()
+    if mihomo_pin not in installed or magitrickle_pin not in installed:
         evidence.set('KAS_INSTALL', 'FAIL', 'native_installer_failed')
         return False
     try:
