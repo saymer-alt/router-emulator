@@ -172,10 +172,34 @@ cp "$source" "$out"
 
 
 def upload(guest, source: bytes, path: str):
-    with guest.client.open_sftp() as sftp:
-        with sftp.file(path, 'wb') as file:
-            file.write(source)
-        sftp.chmod(path, 0o600)
+    """Stream bytes over the existing authenticated SSH *exec* channel.
+
+    Entware Dropbear in this guest does not provide an SFTP subsystem.
+    Never negotiate SFTP or require sftp-server: Guest.execute already accepts
+    input_data and writes it to the command's stdin (binary-safe).
+    """
+    if not isinstance(source, bytes) or not source or len(source) > 32 * 1024 * 1024:
+        raise ValueError('invalid fixture transfer size')
+    if not (path.startswith(BASE + '/assets/') or
+            path.startswith(BASE + '/scripts/') or path in (TESTBIN + '/curl', MANIFEST)):
+        raise ValueError('invalid fixture transfer path')
+    if not re.fullmatch(r'/opt/lab/telemt/[A-Za-z0-9/_.-]+', path) or '..' in path:
+        raise ValueError('invalid fixture transfer path')
+    # The file is inside disposable /opt/lab; write to a private temporary name
+    # then rename only after the guest reports the matching digest.
+    temp = path + '.part'
+    code, _, _ = guest.execute(
+        'umask 077; cat > ' + temp, timeout=180, input_data=source)
+    if code != 0:
+        raise RuntimeError('guest SSH stdin transfer failed')
+    expected = sha256(source)
+    code, output, _ = guest.execute('sha256sum ' + temp, timeout=30)
+    if code != 0 or output.split()[0] != expected:
+        raise RuntimeError('guest fixture transfer SHA-256 mismatch')
+    code, _, _ = guest.execute('mv -f ' + temp + ' ' + path + ' && chmod 0600 ' + path,
+                               timeout=30)
+    if code != 0:
+        raise RuntimeError('guest fixture transfer commit failed')
 
 
 def cmd(guest, shell: str, timeout=120):
@@ -216,13 +240,18 @@ def lifecycle(guest, evidence, source: Path, ipk_dir: Path) -> bool:
         evidence.check(label, 'NOT_TESTED', 'unattempted')
 
     completed = []
+    phase = 'PREPARE'
     try:
         current, future = prepared_fixtures(ipk_dir)
         if not (source / 'entware-manager.sh').is_file():
             raise ValueError('pinned installer source missing')
+        phase = 'GUEST_DEPENDENCIES'
+        print('TELEMT_IPK_E2E: PHASE=' + phase, flush=True)
         cmd(guest, 'opkg update && opkg install ca-bundle curl jq', timeout=240)
         cmd(guest, 'mkdir -p ' + ASSETS + ' ' + TESTBIN + ' ' + BASE + '/scripts '
             + BASE + '/stage ' + BASE + '/cache')
+        phase = 'TRANSFER'
+        print('TELEMT_IPK_E2E: PHASE=' + phase, flush=True)
         for path in ('entware-manager.sh', 'install.sh', 'upgrade.sh'):
             upload(guest, (source / path).read_bytes(), BASE + '/scripts/' + path)
         upload(guest, CURL_FIXTURE.encode(), TESTBIN + '/curl')
@@ -245,6 +274,8 @@ def lifecycle(guest, evidence, source: Path, ipk_dir: Path) -> bool:
         if len(inert) != len(safe_paths):
             raise RuntimeError('lab state fixtures unexpectedly identical')
 
+        phase = 'CLEAN_INSTALL'
+        print('TELEMT_IPK_E2E: PHASE=' + phase, flush=True)
         # The genuine installed version MUST be absent prior to a clean install.
         if any(status(guest, data[0]) for data in PKGS.values()):
             raise RuntimeError('lab starts with an already installed package')
@@ -260,6 +291,8 @@ def lifecycle(guest, evidence, source: Path, ipk_dir: Path) -> bool:
         check_inert(guest, inert)
         completed.append('TELEMT_IPK_INSTALL')
 
+        phase = 'NEGATIVE_GATES'
+        print('TELEMT_IPK_E2E: PHASE=' + phase, flush=True)
         # Reinstall via the clean installer and wrong SHA must be rejected before opkg.
         for fam, data in PKGS.items():
             if assert_command(guest, shell_cmd('install.sh ' + fam + ' --apply')):
@@ -275,6 +308,8 @@ def lifecycle(guest, evidence, source: Path, ipk_dir: Path) -> bool:
         check_inert(guest, inert)
         completed.append('TELEMT_IPK_REFUSALS')
 
+        phase = 'CACHE_STAGE'
+        print('TELEMT_IPK_E2E: PHASE=' + phase, flush=True)
         # Preserve old signed IPKs for package-aware rollback BEFORE changing index.
         for fam in PKGS:
             cmd(guest, shell_cmd('entware-manager.sh cache ' + fam), timeout=120)
@@ -287,6 +322,8 @@ def lifecycle(guest, evidence, source: Path, ipk_dir: Path) -> bool:
         check_inert(guest, inert)
         completed.append('TELEMT_IPK_STAGE')
 
+        phase = 'SYNTHETIC_OPKG_UPGRADE'
+        print('TELEMT_IPK_E2E: PHASE=' + phase, flush=True)
         # Real opkg against synthetic (version-only) successors, no clients/API.
         for fam, (pkg, _, newver, _, newname, _, binary) in PKGS.items():
             cmd(guest, 'opkg install ' + ASSETS + '/' + newname, timeout=180)
@@ -297,6 +334,8 @@ def lifecycle(guest, evidence, source: Path, ipk_dir: Path) -> bool:
         check_inert(guest, inert)
         completed.append('TELEMT_IPK_UPGRADE')
 
+        phase = 'MANUAL_PACKAGE_RESTORE'
+        print('TELEMT_IPK_E2E: PHASE=' + phase, flush=True)
         # Manual package-aware restoration; NOT claiming an automatic rollback.
         for fam, (pkg, oldver, _, oldname, _, _, binary) in PKGS.items():
             cmd(guest, 'opkg remove ' + pkg, timeout=120)
@@ -308,6 +347,8 @@ def lifecycle(guest, evidence, source: Path, ipk_dir: Path) -> bool:
         check_inert(guest, inert)
         completed.append('TELEMT_IPK_RESTORE')
 
+        phase = 'REMOVE_REINSTALL'
+        print('TELEMT_IPK_E2E: PHASE=' + phase, flush=True)
         # Removal must not delete user-created config or panel state.
         for fam, (pkg, oldver, _, oldname, _, _, binary) in PKGS.items():
             cmd(guest, 'opkg remove ' + pkg, timeout=120)
@@ -320,13 +361,18 @@ def lifecycle(guest, evidence, source: Path, ipk_dir: Path) -> bool:
         check_inert(guest, inert)
         completed.append('TELEMT_IPK_REMOVE_REINSTALL')
 
-    except (ValueError, RuntimeError, OSError, TimeoutError) as error:
-        # Never emit raw guest output or paths containing credentials into CI.
+    except Exception as error:
+        # Mark the right gate on SSH/transport exceptions as well as command
+        # failures; never leak raw exception, guest output, secrets or paths.
         failed = CHECKS[len(completed)] if len(completed) < len(CHECKS) else CHECKS[-1]
         evidence.check(failed, 'FAIL', 'telemt_ipk_failed')
         for label in completed:
             evidence.check(label, 'PASS', 'telemt_ipk_passed')
-        print('TELEMT_IPK_E2E: FAIL ' + type(error).__name__ + ' at ' + failed, flush=True)
+        kind = type(error).__name__
+        if kind not in ('RuntimeError', 'ValueError', 'OSError', 'TimeoutError', 'SSHException', 'EOFError'):
+            kind = 'OTHER'
+        print('TELEMT_IPK_E2E: FAIL phase=' + phase + ' kind=' + kind
+              + ' gate=' + failed, flush=True)
         return False
 
     for label in completed:
