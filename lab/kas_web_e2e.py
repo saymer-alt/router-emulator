@@ -82,6 +82,21 @@ def put_large_binary(guest, path, content):
                   'chmod 700 /opt/lab/kas-web', timeout=30)
 
 
+def managed_service_port(guest):
+    """Read the persisted LAN port after reboot, never guess Stage-3 port."""
+    raw = guest.command('cat /opt/etc/kas-control-center.settings.json', timeout=15)
+    settings = json.loads(raw)
+    check(isinstance(settings, dict) and settings.get('version') == 1,
+          'web_invalid_service_settings')
+    port = settings.get('port')
+    fallback = settings.get('auto_port_fallback', False)
+    check(type(port) is int and 18080 <= port <= 18090,
+          'web_unexpected_service_port')
+    check(type(fallback) is bool and (not fallback or port > 18080),
+          'web_invalid_service_fallback')
+    return port
+
+
 def test_opt_in_service(guest, mirror, evidence, reboot=None):
     """Native guest installation/stop/remove of ONLY the dedicated Web files."""
     key = 'web/control-center/kas-web-manage.sh'
@@ -152,6 +167,7 @@ def test_opt_in_service(guest, mirror, evidence, reboot=None):
                   'web_postboot_rss_budget_exceeded')
         if home_default:
             phase = 'HOME_ADDRESS'
+            managed_port = managed_service_port(guest)
             iface = guest.command('ip -4 -o addr show dev br0', timeout=15)
             match = re.search(r'inet (\d+\.\d+\.\d+\.\d+)/(\d+)', iface)
             check(match is not None, 'web_home_bridge_address_missing')
@@ -159,11 +175,11 @@ def test_opt_in_service(guest, mirror, evidence, reboot=None):
             check(home_ip.is_private, 'web_home_not_private')
             phase = 'HOME_HTTP'
             guest.command("curl -fSs --noproxy '*' --max-time 5 "
-                          "http://" + str(home_ip) + ":18081/api/status >/dev/null")
+                          "http://" + str(home_ip) + ":" + str(managed_port) + "/api/status >/dev/null")
             phase = 'LOOPBACK_NOT_EXPOSED'
             deny, _, _ = guest.execute(
                 "curl -sS --noproxy '*' --connect-timeout 2 --max-time 5 "
-                "http://127.0.0.1:18081/api/status >/dev/null", timeout=10)
+                "http://127.0.0.1:" + str(managed_port) + "/api/status >/dev/null", timeout=10)
             check(deny != 0, 'web_home_listener_exposed_on_loopback')
         else:
             guest.command("curl -fSs --noproxy '*' --max-time 5 "
@@ -187,21 +203,21 @@ def test_opt_in_service(guest, mirror, evidence, reboot=None):
             direct = guest.command(
                 "curl -sS --noproxy '*' --max-time 5 -o /dev/null"
                 " -w '%{http_code}' http://" + str(home_ip) +
-                ":18081/api/status", timeout=15)
+                ":" + str(managed_port) + "/api/status", timeout=15)
             check(direct == '401', 'web_optional_password_not_enforced')
             phase = 'PASSWORD_ACCEPTED'
             permitted = guest.command(
                 "curl -sS --noproxy '*' --max-time 5"
                 " -u kas:lab-local-panel-password-1234 -o /dev/null"
                 " -w '%{http_code}' http://" + str(home_ip) +
-                ":18081/api/status", timeout=15)
+                ":" + str(managed_port) + "/api/status", timeout=15)
             check(permitted == '200', 'web_optional_password_rejected')
             phase = 'ROUTER_PROXY_AUTH_DELEGATION'
             via_router = guest.command(
                 "curl -sS --noproxy '*' --max-time 5"
                 " -H 'Host: kas.lab.keenetic.pro' -o /dev/null"
                 " -w '%{http_code}' http://" + str(home_ip) +
-                ":18081/api/status", timeout=15)
+                ":" + str(managed_port) + "/api/status", timeout=15)
             check(via_router == '200', 'web_router_proxy_required_second_password')
             guest.command('sh /opt/etc/init.d/S98kas-control-center stop', timeout=90)
             guest.command('rm -f /opt/etc/kas-control-center.password '
