@@ -19,6 +19,23 @@ class WebImporterContractTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             kas_web_e2e.put_large_binary(guest, '/untrusted/path', payload)
 
+    def test_managed_service_port_matches_persisted_binding(self):
+        for port, fallback in ((18080, False), (18081, True),
+                               (18090, True), (18085, False)):
+            guest = Mock()
+            guest.command.return_value = __import__('json').dumps({
+                'version': 1, 'port': port, 'auth_mode': 'none',
+                'auto_port_fallback': fallback})
+            self.assertEqual(kas_web_e2e.managed_service_port(guest), port)
+        for port, fallback in ((18079, False), (18091, True),
+                               (18080, True), (True, False)):
+            guest = Mock()
+            guest.command.return_value = __import__('json').dumps({
+                'version': 1, 'port': port, 'auth_mode': 'none',
+                'auto_port_fallback': fallback})
+            with self.assertRaises(RuntimeError):
+                kas_web_e2e.managed_service_port(guest)
+
     def test_opt_in_native_lifecycle_is_not_run_without_managed_script(self):
         evidence = Evidence()
         mirror = Mock()
