@@ -21,5 +21,5 @@ jobs:
     with:
       emulator_ref: ${{ github.event.pull_request.head.sha || github.sha }}
       kas_ref: '6dd6438e2b64bad0fe9205ab6575795f808dabd8'
-      telemt_ref: '0fd4c129a5d1fcb515fb8aa94b8d81da938641b1'
+      telemt_ref: '8a1b13d6f4a0fa07f5420700f76025ff94bcfd92'
       stage: telemt-ipk

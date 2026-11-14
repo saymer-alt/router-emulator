@@ -24,7 +24,7 @@ on:
       telemt_ref:
         type: string
         required: false
-        default: 0fd4c129a5d1fcb515fb8aa94b8d81da938641b1
+        default: 8a1b13d6f4a0fa07f5420700f76025ff94bcfd92
   workflow_dispatch:
     inputs:
       emulator_ref:
@@ -48,7 +48,7 @@ on:
       telemt_ref:
         description: 'Exact 40-hex entware-go commit for TeleMT package manager (required by telemt-ipk stage)'
         required: false
-        default: '0fd4c129a5d1fcb515fb8aa94b8d81da938641b1'
+        default: '8a1b13d6f4a0fa07f5420700f76025ff94bcfd92'
         type: string
       legacy_ip_global:
         description: 'legacy-bridge A/B: pre-seed Proxy0 with ip global auto as production create does'
@@ -98,14 +98,14 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: saymer-alt/entware-go
-          ref: ${{ inputs.telemt_ref || '0fd4c129a5d1fcb515fb8aa94b8d81da938641b1' }}
+          ref: ${{ inputs.telemt_ref || '8a1b13d6f4a0fa07f5420700f76025ff94bcfd92' }}
           path: telemt-source
           persist-credentials: false
       - name: Verify pinned input and download current published TeleMT IPKs
         if: ${{ inputs.stage == 'telemt-ipk' }}
         shell: bash
         env:
-          TELEMT_REF: ${{ inputs.telemt_ref || '0fd4c129a5d1fcb515fb8aa94b8d81da938641b1' }}
+          TELEMT_REF: ${{ inputs.telemt_ref || '8a1b13d6f4a0fa07f5420700f76025ff94bcfd92' }}
         run: |
           set -euo pipefail
           [[ "$TELEMT_REF" =~ ^[a-f0-9]{40}$ ]]

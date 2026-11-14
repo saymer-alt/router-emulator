@@ -12,8 +12,14 @@ and preservation of local settings when installing, upgrading and removing IPK.
 Reuses `lab/ported_e2e.py` (`--stage telemt-ipk`) and the already pinned
 `lab/entware.lock.json`; no new QEMU toolchain or persistent runner.
 The tested installer source is **exactly** entware-go PR #33 commit
-`0fd4c129a5d1fcb515fb8aa94b8d81da938641b1`.
+`8a1b13d6f4a0fa07f5420700f76025ff94bcfd92`.
 No production build/release/tag or GitHub token is changed.
+
+Isolation note: QEMU run 43581581444 (entware-go `0fd4c12`) failed at
+`CLEAN_DRY_CORE` because `inspect()` rejected ANY maintainer script, while
+every real Entware SDK IPK carries opkg's standard `default_postinst` /
+`default_prerm` boilerplate. The pinned commit whitelists exactly those
+standard hook bytes and keeps preinst/postrm/custom hooks rejected.
 
 ## Immutable published inputs
 
@@ -25,7 +31,7 @@ No production build/release/tag or GitHub token is changed.
 GitHub Actions downloads only these two assets from
 `saymer-alt/entware-go/releases/download/latest/` and verifies the exact
 immutable digests; missing/replaced assets **fail closed**. The release asset
-name for Panel Lite uses `.rc.3`, while its `control` version uses `~rc.3`.
+name for Panel Lite uses `.rc.4`, while its `control` version uses `~rc.4`.
 The host parses the actual compressed IPK format (`tar.gz` outer container,
 `control.tar.gz` nested) before any guest mutation.
 
