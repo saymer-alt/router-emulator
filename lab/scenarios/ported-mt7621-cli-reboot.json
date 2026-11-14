@@ -33,6 +33,10 @@
       "timeout_sec": 120
     },
     {
+      "action": "sleep",
+      "seconds": 15
+    },
+    {
       "action": "telnet",
       "port": 8023,
       "greeting": "\\(config\\)>",
