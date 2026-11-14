@@ -25,10 +25,10 @@ PKGS = {
              'telemt_3.5.18-1_aarch64-3.10.ipk',
              'ccab455710761f236f5da6f2f2a852de575e5db164f59b8157c30e270110e509',
              '/opt/bin/telemt'),
-    'panel': ('telemt-panel-lite', '1.0.0~rc.3-1', '1.0.0~rc.4-1',
-              'telemt-panel-lite_1.0.0.rc.3-1_aarch64-3.10.ipk',
+    'panel': ('telemt-panel-lite', '1.0.0~rc.4-1', '1.0.0~rc.5-1',
               'telemt-panel-lite_1.0.0.rc.4-1_aarch64-3.10.ipk',
-              'e649a14fe0bfb670d620116fa4d503a96285a085f89fa328e4612ccedbb4fdaa',
+              'telemt-panel-lite_1.0.0.rc.5-1_aarch64-3.10.ipk',
+              '39053c1e747685183390f0d2f683b2ef72b7d3d9afe97c8724c4358620b64424',
               '/opt/bin/telemt-panel'),
 }
 CHECKS = ('TELEMT_IPK_INSTALL', 'TELEMT_IPK_REFUSALS', 'TELEMT_IPK_STAGE',
