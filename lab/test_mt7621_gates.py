@@ -461,6 +461,33 @@ class CliGateTests(unittest.TestCase):
         self.assertEqual(gates["PORTED_NDMC_READY"]["status"], "PASS")
 
 
+    def test_combined_golden_sixteen_pass_three_untested(self):
+        openwrt_report = {"scenario": "s", "outcome": "PASS",
+                          "steps": [row(s["action"]) for s in BOOT_STEPS]}
+        ported_report = {"scenario": "p", "outcome": "PASS",
+                         "steps": [row(s["action"]) for s in PORTED_STEPS]}
+        cli_report = {"scenario": "c", "outcome": "PASS",
+                      "steps": [row(s["action"]) for s in CLI_STEPS]}
+        statuses = [(name, "PASS") for name in (
+            "MT7621_QEMU_BUILD", "PORTED_IMAGE_VALIDATION",
+            "NEGATIVE_IMAGE_REJECT", "HOST_ISOLATION", "CLEANUP")]
+        gates = mg.evaluate(
+            scenario(steps=BOOT_STEPS), openwrt_report, statuses,
+            ported_scenario=scenario(steps=PORTED_STEPS, name="p"),
+            ported_report=ported_report,
+            cli_scenario=scenario(steps=CLI_STEPS, name="c"),
+            cli_report=cli_report)
+        counts = Counter(g["status"] for g in gates.values())
+        self.assertEqual(counts["PASS"], 16)
+        self.assertEqual(counts["NOT_TESTED"], 3)
+        self.assertEqual(counts["BLOCKED"], 0)
+        self.assertEqual(counts["FAIL"], 0)
+        self.assertEqual(len(gates), 19)
+        self.assertEqual(gates["PORTED_NDMC_READY"]["status"], "PASS")
+        for name in ("MIPSEL_ENTWARE_READY", "MIPSEL_SERVICE_RESTART",
+                     "MIPSEL_PERSISTENCE"):
+            self.assertEqual(gates[name]["status"], "NOT_TESTED")
+
 class SummaryClaimTests(unittest.TestCase):
     """The summary footer boot claim follows the evaluated gates: with the
     Ported report omitted or a failed Ported boot it must not assert a
@@ -471,6 +498,8 @@ class SummaryClaimTests(unittest.TestCase):
         gates = {name: mg._gate("NOT_TESTED", "unattempted")
                  for name in mg.GATES}
         gates["PORTED_KERNEL_BOOT"] = mg._gate("PASS", "kernel_boot_observed")
+        gates["PORTED_KERNEL_SMP_4VPE"] = mg._gate("PASS", "four_vpes_brought_up")
+        gates["PORTED_NDMS_READY"] = mg._gate("PASS", "ndm_ready_http_answered_on_lan")
         for name, (status, reason) in overrides.items():
             gates[name] = mg._gate(status, reason)
         return gates
@@ -488,6 +517,18 @@ class SummaryClaimTests(unittest.TestCase):
                 "MIPSEL_SERVICE_RESTART", "MIPSEL_PERSISTENCE")}))
         self.assertIn("boots 4 VPEs to NDMS", claim)
         self.assertNotIn("still open", claim)
+
+    def test_smp_incomplete_does_not_claim_full_ndms(self):
+        claim = mg.ported_claim(self.gates(
+            PORTED_KERNEL_SMP_4VPE=("NOT_TESTED", "not_reached")))
+        self.assertNotIn("boots 4 VPEs to NDMS", claim)
+        self.assertIn("4-VPE SMP=NOT_TESTED", claim)
+
+    def test_ndms_unavailable_does_not_claim_full_ndms(self):
+        claim = mg.ported_claim(self.gates(
+            PORTED_NDMS_READY=("FAIL", "http_probe_failed")))
+        self.assertNotIn("boots 4 VPEs to NDMS", claim)
+        self.assertIn("NDMS=FAIL", claim)
 
     def test_failed_ported_boot_does_not_claim_boot(self):
         claim = mg.ported_claim(self.gates(

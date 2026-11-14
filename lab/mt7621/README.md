@@ -223,7 +223,6 @@ python3 lab/mt7621/mt7621_gates.py --report-dir work/reports/mt7621-gates \
   --cli-report work/reports/ported-mt7621-cli/report.json \
   --set MT7621_QEMU_BUILD PASS --reason MT7621_QEMU_BUILD qemu_mipsel_built_from_pinned_source \
   --set PORTED_IMAGE_VALIDATION PASS --reason PORTED_IMAGE_VALIDATION pinned_sha256_and_header_validated \
-  --set PORTED_NDMC_READY NOT_TESTED --reason PORTED_NDMC_READY serial_console_log_only_telnet_cli_deferred \
   --set MIPSEL_ENTWARE_READY NOT_TESTED --reason MIPSEL_ENTWARE_READY entware_is_next_cycle_after_ndms \
   --set MIPSEL_SERVICE_RESTART NOT_TESTED --reason MIPSEL_SERVICE_RESTART service_state_across_reboot_not_scripted \
   --set MIPSEL_PERSISTENCE NOT_TESTED --reason MIPSEL_PERSISTENCE config_persistence_not_scripted \

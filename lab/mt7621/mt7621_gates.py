@@ -417,7 +417,9 @@ def ported_claim(gates):
     unconditionally: with the Ported report omitted (or a failed Ported
     boot) the footer must not state a successful NDMS boot."""
     boot = gates["PORTED_KERNEL_BOOT"]
-    if boot["status"] == "PASS":
+    smp = gates["PORTED_KERNEL_SMP_4VPE"]
+    ndms = gates["PORTED_NDMS_READY"]
+    if all(gate["status"] == "PASS" for gate in (boot, smp, ndms)):
         claim = ("KeeneticOS Ported boots 4 VPEs to NDMS in QEMU (derived "
                  "from the committed scenario report)")
         open_gates = [name for name in ("PORTED_NDMC_READY",
@@ -429,8 +431,10 @@ def ported_claim(gates):
             claim += ("; still open: " + ", ".join(open_gates)
                       + (" (%s)" % ", ".join(gates[n]["reason"] for n in open_gates)))
         return claim + "."
-    return ("KeeneticOS Ported boot evidence: %s (%s)."
-            % (boot["status"], boot["reason"]))
+    return ("KeeneticOS Ported readiness: kernel=%s (%s); "
+            "4-VPE SMP=%s (%s); NDMS=%s (%s)."
+            % (boot["status"], boot["reason"], smp["status"],
+               smp["reason"], ndms["status"], ndms["reason"]))
 
 
 def main():
