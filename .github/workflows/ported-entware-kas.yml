@@ -116,11 +116,11 @@ jobs:
             "$base/telemt_3.5.17-1_aarch64-3.10.ipk" \
             -o "$RUNNER_TEMP/telemt-ipks/telemt_3.5.17-1_aarch64-3.10.ipk"
           curl --fail --location --retry 2 --connect-timeout 15 --max-time 180 \
-            "$base/telemt-panel-lite_1.0.0.rc.3-1_aarch64-3.10.ipk" \
-            -o "$RUNNER_TEMP/telemt-ipks/telemt-panel-lite_1.0.0.rc.3-1_aarch64-3.10.ipk"
+            "$base/telemt-panel-lite_1.0.0.rc.4-1_aarch64-3.10.ipk" \
+            -o "$RUNNER_TEMP/telemt-ipks/telemt-panel-lite_1.0.0.rc.4-1_aarch64-3.10.ipk"
           printf '%s\n' \
             'ccab455710761f236f5da6f2f2a852de575e5db164f59b8157c30e270110e509  telemt_3.5.17-1_aarch64-3.10.ipk' \
-            'e649a14fe0bfb670d620116fa4d503a96285a085f89fa328e4612ccedbb4fdaa  telemt-panel-lite_1.0.0.rc.3-1_aarch64-3.10.ipk' |
+            '39053c1e747685183390f0d2f683b2ef72b7d3d9afe97c8724c4358620b64424  telemt-panel-lite_1.0.0.rc.4-1_aarch64-3.10.ipk' |
             (cd "$RUNNER_TEMP/telemt-ipks" && sha256sum --check --status)
           echo 'TELEMT_IPK_INPUTS: verified immutable SHA256 pins'
       - name: Setup Go for optional Web ARM64 guest stage
