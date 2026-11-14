@@ -2,7 +2,7 @@
 
 A reproducible MT7621 (MIPS 1004Kc, little-endian) QEMU stand built on the
 existing upstream `mt7621-router` machine (`qemu-system-mipsel`, patches
-`qemu-patches/0028`–`0063`).  It is the MIPSel counterpart of the ARM64
+`qemu-patches/0028`–`0065`).  It is the MIPSel counterpart of the ARM64
 `lab/` flow: same scenario runner, same JSON/JUnit contract, same isolation
 rules.  No new emulator was written; this directory only adds a build script,
 a Ported NAND assembler and gate aggregation for the MT7621 preset family.
