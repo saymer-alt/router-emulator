@@ -30,6 +30,25 @@ BOOT_STEPS = (
     {"action": "wait_serial", "pattern": "Linux version"},
 )
 
+PORTED_STEPS = (
+    {"action": "wait_serial", "pattern": "Boot and Recovery Environment"},
+    {"action": "wait_serial", "pattern": "Starting kernel"},
+    {"action": "wait_serial", "pattern": "Linux version"},
+    {"action": "wait_serial", "pattern": "Brought up 4 CPUs"},
+    {"action": "wait_serial", "pattern": "init process was started"},
+    {"action": "wait_serial", "pattern": "Network Device Manager"},
+    {"action": "wait_serial", "pattern": "system ready"},
+    {"action": "wait_serial", "pattern": "waiting for connections"},
+    {"action": "wait_serial", "pattern": "Started version"},
+    {"action": "probe_http", "url": "http://127.0.0.1:8080/"},
+    {"action": "reset"},
+    {"action": "wait_serial", "pattern": "Boot and Recovery Environment"},
+    {"action": "wait_serial", "pattern": "Starting kernel"},
+    {"action": "wait_serial", "pattern": "Linux version"},
+    {"action": "wait_serial", "pattern": "Brought up 4 CPUs"},
+    {"action": "wait_serial", "pattern": "system ready"},
+)
+
 
 class DerivationTests(unittest.TestCase):
     @staticmethod
@@ -182,10 +201,9 @@ class LabelTests(unittest.TestCase):
 
 
 class ArithmeticTests(unittest.TestCase):
-    def test_golden_thirteen_gate_counts(self):
+    def test_golden_gate_counts(self):
         labels = [("MT7621_QEMU_BUILD", "PASS"),
                   ("PORTED_IMAGE_VALIDATION", "PASS"),
-                  ("PORTED_KERNEL_BOOT", "BLOCKED"),
                   ("PORTED_NDMC_READY", "NOT_TESTED"),
                   ("MIPSEL_ENTWARE_READY", "NOT_TESTED"),
                   ("MIPSEL_SERVICE_RESTART", "NOT_TESTED"),
@@ -195,16 +213,159 @@ class ArithmeticTests(unittest.TestCase):
                   ("CLEANUP", "PASS")]
         rep = {"scenario": "s", "outcome": "PASS",
                "steps": [row(s["action"]) for s in BOOT_STEPS]}
-        gates = mg.evaluate(scenario(steps=BOOT_STEPS), rep, labels)
+        ported_rep = {"scenario": "p", "outcome": "PASS",
+                      "steps": [row(s["action"]) for s in PORTED_STEPS]}
+        gates = mg.evaluate(scenario(steps=BOOT_STEPS), rep, labels,
+                            ported_scenario=scenario(steps=PORTED_STEPS,
+                                                     name="p"),
+                            ported_report=ported_rep)
         counts = Counter(v["status"] for v in gates.values())
-        self.assertEqual(counts["PASS"], 8)
-        self.assertEqual(counts["BLOCKED"], 1)
+        self.assertEqual(counts["PASS"], 15)
+        self.assertEqual(counts["BLOCKED"], 0)
         self.assertEqual(counts["NOT_TESTED"], 4)
         self.assertEqual(sum(counts.values()), len(mg.GATES))
         self.assertEqual(mg.outcome_of(gates), "BLOCKED")
-        # the three derived gates are the expected PASSes
-        for name in ("MT7621_OPENWRT_BOOT", "MT7621_REBOOT", "MIPSEL_NATIVE_ELF"):
+        # the derived gates are the expected PASSes
+        for name in ("MT7621_OPENWRT_BOOT", "MT7621_REBOOT", "MIPSEL_NATIVE_ELF",
+                     "PORTED_KERNEL_BOOT", "PORTED_KERNEL_SMP_4VPE",
+                     "PORTED_USERSPACE_READY", "PORTED_NDMS_READY",
+                     "PORTED_LAN_READY", "PORTED_REBOOT",
+                     "MIPSEL_NATIVE_ELF_ON_NDMS"):
             self.assertEqual(gates[name]["status"], "PASS", name)
+        # Entware/CLI/persistence stay honestly untested
+        for name in ("PORTED_NDMC_READY", "MIPSEL_ENTWARE_READY",
+                     "MIPSEL_SERVICE_RESTART", "MIPSEL_PERSISTENCE"):
+            self.assertEqual(gates[name]["status"], "NOT_TESTED", name)
+
+
+class PortedTests(unittest.TestCase):
+    @staticmethod
+    def report(rows, name="p", outcome="PASS"):
+        return {"scenario": name, "outcome": outcome, "steps": rows}
+
+    def full(self, steps=None):
+        steps = PORTED_STEPS if steps is None else steps
+        return mg.derive_ported_gates(scenario(steps=steps, name="p"),
+                                      self.report([row(s["action"])
+                                                   for s in steps]))
+
+    def test_full_run_passes_all_ported_gates(self):
+        gates = self.full()
+        for name in mg.PORTED_DERIVED_GATES:
+            self.assertEqual(gates[name]["status"], "PASS", name)
+        self.assertEqual(gates["PORTED_KERNEL_SMP_4VPE"]["reason"],
+                         "four_vpes_brought_up")
+        self.assertEqual(gates["PORTED_NDMS_READY"]["reason"],
+                         "ndm_ready_http_answered_on_lan")
+        self.assertEqual(gates["PORTED_LAN_READY"]["reason"],
+                         "ndms_http_answered_on_loopback_forward")
+        self.assertEqual(gates["MIPSEL_NATIVE_ELF_ON_NDMS"]["reason"],
+                         "native_ndms_daemons_running")
+        self.assertEqual(gates["PORTED_REBOOT"]["reason"],
+                         "reset_then_second_full_boot_to_ndms")
+
+    def test_smp_marker_timeout_fails_boot_gates(self):
+        steps = list(PORTED_STEPS)
+        rows = [row(s["action"]) for s in steps]
+        rows[3]["outcome"] = "FAIL"  # "Brought up 4 CPUs" timed out
+        gates = mg.derive_ported_gates(scenario(steps=steps, name="p"),
+                                       self.report(rows, outcome="FAIL"))
+        self.assertEqual(gates["PORTED_KERNEL_BOOT"]["status"], "FAIL")
+        self.assertEqual(gates["PORTED_KERNEL_SMP_4VPE"]["status"], "FAIL")
+        for name in ("PORTED_USERSPACE_READY", "PORTED_NDMS_READY",
+                     "PORTED_LAN_READY", "MIPSEL_NATIVE_ELF_ON_NDMS"):
+            self.assertEqual(gates[name]["status"], "NOT_TESTED", name)
+
+    def test_lan_probe_failure_fails_ndms_ready_and_lan(self):
+        steps = list(PORTED_STEPS)
+        rows = [row(s["action"]) for s in steps]
+        rows[9]["outcome"] = "FAIL"  # the HTTP probe timed out
+        gates = mg.derive_ported_gates(scenario(steps=steps, name="p"),
+                                       self.report(rows, outcome="FAIL"))
+        self.assertEqual(gates["PORTED_LAN_READY"]["status"], "FAIL")
+        self.assertEqual(gates["PORTED_LAN_READY"]["reason"],
+                         "ndms_lan_probe_failed")
+        self.assertEqual(gates["PORTED_NDMS_READY"]["status"], "FAIL")
+        self.assertEqual(gates["PORTED_NDMS_READY"]["reason"],
+                         "ndms_lan_probe_failed")
+        # the kernel/SMP evidence stands
+        self.assertEqual(gates["PORTED_KERNEL_SMP_4VPE"]["status"], "PASS")
+
+    def test_daemon_wait_timeout_fails_native_elf_on_ndms(self):
+        steps = list(PORTED_STEPS)
+        rows = [row(s["action"]) for s in steps]
+        rows[8]["outcome"] = "FAIL"  # dropbear "Started version" timed out
+        gates = mg.derive_ported_gates(scenario(steps=steps, name="p"),
+                                       self.report(rows, outcome="FAIL"))
+        self.assertEqual(gates["MIPSEL_NATIVE_ELF_ON_NDMS"]["status"], "FAIL")
+        self.assertEqual(gates["MIPSEL_NATIVE_ELF_ON_NDMS"]["reason"],
+                         "ndms_daemon_startup_failed")
+        self.assertEqual(gates["PORTED_NDMS_READY"]["status"], "FAIL")
+
+    def test_reboot_requires_reset_and_second_full_boot(self):
+        steps = [s for s in PORTED_STEPS if s["action"] != "reset"]
+        gates = self.full(steps)
+        self.assertEqual(gates["PORTED_REBOOT"]["status"], "NOT_TESTED")
+        self.assertEqual(gates["PORTED_REBOOT"]["reason"],
+                         "scenario_has_no_reset_step")
+
+    def test_reboot_requires_second_ndms_ready(self):
+        steps = PORTED_STEPS[:11]  # stops right after the reset
+        gates = self.full(steps)
+        self.assertEqual(gates["PORTED_REBOOT"]["status"], "NOT_TESTED")
+        self.assertEqual(gates["PORTED_REBOOT"]["reason"],
+                         "scenario_has_no_second_ready_step")
+
+    def test_second_boot_timeout_fails_reboot_only(self):
+        steps = list(PORTED_STEPS)
+        rows = [row(s["action"]) for s in steps]
+        rows[-1]["outcome"] = "FAIL"  # the post-reset "system ready" timed out
+        gates = mg.derive_ported_gates(scenario(steps=steps, name="p"),
+                                       self.report(rows, outcome="FAIL"))
+        self.assertEqual(gates["PORTED_REBOOT"]["status"], "FAIL")
+        self.assertEqual(gates["PORTED_REBOOT"]["reason"],
+                         "second_boot_marker_timeout")
+        # the first boot evidence stands
+        self.assertEqual(gates["PORTED_NDMS_READY"]["status"], "PASS")
+
+    def test_foreign_scenario_is_refused(self):
+        gates = mg.derive_ported_gates(scenario(steps=PORTED_STEPS, name="p"),
+                                       self.report([row(s["action"])
+                                                    for s in PORTED_STEPS],
+                                                   name="other"))
+        self.assertEqual(gates["PORTED_KERNEL_BOOT"]["status"], "FAIL")
+        self.assertEqual(gates["PORTED_KERNEL_BOOT"]["reason"],
+                         "report_scenario_mismatch")
+        self.assertEqual(gates["PORTED_REBOOT"]["status"], "NOT_TESTED")
+
+    def test_missing_daemon_waits_are_not_tested(self):
+        steps = [s for s in PORTED_STEPS
+                 if s.get("pattern") not in mg.DAEMON_WAIT_MARKERS]
+        gates = self.full(steps)
+        self.assertEqual(gates["MIPSEL_NATIVE_ELF_ON_NDMS"]["status"],
+                         "NOT_TESTED")
+        self.assertEqual(gates["MIPSEL_NATIVE_ELF_ON_NDMS"]["reason"],
+                         "scenario_lacks_daemon_waits")
+        # ndms ready without the daemon rows: still probe-based
+        self.assertEqual(gates["PORTED_NDMS_READY"]["status"], "PASS")
+
+    def test_setup_failure_leaves_everything_untested(self):
+        gates = mg.derive_ported_gates(
+            scenario(steps=PORTED_STEPS, name="p"),
+            self.report([row("setup", outcome="FAIL")], outcome="FAIL"))
+        for name in mg.PORTED_DERIVED_GATES:
+            self.assertEqual(gates[name]["status"], "NOT_TESTED", name)
+
+    def test_pass_refused_for_ported_native_gates(self):
+        fresh = {name: mg._gate("NOT_TESTED", "unattempted")
+                 for name in mg.GATES}
+        for name in ("PORTED_KERNEL_BOOT", "PORTED_KERNEL_SMP_4VPE",
+                     "PORTED_USERSPACE_READY", "PORTED_NDMS_READY",
+                     "PORTED_LAN_READY", "PORTED_REBOOT",
+                     "MIPSEL_NATIVE_ELF_ON_NDMS"):
+            with self.assertRaises(ValueError) as cm:
+                mg.apply_labels(dict(fresh), [(name, "PASS")], {})
+            self.assertIn(name, str(cm.exception))
 
 
 if __name__ == "__main__":

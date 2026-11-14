@@ -1,0 +1,141 @@
+From e33f2737851ade09c56d17f85f9aea0d19ffde6f Mon Sep 17 00:00:00 2001
+From: lab-build <lab-build@localhost>
+Date: Sat, 14 Nov 2026 18:02:54 +0300
+Subject: [PATCH] hw: GIC/GCR fixes for the 4.9-ndm kernel SMP bring-up on
+ MT7621
+
+- GIC_SH_CONFIG NUMVPES field is the VPE count minus one (drivers
+  compute gic_vpes = field + 1, same convention as NUMINTRS).  The raw
+  count made the KeeneticOS 4.9 kernel probe a nonexistent extra VPE
+  (GIC_VPE_OTHER_ADDR write of num_vps = guest error) and skip parts of
+  its per-VPE GIC setup; the SMP counter-sync handshake hwirqs were left
+  unmapped, the reply was re-routed to VPE0 and the bring-up hung after
+  "Synchronize counters for CPU 2" with 4 VPEs.
+- GIC MAP_VP: store any VPE bit like the real GIC; a map to a VPE that
+  does not exist is a natural delivery no-op.
+- GCR: implement GCR_Cx_RESET_EXT_BASE (per-core 0x30, UEB bit 30);
+  the kernel writes it before booting a secondary core.
+---
+ hw/intc/mips_gic.c           | 15 +++++++++++++--
+ hw/misc/mips_cmgcr.c         | 23 ++++++++++++++++++++++-
+ include/hw/misc/mips_cmgcr.h | 11 +++++++++++
+ 3 files changed, 46 insertions(+), 3 deletions(-)
+
+diff --git a/hw/intc/mips_gic.c b/hw/intc/mips_gic.c
+index 5ec7b5f..ae632d1 100644
+--- a/hw/intc/mips_gic.c
++++ b/hw/intc/mips_gic.c
+@@ -395,7 +395,11 @@ static void gic_write(void *opaque, hwaddr addr, uint64_t data, unsigned size)
+         irq_src = (addr - GIC_SH_MAP0_VP_OFS) / 32;
+         OFFSET_CHECK(irq_src < gic->num_irq);
+         data = data ? ctz64(data) : -1;
+-        OFFSET_CHECK(data < gic->num_vps);
++        /*
++         * The real GIC stores any VPE bit; a map to a VPE that does not
++         * exist is a natural no-op for delivery (gic_update_pin_for_irq
++         * ignores out-of-range map_vp), so do not reject the write.
++         */
+         gic->irq_state[irq_src].map_vp = data;
+         break;
+     case VP_LOCAL_SECTION_OFS ... (VP_LOCAL_SECTION_OFS + GIC_VL_BRK_GROUP):
+@@ -429,7 +433,14 @@ static void gic_reset(void *opaque)
+                      /* COUNTBITS: 32 + 4 * n bits */
+                      ((gic->counter64 ? 8 : 0) << GIC_SH_CONFIG_COUNTBITS_SHF) |
+                      (numintrs     << GIC_SH_CONFIG_NUMINTRS_SHF)  |
+-                     (gic->num_vps << GIC_SH_CONFIG_PVPS_SHF);
++                     /* NUMVPES = number of VPEs minus 1 (drivers compute
++                      * gic_vpes = field + 1, same convention as NUMINTRS
++                      * above); the raw count made the 4.9 kernel probe a
++                      * nonexistent extra VPE (GIC_VPE_OTHER_ADDR write of
++                      * num_vps is a guest error) and skip parts of its
++                      * per-VPE GIC setup, hanging the SMP bring-up */
++                     ((gic->num_vps ? gic->num_vps - 1 : 0)
++                      << GIC_SH_CONFIG_PVPS_SHF);
+     for (i = 0; i < gic->num_vps; i++) {
+         /* Vx_CTL: TIMER_ROUTABLE (bit 1) when the CP0 timers are inputs */
+         gic->vps[i].ctl         = gic->timer_routable & BIT(i) ? 0x2 : 0x0;
+diff --git a/hw/misc/mips_cmgcr.c b/hw/misc/mips_cmgcr.c
+index 06435b7..62aa0f4 100644
+--- a/hw/misc/mips_cmgcr.c
++++ b/hw/misc/mips_cmgcr.c
+@@ -149,6 +149,10 @@ static uint64_t gcr_read(void *opaque, hwaddr addr, unsigned size)
+         return current_vps->other << (gcr->vp_per_core ? 16 : 0);
+     case MIPS_COCB_OFS + GCR_CL_OTHER_OFS:
+         return other_vps->other << (gcr->vp_per_core ? 16 : 0);
++    case MIPS_CLCB_OFS + GCR_CL_RESET_EXT_BASE_OFS:
++        return current_vps->reset_ext_base;
++    case MIPS_COCB_OFS + GCR_CL_RESET_EXT_BASE_OFS:
++        return other_vps->reset_ext_base;
+     case MIPS_CLCB_OFS + GCR_CL_ID_OFS:
+         if (gcr->vp_per_core) {
+             return cur;
+@@ -207,6 +211,22 @@ static void gcr_write(void *opaque, hwaddr addr, uint64_t data, unsigned size)
+     case MIPS_COCB_OFS + GCR_CL_OTHER_OFS:
+         gcr_set_other(gcr, other_vps, data);
+         break;
++    case MIPS_CLCB_OFS + GCR_CL_RESET_EXT_BASE_OFS:
++        if (data >> GCR_CL_RESET_EXT_BASE_EVARESET_SHF) {
++            qemu_log_mask(LOG_UNIMP, "GCR_Cx_RESET_EXT_BASE EVARESET "
++                          "is not implemented\n");
++            break;
++        }
++        current_vps->reset_ext_base = data & GCR_CL_RESET_EXT_BASE_MSK;
++        break;
++    case MIPS_COCB_OFS + GCR_CL_RESET_EXT_BASE_OFS:
++        if (data >> GCR_CL_RESET_EXT_BASE_EVARESET_SHF) {
++            qemu_log_mask(LOG_UNIMP, "GCR_Cx_RESET_EXT_BASE EVARESET "
++                          "is not implemented\n");
++            break;
++        }
++        other_vps->reset_ext_base = data & GCR_CL_RESET_EXT_BASE_MSK;
++        break;
+     default:
+         qemu_log_mask(LOG_UNIMP, "Write %d bytes at GCR offset 0x%" HWADDR_PRIx
+                       " 0x%" PRIx64 "\n", size, addr, data);
+@@ -244,6 +264,7 @@ static void mips_gcr_reset(DeviceState *dev)
+     for (i = 0; i < s->num_vps; i++) {
+         s->vps[i].other = 0;
+         s->vps[i].coherence = 0;
++        s->vps[i].reset_ext_base = 0;
+         s->vps[i].reset_base = 0xBFC00000 & GCR_CL_RESET_BASE_MSK;
+         cpu_set_exception_base(i, get_exception_base(&s->vps[i]));
+     }
+@@ -275,7 +296,7 @@ static void mips_gcr_realize(DeviceState *dev, Error **errp)
+     MIPSGCRState *s = MIPS_GCR(dev);
+ 
+     /* Create local set of registers for each VP */
+-    s->vps = g_new(MIPSGCRVPState, s->num_vps);
++    s->vps = g_new0(MIPSGCRVPState, s->num_vps);
+ }
+ 
+ static void mips_gcr_class_init(ObjectClass *klass, const void *data)
+diff --git a/include/hw/misc/mips_cmgcr.h b/include/hw/misc/mips_cmgcr.h
+index 9885066..9f67835 100644
+--- a/include/hw/misc/mips_cmgcr.h
++++ b/include/hw/misc/mips_cmgcr.h
+@@ -67,11 +67,22 @@ OBJECT_DECLARE_SIMPLE_TYPE(MIPSGCRState, MIPS_GCR)
+ #define GCR_CL_RESET_BASE_RESETBASE_MSK 0xFFFFF000U
+ #define GCR_CL_RESET_BASE_MSK GCR_CL_RESET_BASE_RESETBASE_MSK
+ 
++/* CM2/CM3 GCR_Cx_RESET_EXT_BASE (per-core block offset 0x30) */
++#define GCR_CL_RESET_EXT_BASE_OFS            0x0030
++#define GCR_CL_RESET_EXT_BASE_EVARESET_SHF   31
++#define GCR_CL_RESET_EXT_BASE_UEB_SHF        30
++#define GCR_CL_RESET_EXT_BASE_BEVEXCMASK_SHF 20
++#define GCR_CL_RESET_EXT_BASE_BEVEXCBASE_SHF 12
++#define GCR_CL_RESET_EXT_BASE_MSK                          \
++    ((MSK(16) << GCR_CL_RESET_EXT_BASE_BEVEXCBASE_SHF) |    \
++     (MSK(1) << GCR_CL_RESET_EXT_BASE_UEB_SHF))
++
+ typedef struct MIPSGCRVPState MIPSGCRVPState;
+ struct MIPSGCRVPState {
+     uint32_t other;
+     uint32_t coherence;
+     uint64_t reset_base;
++    uint32_t reset_ext_base;
+ };
+ 
+ struct MIPSGCRState {
+-- 
+2.53.0
+

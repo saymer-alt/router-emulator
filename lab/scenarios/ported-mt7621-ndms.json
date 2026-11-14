@@ -1,0 +1,85 @@
+{
+  "name": "KeeneticOS Ported MT7621: 4-VPE SMP boot to NDMS, LAN answer and reboot (Xiaomi Mi Router 3G, Breed)",
+  "evidence": "KEENETICOS_VIRTUAL",
+  "steps": [
+    {
+      "action": "wait_serial",
+      "pattern": "Boot and Recovery Environment",
+      "timeout_sec": 90
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Starting kernel",
+      "timeout_sec": 240
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Linux version",
+      "timeout_sec": 100
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Brought up 4 CPUs",
+      "timeout_sec": 240
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "init process was started",
+      "timeout_sec": 300
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Network Device Manager",
+      "timeout_sec": 120
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "system ready",
+      "timeout_sec": 600
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "waiting for connections",
+      "timeout_sec": 120
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Started version",
+      "timeout_sec": 120
+    },
+    {
+      "action": "probe_http",
+      "url": "http://127.0.0.1:8080/",
+      "statuses": [200, 301, 302],
+      "timeout_sec": 120
+    },
+    {
+      "action": "reset"
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Boot and Recovery Environment",
+      "timeout_sec": 240
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Starting kernel",
+      "timeout_sec": 240
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Linux version",
+      "timeout_sec": 100
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Brought up 4 CPUs",
+      "timeout_sec": 240
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "system ready",
+      "timeout_sec": 600
+    }
+  ]
+}
