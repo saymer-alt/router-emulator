@@ -9,9 +9,12 @@ match the scenario, reboot gates require an actual reset step plus an
 observed second boot, MIPSEL_NATIVE_ELF requires explicit execution of
 the busybox ELF binary with the command's answer verified (the answer
 marker must not occur in the sent text, so a UART echo of the command
-cannot fake the PASS), and the Ported gates require the 4-VPE SMP
+cannot fake the PASS), the Ported gates require the 4-VPE SMP
 bring-up, the NDMS userspace startup markers and the NDMS HTTP answer on
-the loopback LAN forward.  Statuses are never upgraded: BLOCKED and
+the loopback LAN forward, and PORTED_NDMC_READY requires a real ndm CLI
+session over the loopback telnet forward (prompt greeting plus a version
+command with its verified release answer — an open port or banner alone
+never satisfies it).  Statuses are never upgraded: BLOCKED and
 NOT_TESTED stay what they are.
 
 Usage:
@@ -63,6 +66,16 @@ INIT_MARKER = "init process was started"
 NDMS_READY_MARKER = "system ready"
 # telnetd + dropbear: native MIPSel daemons started by NDMS.
 DAEMON_WAIT_MARKERS = ("waiting for connections", "Started version")
+# PORTED_NDMC_READY: the ndm CLI over the loopback telnet forward.  A real
+# CLI session is proven by the prompt greeting plus a version command with
+# its verified release answer; an open TCP port or the banner alone is not
+# a CLI.  The answer markers are echo-safe (checked at scenario load).
+CLI_PROMPT_MARKER = "\\(config\\)>"
+CLI_VERSION_SEND = "show version"
+CLI_VERSION_ANSWER = "release:"
+CLI_REBOOT_SEND = "system reboot"
+CLI_REBOOT_ANSWER = "Activated system reboot"
+CLI_REBOOT_KERNEL_MARKER = "reboot: Restarting system"
 
 
 def _gate(status, reason):
@@ -321,6 +334,48 @@ def derive_ported_gates(scenario, report):
             "MIPSEL_NATIVE_ELF_ON_NDMS": native_elf}
 
 
+def derive_cli_gates(scenario, report):
+    """Derive PORTED_NDMC_READY from a report against its committed CLI
+    scenario: the ndm CLI over the loopback telnet forward must show its
+    prompt, answer a version command with the pinned release string and
+    answer a state command — matching report rows, echo-safe by load-time
+    validation.  An open port or banner alone never satisfies the gate."""
+    untested = _gate("NOT_TESTED", "cli_scenario_not_provided")
+    checked = _checked_prefix(scenario, report)
+    if checked is None:
+        return {"PORTED_NDMC_READY": _gate("FAIL", "report_scenario_mismatch")}
+    steps, rows, first_fail = checked
+
+    def telnet_idx(predicate):
+        return next((i for i, s in enumerate(steps)
+                     if s.get("action") == "telnet" and predicate(s)), None)
+
+    def state(idx):
+        if idx is None:
+            return "absent"
+        if first_fail is not None and first_fail < idx:
+            return "blocked"
+        if idx >= len(rows):
+            return "unreached"
+        return "passed" if rows[idx].get("outcome") == "PASS" else "timeout"
+
+    prompt = state(telnet_idx(lambda s: CLI_PROMPT_MARKER in s.get("greeting", "")))
+    version = state(telnet_idx(lambda s: CLI_VERSION_SEND in s.get("send", "")
+                               and CLI_VERSION_ANSWER in s.get("expect", "")))
+    # rows stop at the first failing step, so at most one of the two states
+    # is "timeout" (a direct marker timeout) while the other is blocked —
+    # the direct timeout is the gate's own FAIL verdict.
+    if "timeout" in (prompt, version):
+        return {"PORTED_NDMC_READY": _gate("FAIL", "ndm_cli_marker_timeout")}
+    if "absent" in (prompt, version):
+        return {"PORTED_NDMC_READY": _gate(
+            "NOT_TESTED", "scenario_lacks_cli_prompt_or_version_answer")}
+    if "blocked" in (prompt, version) or "unreached" in (prompt, version):
+        return {"PORTED_NDMC_READY": _gate("NOT_TESTED", "prerequisite_failed")}
+    return {"PORTED_NDMC_READY": _gate(
+        "PASS", "ndm_cli_prompt_and_version_answer_on_telnet")}
+
+
 def apply_labels(gates, statuses, reasons=None):
     """Apply controller labels; PASS is refused for native gates."""
     reasons = reasons or {}
@@ -336,11 +391,14 @@ def apply_labels(gates, statuses, reasons=None):
 
 
 def evaluate(openwrt_scenario, openwrt_report, statuses=(), reasons=None,
-             ported_scenario=None, ported_report=None):
+             ported_scenario=None, ported_report=None,
+             cli_scenario=None, cli_report=None):
     gates = {name: _gate("NOT_TESTED", "unattempted") for name in GATES}
     gates.update(derive_openwrt_gates(openwrt_scenario, openwrt_report))
     if ported_scenario is not None and ported_report is not None:
         gates.update(derive_ported_gates(ported_scenario, ported_report))
+    if cli_scenario is not None and cli_report is not None:
+        gates.update(derive_cli_gates(cli_scenario, cli_report))
     apply_labels(gates, statuses, reasons)
     return gates
 
@@ -350,6 +408,29 @@ def outcome_of(gates):
     return ("FAIL" if any(v["status"] == "FAIL" for v in values)
             else "BLOCKED" if any(v["status"] != "PASS" for v in values)
             else "PASS")
+
+
+def ported_claim(gates):
+    """Summary footer sentence derived from the evaluated Ported gates.
+
+    The boot claim must follow the evaluated gate status, never assert it
+    unconditionally: with the Ported report omitted (or a failed Ported
+    boot) the footer must not state a successful NDMS boot."""
+    boot = gates["PORTED_KERNEL_BOOT"]
+    if boot["status"] == "PASS":
+        claim = ("KeeneticOS Ported boots 4 VPEs to NDMS in QEMU (derived "
+                 "from the committed scenario report)")
+        open_gates = [name for name in ("PORTED_NDMC_READY",
+                                        "MIPSEL_ENTWARE_READY",
+                                        "MIPSEL_SERVICE_RESTART",
+                                        "MIPSEL_PERSISTENCE")
+                      if gates[name]["status"] != "PASS"]
+        if open_gates:
+            claim += ("; still open: " + ", ".join(open_gates)
+                      + (" (%s)" % ", ".join(gates[n]["reason"] for n in open_gates)))
+        return claim + "."
+    return ("KeeneticOS Ported boot evidence: %s (%s)."
+            % (boot["status"], boot["reason"]))
 
 
 def main():
@@ -363,6 +444,10 @@ def main():
                     help="committed KeeneticOS Ported scenario JSON")
     ap.add_argument("--ported-report",
                     help="report.json of the KeeneticOS Ported boot scenario")
+    ap.add_argument("--cli-scenario",
+                    help="committed ndm CLI telnet scenario JSON")
+    ap.add_argument("--cli-report",
+                    help="report.json of the ndm CLI telnet scenario")
     ap.add_argument("--set", action="append", nargs=2, metavar=("GATE", "STATUS"),
                     default=[],
                     help="explicit gate status; PASS refused for native gates")
@@ -378,9 +463,16 @@ def main():
                 Path(args.ported_scenario).read_text(encoding="utf-8"))
             ported_report = json.loads(
                 Path(args.ported_report).read_text(encoding="utf-8"))
+        cli_scenario = cli_report = None
+        if args.cli_scenario and args.cli_report:
+            cli_scenario = json.loads(
+                Path(args.cli_scenario).read_text(encoding="utf-8"))
+            cli_report = json.loads(
+                Path(args.cli_report).read_text(encoding="utf-8"))
         reasons = {name: why for name, why in args.reason}
         gates = evaluate(scenario, report, args.set, reasons,
-                         ported_scenario, ported_report)
+                         ported_scenario, ported_report,
+                         cli_scenario, cli_report)
     except ValueError as error:
         ap.error(str(error))
     report_dir = Path(args.report_dir)
@@ -411,11 +503,8 @@ def main():
                                 xml_declaration=True)
     lines += ["", "Physical-router acceptance: NOT_TESTED; the full MT7621AT "
               "4-VPE hardware profile is a separate acceptance criterion. "
-              "KeeneticOS Ported boots 4 VPEs to NDMS in QEMU (derived from "
-              "the committed scenario report); Entware, the ndm CLI over "
-              "telnet, service restart and persistence remain NOT_TESTED. "
-              "Native MIPSel ELF execution in the OpenWrt guest is NOT an "
-              "Entware check on KeeneticOS.", ""]
+              + ported_claim(gates) + " Native MIPSel ELF execution in the "
+              "OpenWrt guest is NOT an Entware check on KeeneticOS.", ""]
     (report_dir / "summary.md").write_text("\n".join(lines), encoding="utf-8")
     print("gates outcome:", outcome, "->", report_dir / "gates.json")
 

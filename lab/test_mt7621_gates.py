@@ -368,5 +368,140 @@ class PortedTests(unittest.TestCase):
             self.assertIn(name, str(cm.exception))
 
 
+CLI_STEPS = (
+    {"action": "wait_serial", "pattern": "system ready"},
+    {"action": "telnet", "port": 8023, "greeting": "\\(config\\)>"},
+    {"action": "telnet", "port": 8023, "send": "show version",
+     "expect": "release: 5\\.01\\.C\\.8\\.0-2"},
+    {"action": "telnet", "port": 8023, "send": "show system",
+     "expect": "hostname: "},
+)
+
+
+class CliGateTests(unittest.TestCase):
+    """PORTED_NDMC_READY derives only from a matching CLI scenario report:
+    prompt greeting plus a version command with its verified release
+    answer; an open port or banner alone never satisfies the gate."""
+
+    @staticmethod
+    def report(rows, name="c", outcome="PASS"):
+        return {"scenario": name, "outcome": outcome, "steps": rows}
+
+    def full(self, steps=None):
+        steps = CLI_STEPS if steps is None else steps
+        return mg.derive_cli_gates(scenario(steps=steps, name="c"),
+                                   self.report([row(s["action"])
+                                                for s in steps]))
+
+    def test_full_run_passes_ndmc_ready(self):
+        gates = self.full()
+        self.assertEqual(gates["PORTED_NDMC_READY"]["status"], "PASS")
+        self.assertEqual(gates["PORTED_NDMC_READY"]["reason"],
+                         "ndm_cli_prompt_and_version_answer_on_telnet")
+
+    def test_missing_prompt_is_not_tested(self):
+        gates = self.full(steps=(CLI_STEPS[0], CLI_STEPS[2]))
+        self.assertEqual(gates["PORTED_NDMC_READY"]["status"], "NOT_TESTED")
+
+    def test_missing_version_answer_is_not_tested(self):
+        gates = self.full(steps=(CLI_STEPS[0], CLI_STEPS[1]))
+        self.assertEqual(gates["PORTED_NDMC_READY"]["status"], "NOT_TESTED")
+
+    def test_version_marker_timeout_fails(self):
+        gates = mg.derive_cli_gates(
+            scenario(steps=CLI_STEPS, name="c"),
+            self.report([row(CLI_STEPS[0]["action"]), row("telnet"),
+                         row("telnet", outcome="FAIL")], outcome="FAIL"))
+        self.assertEqual(gates["PORTED_NDMC_READY"]["status"], "FAIL")
+
+    def test_prompt_marker_timeout_fails(self):
+        gates = mg.derive_cli_gates(
+            scenario(steps=CLI_STEPS, name="c"),
+            self.report([row(CLI_STEPS[0]["action"]),
+                         row("telnet", outcome="FAIL")], outcome="FAIL"))
+        self.assertEqual(gates["PORTED_NDMC_READY"]["status"], "FAIL")
+
+    def test_failure_before_cli_steps_is_prerequisite(self):
+        gates = mg.derive_cli_gates(
+            scenario(steps=CLI_STEPS, name="c"),
+            self.report([row(CLI_STEPS[0]["action"], outcome="FAIL")],
+                        outcome="FAIL"))
+        self.assertEqual(gates["PORTED_NDMC_READY"]["status"], "NOT_TESTED")
+
+    def test_foreign_scenario_is_refused(self):
+        foreign = mg.derive_cli_gates(
+            scenario(steps=CLI_STEPS, name="other"),
+            self.report([row(s["action"]) for s in CLI_STEPS]))
+        self.assertEqual(foreign["PORTED_NDMC_READY"]["status"], "FAIL")
+        self.assertEqual(foreign["PORTED_NDMC_READY"]["reason"],
+                         "report_scenario_mismatch")
+
+    def test_pass_refused_from_controller(self):
+        fresh = {name: mg._gate("NOT_TESTED", "unattempted")
+                 for name in mg.GATES}
+        with self.assertRaises(ValueError) as cm:
+            mg.apply_labels(dict(fresh), [("PORTED_NDMC_READY", "PASS")], {})
+        self.assertIn("PORTED_NDMC_READY", str(cm.exception))
+
+    def test_evaluate_without_cli_inputs_stays_untested(self):
+        rep = {"scenario": "s", "outcome": "PASS",
+               "steps": [row(s["action"]) for s in BOOT_STEPS]}
+        gates = mg.evaluate(scenario(steps=BOOT_STEPS), rep)
+        self.assertEqual(gates["PORTED_NDMC_READY"]["status"], "NOT_TESTED")
+        self.assertEqual(gates["PORTED_NDMC_READY"]["reason"], "unattempted")
+
+    def test_evaluate_with_cli_inputs_derives_pass(self):
+        rep = {"scenario": "s", "outcome": "PASS",
+               "steps": [row(s["action"]) for s in BOOT_STEPS]}
+        crep = {"scenario": "c", "outcome": "PASS",
+                "steps": [row(s["action"]) for s in CLI_STEPS]}
+        gates = mg.evaluate(scenario(steps=BOOT_STEPS), rep,
+                            cli_scenario=scenario(steps=CLI_STEPS, name="c"),
+                            cli_report=crep)
+        self.assertEqual(gates["PORTED_NDMC_READY"]["status"], "PASS")
+
+
+class SummaryClaimTests(unittest.TestCase):
+    """The summary footer boot claim follows the evaluated gates: with the
+    Ported report omitted or a failed Ported boot it must not assert a
+    successful 4-VPE NDMS boot."""
+
+    @staticmethod
+    def gates(**overrides):
+        gates = {name: mg._gate("NOT_TESTED", "unattempted")
+                 for name in mg.GATES}
+        gates["PORTED_KERNEL_BOOT"] = mg._gate("PASS", "kernel_boot_observed")
+        for name, (status, reason) in overrides.items():
+            gates[name] = mg._gate(status, reason)
+        return gates
+
+    def test_pass_claim_names_open_followup_gates(self):
+        claim = mg.ported_claim(self.gates(
+            PORTED_NDMC_READY=("NOT_TESTED", "unattempted")))
+        self.assertIn("boots 4 VPEs to NDMS", claim)
+        self.assertIn("PORTED_NDMC_READY", claim)
+
+    def test_all_pass_claim_names_nothing_open(self):
+        claim = mg.ported_claim(self.gates(
+            **{name: ("PASS", "e") for name in
+               ("PORTED_NDMC_READY", "MIPSEL_ENTWARE_READY",
+                "MIPSEL_SERVICE_RESTART", "MIPSEL_PERSISTENCE")}))
+        self.assertIn("boots 4 VPEs to NDMS", claim)
+        self.assertNotIn("still open", claim)
+
+    def test_failed_ported_boot_does_not_claim_boot(self):
+        claim = mg.ported_claim(self.gates(
+            PORTED_KERNEL_BOOT=("FAIL", "kernel_boot_failed")))
+        self.assertNotIn("boots 4 VPEs", claim)
+        self.assertIn("FAIL", claim)
+
+    def test_unattempted_ported_boot_does_not_claim_boot(self):
+        gates = {name: mg._gate("NOT_TESTED", "unattempted")
+                 for name in mg.GATES}
+        claim = mg.ported_claim(gates)
+        self.assertNotIn("boots 4 VPEs", claim)
+        self.assertIn("NOT_TESTED", claim)
+
+
 if __name__ == "__main__":
     unittest.main()

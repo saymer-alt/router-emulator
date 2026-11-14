@@ -1,0 +1,69 @@
+{
+  "name": "KeeneticOS Ported MT7621: native system reboot from the ndm CLI over telnet (not a QEMU reset)",
+  "evidence": "KEENETICOS_VIRTUAL",
+  "steps": [
+    {
+      "action": "wait_serial",
+      "pattern": "Boot and Recovery Environment",
+      "timeout_sec": 90
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Starting kernel",
+      "timeout_sec": 240
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Linux version",
+      "timeout_sec": 100
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Brought up 4 CPUs",
+      "timeout_sec": 240
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "system ready",
+      "timeout_sec": 600
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "waiting for connections",
+      "timeout_sec": 120
+    },
+    {
+      "action": "telnet",
+      "port": 8023,
+      "greeting": "\\(config\\)>",
+      "timeout_sec": 60
+    },
+    {
+      "action": "telnet",
+      "port": 8023,
+      "send": "system reboot",
+      "expect": "Activated system reboot",
+      "timeout_sec": 60
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "reboot: Restarting system",
+      "timeout_sec": 90
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Starting kernel",
+      "timeout_sec": 240
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Brought up 4 CPUs",
+      "timeout_sec": 240
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "system ready",
+      "timeout_sec": 600
+    }
+  ]
+}
