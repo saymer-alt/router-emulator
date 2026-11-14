@@ -24,11 +24,13 @@ a Ported NAND assembler and gate aggregation for the MT7621 preset family.
 | MIPSEL_NATIVE_ELF_ON_NDMS | PASS | same scenario: native MIPSel NDMS daemons started (telnetd, dropbear) |
 | PORTED_REBOOT | PASS | same scenario: `reset` step + a second full boot to `system ready` |
 | NEGATIVE_IMAGE_REJECT | PASS | unit tests: wrong size/hash/magic/output refused |
+| HOST_ISOLATION | PASS | guest runs with `-w offline -l user`; forwards bound to 127.0.0.1 only |
+| CLEANUP | PASS | the runner's disposable workspace copy is removed after the run |
 | PORTED_NDMC_READY | NOT_TESTED | the Ported serial console is log-only; the ndm CLI over telnet (port 23) is not scripted yet |
 | MIPSEL_ENTWARE_READY | NOT_TESTED | Entware installation is the next cycle's work, after NDMS |
 | MIPSEL_SERVICE_RESTART, MIPSEL_PERSISTENCE | NOT_TESTED | service state across reboots is not scripted yet |
 
-Totals: **13 PASS / 6 NOT_TESTED** (aggregate outcome BLOCKED while any
+Totals: **15 PASS / 4 NOT_TESTED** of 19 gates (aggregate outcome BLOCKED while any
 gate is not PASS).  Hardware acceptance (physical MT7621AT, full 4-VPE
 profile) is a separate acceptance criterion and is not covered by
 virtual evidence.  Native gates (`MT7621_OPENWRT_BOOT`, `MT7621_REBOOT`,
