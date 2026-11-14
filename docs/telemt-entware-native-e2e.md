@@ -20,7 +20,7 @@ No production build/release/tag or GitHub token is changed.
 | Family | Release asset | SHA-256 |
 | --- | --- | --- |
 | TeleMT | `telemt_3.5.17-1_aarch64-3.10.ipk` | `ccab455710761f236f5da6f2f2a852de575e5db164f59b8157c30e270110e509` |
-| Panel Lite | `telemt-panel-lite_1.0.0.rc.3-1_aarch64-3.10.ipk` | `e649a14fe0bfb670d620116fa4d503a96285a085f89fa328e4612ccedbb4fdaa` |
+| Panel Lite | `telemt-panel-lite_1.0.0.rc.4-1_aarch64-3.10.ipk` | `39053c1e747685183390f0d2f683b2ef72b7d3d9afe97c8724c4358620b64424` |
 
 GitHub Actions downloads only these two assets from
 `saymer-alt/entware-go/releases/download/latest/` and verifies the exact
@@ -32,7 +32,7 @@ The host parses the actual compressed IPK format (`tar.gz` outer container,
 The **synthetic successor** for update mechanics contains the exact same
 binary/data archive and changes only `control` Version:
 `3.5.17-1 → 3.5.18-1` and
-`1.0.0~rc.3-1 → 1.0.0~rc.4-1`.
+`1.0.0~rc.4-1 → 1.0.0~rc.5-1`.
 It is **only a laboratory fixture**, not a claimed upstream release, and is
 never uploaded or installed on real devices.
 
