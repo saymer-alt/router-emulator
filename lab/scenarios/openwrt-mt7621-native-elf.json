@@ -1,0 +1,96 @@
+{
+  "name": "OpenWrt MT7621 boot, native MIPSel ELF execution and reboot (Xiaomi Mi Router 3G, Breed)",
+  "evidence": "OPENWRT_QEMU_SMOKE",
+  "steps": [
+    {
+      "action": "wait_serial",
+      "pattern": "Boot and Recovery Environment",
+      "timeout_sec": 90
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Starting kernel",
+      "timeout_sec": 240
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Linux version",
+      "timeout_sec": 100
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Please press Enter",
+      "timeout_sec": 600
+    },
+    {
+      "action": "probe_http",
+      "url": "http://127.0.0.1:8080/cgi-bin/luci/",
+      "statuses": [200, 403],
+      "body_regex": "luci-static",
+      "timeout_sec": 300
+    },
+    {
+      "action": "send_serial",
+      "text": "",
+      "enter": true
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "root@OpenWrt",
+      "timeout_sec": 60
+    },
+    {
+      "action": "send_serial",
+      "text": "uname -m",
+      "enter": true
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "mips",
+      "timeout_sec": 60
+    },
+    {
+      "action": "send_serial",
+      "text": "/bin/busybox uname -m",
+      "enter": true
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "mips",
+      "timeout_sec": 60
+    },
+    {
+      "action": "send_serial",
+      "text": "grep -m1 'system type' /proc/cpuinfo",
+      "enter": true
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "MediaTek MT7621",
+      "timeout_sec": 60
+    },
+    {
+      "action": "reset"
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Boot and Recovery Environment",
+      "timeout_sec": 240
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Starting kernel",
+      "timeout_sec": 240
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Linux version",
+      "timeout_sec": 100
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Please press Enter",
+      "timeout_sec": 600
+    }
+  ]
+}
