@@ -43,7 +43,8 @@
       "port": 8023,
       "send": "system reboot",
       "expect": "Activated system reboot",
-      "timeout_sec": 60
+      "timeout_sec": 60,
+      "greeting": "\\(config\\)>"
     },
     {
       "action": "wait_serial",

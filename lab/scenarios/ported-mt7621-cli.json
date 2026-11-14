@@ -43,14 +43,16 @@
       "port": 8023,
       "send": "show version",
       "expect": "release: 5\\.01\\.C\\.8\\.0-2",
-      "timeout_sec": 60
+      "timeout_sec": 60,
+      "greeting": "\\(config\\)>"
     },
     {
       "action": "telnet",
       "port": 8023,
       "send": "show system",
       "expect": "hostname: ",
-      "timeout_sec": 60
+      "timeout_sec": 60,
+      "greeting": "\\(config\\)>"
     }
   ]
 }

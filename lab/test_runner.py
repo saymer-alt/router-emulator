@@ -185,6 +185,30 @@ class InteractiveStepTests(unittest.TestCase):
         self.refused({"action": "telnet", "port": 8023, "send": "show version",
                       "expect": "version", "timeout_sec": 5})
 
+    def test_telnet_send_sequence_is_valid(self):
+        payload = self.load({"action": "telnet", "port": 8023,
+                             "send": ["user lab", "password plain {password}"],
+                             "expect": "ok", "timeout_sec": 5})
+        self.assertEqual(payload["steps"][0]["send"],
+                         ["user lab", "password plain {password}"])
+
+    def test_telnet_send_sequence_item_validation(self):
+        self.refused({"action": "telnet", "port": 8023, "send": [],
+                      "expect": "ok", "timeout_sec": 5})
+        self.refused({"action": "telnet", "port": 8023,
+                      "send": ["user lab", "password plain X\nY"],
+                      "expect": "ok", "timeout_sec": 5})
+        self.refused({"action": "telnet", "port": 8023,
+                      "send": ["user lab", 42], "expect": "ok",
+                      "timeout_sec": 5})
+        self.refused({"action": "telnet", "port": 8023,
+                      "send": ["user lab", "password plain ok"],
+                      "expect": "ok", "timeout_sec": 5})
+
+    def test_ssh_send_sequence_refused(self):
+        self.refused({"action": "ssh", "port": 8022, "send": ["id", "uname"],
+                      "expect": "uid", "timeout_sec": 5})
+
     def test_telnet_multiline_send_refused(self):
         self.refused({"action": "telnet", "port": 8023,
                       "send": "show version\nshow system",
@@ -222,6 +246,15 @@ class InteractiveStepTests(unittest.TestCase):
             runner.validate_runtime_access([step], {8023}, None)
         self.assertIn("9999", str(cm.exception))
 
+    def test_runtime_access_placeholder_needs_credentials(self):
+        step = {"action": "telnet", "port": 8023, "greeting": "x",
+                "send": ["user lab", "password plain {password}"],
+                "expect": "ok", "timeout_sec": 5}
+        runner.validate_runtime_access([step], {8023},
+                                       {"username": "lab", "password": "x"})
+        with self.assertRaises(ValueError):
+            runner.validate_runtime_access([step], {8023}, None)
+
     def test_runtime_access_requires_credentials_for_ssh(self):
         step = {"action": "ssh", "port": 8022, "send": "id", "expect": "uid",
                 "timeout_sec": 5}
@@ -253,6 +286,17 @@ class InteractiveStepTests(unittest.TestCase):
         self.assertEqual(
             cleaner.feed(b"\xff\xfa\x18\x00x\xff\xf0ab"), b"ab")
 
+    # --- credential substitution ---------------------------------------
+    def test_substitute_credentials_resolves_and_fails_closed(self):
+        creds = {"username": "lab", "password": "SecretToken0123456789"}
+        self.assertEqual(
+            runner.substitute_credentials("user {username} password plain {password}", creds),
+            "user lab password plain SecretToken0123456789")
+        self.assertEqual(runner.substitute_credentials("show version", creds),
+                         "show version")
+        with self.assertRaises(ValueError):
+            runner.substitute_credentials("password plain {password}", None)
+
     # --- runtime against a local fake CLI ------------------------------
     def serve(self, script):
         server = socket.socket()
@@ -268,6 +312,19 @@ class InteractiveStepTests(unittest.TestCase):
                 time.sleep(0.2)
                 received.append(conn.recv(1024))
                 conn.sendall(b"\r\nrelease: 5.01.C.8.0-2\r\n(config)> \x1b[K")
+                time.sleep(0.3)
+            elif action == "configure":
+                conn.sendall(b"\xff\xfd\x01\x1b[K(config)> \x1b[K")
+                time.sleep(0.2)
+                conn.settimeout(2)
+                buf = b""
+                while b"user lab\n" not in buf \
+                        or b"SecretToken0123456789\n" not in buf:
+                    buf += conn.recv(1024)
+                received.append(buf)
+                conn.sendall(b"\r\n(config-user)> \x1b[K")
+                time.sleep(0.5)
+                conn.sendall(b"\r\nCore::Authenticator: user added. user-added\r\n")
                 time.sleep(0.3)
             elif action == "close":
                 conn.close()
@@ -290,8 +347,9 @@ class InteractiveStepTests(unittest.TestCase):
         threading.Thread(target=worker, daemon=True).start()
         return server, port, received
 
-    def step_run(self, step, port):
-        runner.run_telnet_step(step, {port}, lambda s: time.monotonic() + s,
+    def step_run(self, step, port, credentials=None):
+        runner.run_telnet_step(step, {port}, credentials,
+                               lambda s: time.monotonic() + s,
                                lambda: None)
 
     def test_telnet_greeting_command_answer_passes(self):
@@ -329,9 +387,23 @@ class InteractiveStepTests(unittest.TestCase):
         step = {"action": "telnet", "port": 9999, "greeting": "x",
                 "timeout_sec": 1}
         with self.assertRaises(ValueError):
-            runner.run_telnet_step(step, set(),
+            runner.run_telnet_step(step, set(), None,
                                    lambda s: time.monotonic() + s,
                                    lambda: None)
+
+    def test_telnet_sequence_single_session_with_substitution(self):
+        server, port, received = self.serve(["configure"])
+        try:
+            step = {"action": "telnet", "port": port,
+                    "greeting": r"\(config\)>",
+                    "send": ["user lab", "password plain {password}"],
+                    "expect": "user-added", "timeout_sec": 15}
+            self.step_run(step, port,
+                          {"username": "lab", "password": "SecretToken0123456789"})
+            self.assertIn(b"user lab\n", received[0])
+            self.assertIn(b"password plain SecretToken0123456789\n", received[0])
+        finally:
+            server.close()
 
     def test_ssh_refuses_unforwarded_port_before_paramiko(self):
         step = {"action": "ssh", "port": 9999, "send": "id", "expect": "uid",
