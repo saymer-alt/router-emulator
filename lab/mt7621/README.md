@@ -26,11 +26,11 @@ a Ported NAND assembler and gate aggregation for the MT7621 preset family.
 | NEGATIVE_IMAGE_REJECT | PASS | unit tests: wrong size/hash/magic/output refused |
 | HOST_ISOLATION | PASS | guest runs with `-w offline -l user`; forwards bound to 127.0.0.1 only |
 | CLEANUP | PASS | the runner's disposable workspace copy is removed after the run |
-| PORTED_NDMC_READY | NOT_TESTED | the Ported serial console is log-only; the ndm CLI over telnet (port 23) is not scripted yet |
-| MIPSEL_ENTWARE_READY | NOT_TESTED | Entware installation is the next cycle's work, after NDMS |
-| MIPSEL_SERVICE_RESTART, MIPSEL_PERSISTENCE | NOT_TESTED | service state across reboots is not scripted yet |
+| PORTED_NDMC_READY | PASS | `lab/scenarios/ported-mt7621-cli.json`: the ndm CLI over the loopback telnet forward answers (prompt greeting + verified `show version` release answer) |
+| MIPSEL_ENTWARE_READY | NOT_TESTED | virtual USB ext4 mount, opkg init and native package install from the pinned mirror proven; completion blocked by a reproducible Deadwood reload loop (see below) |
+| MIPSEL_SERVICE_RESTART, MIPSEL_PERSISTENCE | NOT_TESTED | follow-up cycle after the Entware completion |
 
-Totals: **15 PASS / 4 NOT_TESTED** of 19 gates (aggregate outcome BLOCKED while any
+Totals: **16 PASS / 3 NOT_TESTED** of 19 gates (aggregate outcome BLOCKED while any
 gate is not PASS).  Hardware acceptance (physical MT7621AT, full 4-VPE
 profile) is a separate acceptance criterion and is not covered by
 virtual evidence.  Native gates (`MT7621_OPENWRT_BOOT`, `MT7621_REBOOT`,
@@ -165,6 +165,52 @@ emulated NFI (`mt7621-nand: NFI core FIFO write operation timed out`
 ×4 during `env save`; erase lands, data never commits).  The static env
 blob bypasses this.  Reads and `boot flash` are unaffected.
 
+### The ndm CLI over telnet (2026-11-14)
+
+The fresh Ported configuration exposes the ndm CLI on telnet:23 without
+a login prompt ("administrative password is not configured"), and the
+scenario runner drives it with the new `telnet` action (loopback forward
+`8023:23`, IAC/ANSI filtering, one command per step, LF submits the
+line — CR alone only echoes).  `lab/scenarios/ported-mt7621-cli.json`
+proves a real CLI session, not just an open port: the `(config)>`
+prompt greeting, `show version` with the verified pinned release answer
+(`release: 5.01.C.8.0-2`) and `show system` (`hostname: Xiaomi_3G`);
+`PORTED_NDMC_READY` derives PASS from that report.  A 15 s settle after
+telnetd's first `waiting for connections` line is required: CLI sessions
+opened in the first seconds can hang.  A companion scenario,
+`ported-mt7621-cli-reboot.json`, drives the native `system reboot` from
+the CLI (`Core::System::RebootManager: Activated system reboot.`) and
+observes the second full 4-VPE boot on the UART — CLI-initiated reboot
+evidence, separate from the QEMU-reset reboot.  Command sequences
+(`send` as a list) on one session configure user contexts
+(`user lab` → `password plain …` → tags), with `{password}`/`{username}`
+placeholders resolved only from the private credentials file.
+
+### Entware mipselsf on the virtual USB drive (2026-11-14, BLOCKED at completion)
+
+Proven with the `mipselsf` profile (pinned installer + 24 packages in
+`lab/entware-mipselsf.lock.json`, mirror served on 127.0.0.1 and reached
+by the guest through the `192.168.1.100:80` guestfwd):
+
+* the virtual usb-storage drive is detected and its ext4 volume mounts
+  to `/opt` (`Opkg::Manager: /tmp/mnt/1111… mounted to /opt/.`);
+* opkg init refused without a privileged password
+  (`Opkg::Manager: unable to init the opkg with a weak admin password.`)
+  and proceeded after the builtin admin password was set through the
+  ndm CLI — CLI-driven guest configuration works;
+* the installer ran **native opkg installs from the pinned mirror**
+  (libgcc, libc, libpthread, librt, entware-release installed; UART
+  evidence from `/opt/etc/init.d/doinstall`).
+
+BLOCKED, exact cause: after a partial install the following boots stop
+in a reproducible Deadwood reload loop (SIGHUP restarts, no `system
+ready`, installer not retried; 2/2 reproductions).  Suspected but
+unproven: the half-installed Entware release hooks (DNS override)
+interacting with 4.9-ndm's Deadwood.  Follow-up: bisect from a fresh
+NAND (install to completion with the complete 24-package mirror), then
+the ELF checks (`opkg print-architecture`, `bash --version`), service
+restart and persistence gates.
+
 ## Gate aggregation
 
 ```bash
@@ -173,6 +219,8 @@ python3 lab/mt7621/mt7621_gates.py --report-dir work/reports/mt7621-gates \
   --openwrt-report work/reports/openwrt-mt7621/report.json \
   --ported-scenario lab/scenarios/ported-mt7621-ndms.json \
   --ported-report work/reports/ported-mt7621-ndms/report.json \
+  --cli-scenario lab/scenarios/ported-mt7621-cli.json \
+  --cli-report work/reports/ported-mt7621-cli/report.json \
   --set MT7621_QEMU_BUILD PASS --reason MT7621_QEMU_BUILD qemu_mipsel_built_from_pinned_source \
   --set PORTED_IMAGE_VALIDATION PASS --reason PORTED_IMAGE_VALIDATION pinned_sha256_and_header_validated \
   --set PORTED_NDMC_READY NOT_TESTED --reason PORTED_NDMC_READY serial_console_log_only_telnet_cli_deferred \
