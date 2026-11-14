@@ -51,12 +51,12 @@
     },
     {
       "action": "send_serial",
-      "text": "head -c 4 /bin/busybox",
+      "text": "/bin/busybox uname -m",
       "enter": true
     },
     {
       "action": "wait_serial",
-      "pattern": "\u007fELF",
+      "pattern": "mips",
       "timeout_sec": 60
     },
     {
@@ -76,6 +76,16 @@
       "action": "wait_serial",
       "pattern": "Boot and Recovery Environment",
       "timeout_sec": 240
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Starting kernel",
+      "timeout_sec": 240
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Linux version",
+      "timeout_sec": 100
     },
     {
       "action": "wait_serial",

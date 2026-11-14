@@ -13,12 +13,23 @@ a Ported NAND assembler and gate aggregation for the MT7621 preset family.
 |---|---|---|
 | MT7621_QEMU_BUILD | PASS | `lab/mt7621/build_qemu_mipsel.sh`, QEMU v10.1.0 (`f8b2f64e`) + 65 patches |
 | MT7621_OPENWRT_BOOT | PASS | `lab/scenarios/openwrt-mt7621-native-elf.json` via `lab/run.py` |
-| MT7621_REBOOT | PASS | same scenario, second boot after `reset` |
-| MIPSEL_NATIVE_ELF | PASS | `uname -m` → `mips`, `\x7fELF` of `/bin/busybox`, executed in the guest |
+| MT7621_REBOOT | PASS | same scenario: `reset` step + second kernel boot (`Linux version` after reset) |
+| MIPSEL_NATIVE_ELF | PASS | explicit `/bin/busybox uname -m` executed in the guest, answer `mips` verified (echo-safe marker) |
 | PORTED_IMAGE_VALIDATION | PASS | `lab/mt7621/prepare_ported_mir3g.py` pinning + negative tests |
 | NEGATIVE_IMAGE_REJECT | PASS | unit tests: wrong size/hash/magic/output refused |
 | PORTED_KERNEL_BOOT | **BLOCKED** | KeeneticOS 4.9-ndm-5 kernel hangs at SMP bring-up (see below) |
 | PORTED_NDMC_READY, MIPSEL_ENTWARE_READY, MIPSEL_SERVICE_RESTART, MIPSEL_PERSISTENCE | NOT_TESTED | prerequisite blocked |
+
+Totals: **8 PASS / 1 BLOCKED / 4 NOT_TESTED** (aggregate outcome BLOCKED).
+Hardware acceptance (physical MT7621AT, full 4-VPE profile) is a separate
+acceptance criterion and is not covered by virtual evidence.  Native gates
+(`MT7621_OPENWRT_BOOT`, `MT7621_REBOOT`, `PORTED_KERNEL_BOOT`,
+`PORTED_NDMC_READY`, `MIPSEL_ENTWARE_READY`, `MIPSEL_NATIVE_ELF`,
+`MIPSEL_SERVICE_RESTART`, `MIPSEL_PERSISTENCE`) can never be set to PASS
+from the controller — `mt7621_gates.py` refuses `--set GATE PASS` for them;
+their PASS is derived only from a scenario report validated against the
+committed scenario (row order, actual `reset` + second kernel boot,
+explicit ELF execution with an echo-safe answer marker).
 
 **NDMS/Entware on Keenetic Ported remain BLOCKED.**  Native MIPSel ELF
 execution was proven in the **OpenWrt** guest; that is *not* an Entware
@@ -145,6 +156,7 @@ blob bypasses this.  Reads and `boot flash` are unaffected.
 
 ```bash
 python3 lab/mt7621/mt7621_gates.py --report-dir work/reports/mt7621-gates \
+  --openwrt-scenario lab/scenarios/openwrt-mt7621-native-elf.json \
   --openwrt-report work/reports/openwrt-mt7621/report.json \
   --set MT7621_QEMU_BUILD PASS --reason MT7621_QEMU_BUILD qemu_mipsel_built_from_pinned_source \
   --set PORTED_IMAGE_VALIDATION PASS --reason PORTED_IMAGE_VALIDATION pinned_sha256_and_header_validated \
@@ -158,7 +170,10 @@ python3 lab/mt7621/mt7621_gates.py --report-dir work/reports/mt7621-gates \
   --set CLEANUP PASS --reason CLEANUP disposable_workspace_removed_after_run
 ```
 
-Statuses are never upgraded by this script; BLOCKED stays BLOCKED.
+Statuses are never upgraded by this script; BLOCKED stays BLOCKED, and
+`--set GATE PASS` is refused for native gates (see the gate table above) —
+their PASS can only be derived from a scenario report that matches the
+committed scenario.
 
 ## Limits
 
