@@ -280,12 +280,19 @@ def lifecycle(guest, evidence, source: Path, ipk_dir: Path) -> bool:
         if any(status(guest, data[0]) for data in PKGS.values()):
             raise RuntimeError('lab starts with an already installed package')
         for fam, (pkg, old, _, _, _, _, binary) in PKGS.items():
+            phase = 'CLEAN_DRY_' + fam.upper()
+            print('TELEMT_IPK_E2E: PHASE=' + phase, flush=True)
             cmd(guest, shell_cmd('install.sh ' + fam), timeout=120)
+            phase = 'CLEAN_DRY_STATUS_' + fam.upper()
             if status(guest, pkg) is not None:
                 raise RuntimeError('dry run mutated opkg')
+            phase = 'CLEAN_APPLY_' + fam.upper()
+            print('TELEMT_IPK_E2E: PHASE=' + phase, flush=True)
             cmd(guest, shell_cmd('install.sh ' + fam + ' --apply'), timeout=180)
+            phase = 'CLEAN_STATUS_' + fam.upper()
             if status(guest, pkg) != old:
                 raise RuntimeError('opkg metadata differs after install')
+            phase = 'CLEAN_BINARY_' + fam.upper()
             if cmd(guest, 'sha256sum ' + binary).split()[0] != current[fam]['binary']:
                 raise RuntimeError('installed binary identity mismatch')
         check_inert(guest, inert)
