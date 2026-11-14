@@ -1,0 +1,51 @@
+{
+  "name": "OpenWrt MT7621 baseline boot/reboot (Xiaomi Mi Router 3G, Breed)",
+  "evidence": "OPENWRT_QEMU_SMOKE",
+  "steps": [
+    {
+      "action": "wait_serial",
+      "pattern": "Boot and Recovery Environment",
+      "timeout_sec": 90
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Starting kernel",
+      "timeout_sec": 240
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Linux version",
+      "timeout_sec": 100
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Please press Enter",
+      "timeout_sec": 600
+    },
+    {
+      "action": "probe_http",
+      "url": "http://127.0.0.1:8080/cgi-bin/luci/",
+      "statuses": [200, 403],
+      "body_regex": "luci-static",
+      "timeout_sec": 300
+    },
+    {
+      "action": "reset"
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Boot and Recovery Environment",
+      "timeout_sec": 240
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Starting kernel",
+      "timeout_sec": 240
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Please press Enter",
+      "timeout_sec": 600
+    }
+  ]
+}
