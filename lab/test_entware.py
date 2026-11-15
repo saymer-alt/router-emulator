@@ -210,7 +210,7 @@ class EntwareTests(unittest.TestCase):
                        b'/opt/etc/init.d/S51dropbear start\n'
                        b"wget -qO - --post-data='[]' localhost:79/rci/ >/dev/null 2>&1\n"
                        b'if grep -q "222"; then\necho port\nfi\n'
-                       b"echo '[5/5] \\"Entware\\" installed!'\n"
+                       b"echo '[5/5] \"Entware\" installed!'\n"
                        b'rm /opt/etc/init.d/doinstall\n'
                        b'rm "$0"\n')
             with tarfile.open(source, 'w:gz') as archive:
