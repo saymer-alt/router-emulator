@@ -1,4 +1,5 @@
 import io
+import json
 import pathlib
 import tarfile
 import tempfile
@@ -173,3 +174,44 @@ class EntwareTests(unittest.TestCase):
             # The relay bridge swallows stdout in the tail section, so the
             # gate marker must also land on the console device itself.
             self.assertIn(b"echo '[5/5] \"Entware\" installed!' > /dev/console", script)
+
+
+class MipselLockTests(unittest.TestCase):
+    """MIPSel is a complete offline feed, rather than a handful of IPKs."""
+
+    def load_lock(self):
+        return json.loads(pathlib.Path(__file__).with_name(
+            "entware-mipselsf.lock.json").read_text(encoding="utf8"))
+
+    def test_pinned_feed_is_closed_and_has_verified_four_packages(self):
+        lock = self.load_lock()
+        self.assertEqual(entware.validate_mipsel_lock(lock), 25)
+        packages = {p["Package"]: p for p in lock["packages"]}
+        for name in ("libstdcpp", "libncurses", "libncursesw", "terminfo"):
+            self.assertIn(name, packages)
+        self.assertEqual(packages["libstdcpp"]["Version"], "8.4.0-12")
+        for name in ("libncurses", "libncursesw", "terminfo"):
+            self.assertEqual(packages[name]["Version"], "6.6.20260801-4a")
+
+    def test_missing_transitive_dependency_fails_before_fetch(self):
+        lock = self.load_lock()
+        lock["packages"] = [p for p in lock["packages"]
+                            if p["Package"] != "libstdcpp"]
+        with self.assertRaisesRegex(ValueError, "opt-ndmsv2 -> libstdcpp"):
+            entware.validate_mipsel_lock(lock)
+
+    def test_duplicate_package_is_refused(self):
+        lock = self.load_lock()
+        lock["packages"].append(dict(lock["packages"][0]))
+        with self.assertRaisesRegex(ValueError, "duplicate"):
+            entware.validate_mipsel_lock(lock)
+
+    def test_foreign_arch_and_unpinned_feed_are_refused(self):
+        lock = self.load_lock()
+        lock["packages"][0]["Architecture"] = "aarch64-3.10"
+        with self.assertRaisesRegex(ValueError, "architecture"):
+            entware.validate_mipsel_lock(lock)
+        lock = self.load_lock()
+        lock["packages"][0]["url"] = "http://example.invalid/unsafe.ipk"
+        with self.assertRaisesRegex(ValueError, "URL"):
+            entware.validate_mipsel_lock(lock)
