@@ -576,6 +576,149 @@ class EntwareScenarioContractTests(unittest.TestCase):
         self.assertIn("DOINSTALL_ABSENT", text)
         self.assertIn("Activated system reboot", text)
 
+
+ENTWARE_STEPS = (
+    {"action": "wait_serial", "pattern": "system ready"},
+    {"action": "telnet", "port": 8023, "greeting": "\\(config\\)>"},
+    {"action": "telnet", "port": 8023, "send": "user admin"},
+    {"action": "wait_serial", "pattern": "mounted to /opt"},
+    {"action": "wait_serial", "pattern": "[1/5]"},
+    {"action": "wait_serial", "pattern": "configured init script"},
+    {"action": "ssh", "port": 8022, "send": "/opt/bin/opkg print-architecture",
+     "expect": "mipsel-3\\.4_kn 200"},
+    {"action": "ssh", "port": 8022, "send": "/opt/bin/opkg list-installed",
+     "expect": "entware-release - "},
+    {"action": "ssh", "port": 8022, "send": "/opt/bin/opkg install bash",
+     "expect": "Configuring bash"},
+    {"action": "ssh", "port": 8022, "send": "/opt/bin/bash --version",
+     "expect": "mipsel-openwrt-linux-gnu"},
+    {"action": "ssh", "port": 8022,
+     "send": "/opt/bin/busybox test ! -e /opt/etc/init.d/doinstall && printf 'DOINSTALL_%s\\n' ABSENT",
+     "expect": "DOINSTALL_ABSENT"},
+    {"action": "ssh", "port": 8022,
+     "send": "printf MARK$((7*6)) > /opt/.lab-marker; /opt/bin/busybox cat /opt/.lab-marker",
+     "expect": "MARK42"},
+    {"action": "telnet", "port": 8023, "send": "system reboot"},
+    {"action": "wait_serial", "pattern": "reboot: Restarting system"},
+    {"action": "wait_serial", "pattern": "system ready"},
+    {"action": "ssh", "port": 8022, "send": "/opt/bin/busybox cat /proc/mounts",
+     "expect": "/opt ext4"},
+    {"action": "ssh", "port": 8022, "send": "/opt/bin/opkg print-architecture",
+     "expect": "mipsel-3\\.4_kn 200"},
+    {"action": "ssh", "port": 8022, "send": "/opt/bin/bash --version",
+     "expect": "mipsel-openwrt-linux-gnu"},
+    {"action": "ssh", "port": 8022, "send": "/opt/bin/busybox cat /opt/.lab-marker",
+     "expect": "MARK42"},
+)
+
+
+class EntwareGateDerivationTests(unittest.TestCase):
+    """MIPSEL_ENTWARE_READY derives only from a matching scenario report.
+
+    The full chain (installer completion, real opkg answers, native ELF
+    answer with the real Entware banner triplet, native reboot, post-reboot
+    persistence) must be covered by the committed scenario and passed in
+    the report; failures before the installer completion marker are
+    prerequisites, failures after it are Entware-chain failures."""
+
+    @staticmethod
+    def report(rows, name="s", outcome="PASS"):
+        return {"scenario": name, "outcome": outcome, "steps": rows}
+
+    @staticmethod
+    def gates(rows):
+        rep = EntwareGateDerivationTests.report([row(s["action"]) for s in rows])
+        return mg.derive_entware_gates(scenario(steps=rows), rep)
+
+    def test_full_chain_passes(self):
+        gates = self.gates(ENTWARE_STEPS)
+        self.assertEqual(gates["MIPSEL_ENTWARE_READY"]["status"], "PASS")
+        self.assertEqual(gates["MIPSEL_ENTWARE_READY"]["reason"],
+                         "entware_clean_bootstrap_opkg_elf_reboot_persistence")
+
+    def test_reordered_reboot_proofs_do_not_fake_pass(self):
+        steps = list(ENTWARE_STEPS)
+        # Swap the post-reboot system-ready with the initial boot marker:
+        # same number of successful rows, wrong chronological chain.
+        ready = [i for i, s in enumerate(steps)
+                 if s.get("action") == "wait_serial"
+                 and s.get("pattern") == "system ready"]
+        self.assertEqual(len(ready), 2)
+        steps.pop(ready[1])
+        steps.insert(4, {"action": "wait_serial", "pattern": "system ready"})
+        gate = self.gates(tuple(steps))["MIPSEL_ENTWARE_READY"]
+        self.assertEqual(gate["status"], "NOT_TESTED")
+        self.assertEqual(gate["reason"], "entware_chain_not_ordered")
+
+    def test_missing_post_reboot_mount_does_not_fake_pass(self):
+        steps = tuple(s for s in ENTWARE_STEPS if not
+                      (s.get("action") == "ssh" and "/proc/mounts" in s.get("send", "")))
+        gate = self.gates(steps)["MIPSEL_ENTWARE_READY"]
+        self.assertEqual(gate["status"], "NOT_TESTED")
+
+    def test_missing_second_opkg_proof_does_not_fake_pass(self):
+        steps = list(ENTWARE_STEPS)
+        arch = [i for i, s in enumerate(steps) if s.get("action") == "ssh"
+                and "opkg print-architecture" in s.get("send", "")]
+        steps.pop(arch[1])
+        self.assertEqual(self.gates(steps)["MIPSEL_ENTWARE_READY"]["status"],
+                         "NOT_TESTED")
+
+    def test_report_outcome_mismatch_does_not_fake_pass(self):
+        rep = self.report([row(s["action"]) for s in ENTWARE_STEPS],
+                          outcome="FAIL")
+        gate = mg.derive_entware_gates(scenario(steps=ENTWARE_STEPS), rep)
+        self.assertEqual(gate["MIPSEL_ENTWARE_READY"]["status"], "FAIL")
+        self.assertEqual(gate["MIPSEL_ENTWARE_READY"]["reason"],
+                         "report_outcome_mismatch")
+
+    def test_report_mismatch_fails_closed(self):
+        rep = self.report([row(s["action"]) for s in ENTWARE_STEPS],
+                          name="other-scenario")
+        gates = mg.derive_entware_gates(scenario(steps=ENTWARE_STEPS), rep)
+        self.assertEqual(gates["MIPSEL_ENTWARE_READY"]["status"], "FAIL")
+        self.assertEqual(gates["MIPSEL_ENTWARE_READY"]["reason"],
+                         "report_scenario_mismatch")
+
+    def test_scenario_missing_persistence_chain_stays_not_tested(self):
+        gates = self.gates(ENTWARE_STEPS[:-1])
+        self.assertEqual(gates["MIPSEL_ENTWARE_READY"]["status"], "NOT_TESTED")
+        self.assertEqual(gates["MIPSEL_ENTWARE_READY"]["reason"],
+                         "scenario_lacks_entware_chain")
+
+    def test_scenario_missing_post_reboot_elf_answer_stays_not_tested(self):
+        gates = self.gates(ENTWARE_STEPS[:-2])
+        self.assertEqual(gates["MIPSEL_ENTWARE_READY"]["status"], "NOT_TESTED")
+        self.assertEqual(gates["MIPSEL_ENTWARE_READY"]["reason"],
+                         "scenario_lacks_entware_chain")
+
+    def test_prerequisite_failure_stays_not_tested(self):
+        rows = [row(s["action"]) for s in ENTWARE_STEPS]
+        rows[3]["outcome"] = "FAIL"  # "mounted to /opt" timed out
+        rep = self.report(rows, outcome="FAIL")
+        gates = mg.derive_entware_gates(scenario(steps=ENTWARE_STEPS), rep)
+        self.assertEqual(gates["MIPSEL_ENTWARE_READY"]["status"], "NOT_TESTED")
+        self.assertEqual(gates["MIPSEL_ENTWARE_READY"]["reason"],
+                         "prerequisite_failed")
+
+    def test_installer_completion_timeout_fails(self):
+        rows = [row(s["action"]) for s in ENTWARE_STEPS]
+        rows[5]["outcome"] = "FAIL"  # "configured init script" timed out
+        rep = self.report(rows, outcome="FAIL")
+        gates = mg.derive_entware_gates(scenario(steps=ENTWARE_STEPS), rep)
+        self.assertEqual(gates["MIPSEL_ENTWARE_READY"]["status"], "FAIL")
+        self.assertEqual(gates["MIPSEL_ENTWARE_READY"]["reason"],
+                         "entware_chain_step_failed")
+
+    def test_native_elf_answer_timeout_fails(self):
+        rows = [row(s["action"]) for s in ENTWARE_STEPS]
+        rows[9]["outcome"] = "FAIL"  # first bash --version answer failed
+        rep = self.report(rows, outcome="FAIL")
+        gates = mg.derive_entware_gates(scenario(steps=ENTWARE_STEPS), rep)
+        self.assertEqual(gates["MIPSEL_ENTWARE_READY"]["status"], "FAIL")
+        self.assertEqual(gates["MIPSEL_ENTWARE_READY"]["reason"],
+                         "entware_chain_step_failed")
+
 if __name__ == "__main__":
     unittest.main()
 
