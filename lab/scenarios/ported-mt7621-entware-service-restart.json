@@ -1,0 +1,266 @@
+{
+  "name": "KeeneticOS MT7621 Entware Stage C: disposable service start/restart/PID/liveness/cleanup",
+  "evidence": "KEENETIC_PORTED_EXPERIMENTAL",
+  "steps": [
+    {
+      "action": "wait_serial",
+      "pattern": "Boot and Recovery Environment",
+      "timeout_sec": 120
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Starting kernel",
+      "timeout_sec": 240
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Linux version",
+      "timeout_sec": 120
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Brought up 4 CPUs",
+      "timeout_sec": 240
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "system ready",
+      "timeout_sec": 600
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "waiting for connections",
+      "timeout_sec": 120
+    },
+    {
+      "action": "sleep",
+      "seconds": 15
+    },
+    {
+      "action": "telnet",
+      "port": 8023,
+      "greeting": "\\(config\\)>",
+      "timeout_sec": 60
+    },
+    {
+      "action": "telnet",
+      "port": 8023,
+      "send": "show version",
+      "expect": "release: 5\\.01\\.C\\.8\\.0-2",
+      "timeout_sec": 60,
+      "greeting": "\\(config\\)>"
+    },
+    {
+      "action": "telnet",
+      "port": 8023,
+      "send": "show running-config",
+      "expect": "Model:|interface|dns|opkg|hostname",
+      "timeout_sec": 60,
+      "greeting": "\\(config\\)>"
+    },
+    {
+      "action": "telnet",
+      "port": 8023,
+      "greeting": "\\(config\\)>",
+      "send": [
+        "user admin",
+        "password plain {password}",
+        "exit",
+        "system configuration save",
+        "opkg disk KASOPT:/"
+      ],
+      "expect": "\\(config\\)>",
+      "timeout_sec": 180
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "mounted to /opt",
+      "timeout_sec": 180
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "\\[1/5\\]",
+      "reject_pattern": "Critical error:|Please use ext2/ext3/ext4",
+      "timeout_sec": 300
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "configured init script",
+      "reject_pattern": "Critical error:|Please use ext2/ext3/ext4",
+      "timeout_sec": 600
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "/opt/bin/opkg print-architecture",
+      "expect": "mipsel-3\\.4_kn 200",
+      "timeout_sec": 120
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "/opt/bin/opkg list-installed",
+      "expect": "entware-release - ",
+      "timeout_sec": 60
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "/opt/bin/opkg install bash",
+      "expect": "Configuring bash",
+      "timeout_sec": 300
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "/opt/bin/bash --version",
+      "expect": "mipsel-openwrt-linux-gnu",
+      "timeout_sec": 60
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "/opt/bin/busybox test ! -e /opt/etc/init.d/doinstall && printf 'DOINSTALL_%s\\n' ABSENT",
+      "expect": "DOINSTALL_ABSENT",
+      "timeout_sec": 60
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "printf MARK$((7*6)) > /opt/.lab-marker; /opt/bin/busybox cat /opt/.lab-marker",
+      "expect": "MARK42",
+      "timeout_sec": 60
+    },
+    {
+      "action": "telnet",
+      "port": 8023,
+      "greeting": "Login:|\\(config\\)>",
+      "send": [
+        "admin",
+        "{password}",
+        "system reboot"
+      ],
+      "expect": "Activated system reboot",
+      "timeout_sec": 120
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "reboot: Restarting system",
+      "timeout_sec": 120
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Boot and Recovery Environment",
+      "timeout_sec": 240
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Starting kernel",
+      "timeout_sec": 240
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Brought up 4 CPUs",
+      "timeout_sec": 240
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "system ready",
+      "timeout_sec": 600
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "waiting for connections",
+      "timeout_sec": 120
+    },
+    {
+      "action": "telnet",
+      "port": 8023,
+      "greeting": "Login:|\\(config\\)>",
+      "send": [
+        "admin",
+        "{password}",
+        "show version"
+      ],
+      "expect": "release: 5\\.01\\.C\\.8\\.0-2",
+      "timeout_sec": 120
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "/opt/bin/busybox cat /proc/mounts",
+      "expect": "/opt ext4",
+      "timeout_sec": 180
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "/opt/bin/opkg print-architecture",
+      "expect": "mipsel-3\\.4_kn 200",
+      "timeout_sec": 180
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "/opt/bin/bash --version",
+      "expect": "mipsel-openwrt-linux-gnu",
+      "timeout_sec": 120
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "/opt/bin/busybox cat /opt/.lab-marker",
+      "expect": "MARK42",
+      "timeout_sec": 120
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "/opt/bin/busybox --list | /opt/bin/busybox grep -x base64 >/dev/null && printf 'APPLET_%s\\n' READY",
+      "expect": "APPLET_READY",
+      "timeout_sec": 90
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "printf '%s' 'IyEvb3B0L2Jpbi9zaAojIERpc3Bvc2FibGUgTVQ3NjIxIEVudHdhcmUtb25seSB0ZXN0IHNlcnZpY2UsIG5ldmVyIGluc3RhbGxlZCBvbiByZWFsIHJvdXRlcnMuCnNldCAtZXUKcGlkZmlsZT0vb3B0L3Zhci9ydW4vbGFicHJvYmUucGlkCmNvdW50ZXI9L29wdC92YXIvcnVuL2xhYnByb2JlLmNvdW50CmNhc2UgIiR7MTotfSIgaW4Kc3RhcnQpCiAgL29wdC9iaW4vYnVzeWJveCBta2RpciAtcCAvb3B0L3Zhci9ydW4KICBpZiBbIC1yICIkcGlkZmlsZSIgXTsgdGhlbgogICAgb2xkPSQoL29wdC9iaW4vYnVzeWJveCBjYXQgIiRwaWRmaWxlIikKICAgIGlmIGtpbGwgLTAgIiRvbGQiIDI+L2Rldi9udWxsOyB0aGVuIGV4aXQgMTsgZmkKICBmaQogIC9vcHQvYmluL2J1c3lib3ggc2xlZXAgMzYwMCA8L2Rldi9udWxsID4vZGV2L251bGwgMj4mMSAmCiAgcGlkPSQhCiAgcHJpbnRmICclc1xuJyAiJHBpZCIgPiAiJHBpZGZpbGUiCiAgY291bnQ9MAogIGlmIFsgLXIgIiRjb3VudGVyIiBdOyB0aGVuIGNvdW50PSQoL29wdC9iaW4vYnVzeWJveCBjYXQgIiRjb3VudGVyIik7IGZpCiAgY291bnQ9JCgoY291bnQrMSkpCiAgcHJpbnRmICclc1xuJyAiJGNvdW50IiA+ICIkY291bnRlciIKICA7OwpzdG9wKQogIFsgLXIgIiRwaWRmaWxlIiBdIHx8IGV4aXQgMQogIHBpZD0kKC9vcHQvYmluL2J1c3lib3ggY2F0ICIkcGlkZmlsZSIpCiAga2lsbCAiJHBpZCIKICAvb3B0L2Jpbi9idXN5Ym94IHJtIC1mICIkcGlkZmlsZSIKICA7OwpyZXN0YXJ0KQogICIkMCIgc3RvcAogICIkMCIgc3RhcnQKICA7OwpzdGF0dXMpCiAgWyAtciAiJHBpZGZpbGUiIF0gfHwgZXhpdCAxCiAgcGlkPSQoL29wdC9iaW4vYnVzeWJveCBjYXQgIiRwaWRmaWxlIikKICBraWxsIC0wICIkcGlkIiAyPi9kZXYvbnVsbCB8fCBleGl0IDEKICBwcmludGYgJ1JVTk5JTkcgJXMgJXNcbicgIiQoL29wdC9iaW4vYnVzeWJveCBjYXQgIiRjb3VudGVyIikiICIkcGlkIgogIDs7CiopIGV4aXQgMiA7Owplc2FjCg==' | /opt/bin/busybox base64 -d > /opt/etc/init.d/S98labprobe && /opt/bin/busybox chmod 700 /opt/etc/init.d/S98labprobe && /opt/bin/busybox test -s /opt/etc/init.d/S98labprobe && printf 'LAB_SERVICE_%s\\n' READY",
+      "expect": "LAB_SERVICE_READY",
+      "timeout_sec": 90
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "/opt/bin/sh /opt/etc/init.d/S98labprobe start && /opt/bin/sh /opt/etc/init.d/S98labprobe status",
+      "expect": "RUNNING 1 [0-9]+",
+      "timeout_sec": 90
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "/opt/bin/busybox cp /opt/var/run/labprobe.pid /opt/var/run/labprobe.first && /opt/bin/busybox test -s /opt/var/run/labprobe.first && printf 'FIRST_%s\\n' SAVED",
+      "expect": "FIRST_SAVED",
+      "timeout_sec": 90
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "/opt/bin/sh /opt/etc/init.d/S98labprobe restart && /opt/bin/sh /opt/etc/init.d/S98labprobe status",
+      "expect": "RUNNING 2 [0-9]+",
+      "timeout_sec": 90
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "old=$(/opt/bin/busybox cat /opt/var/run/labprobe.first); now=$(/opt/bin/busybox cat /opt/var/run/labprobe.pid); [ \"$old\" != \"$now\" ] && kill -0 \"$now\" && [ \"$(/opt/bin/busybox cat /opt/var/run/labprobe.count)\" = 2 ] && printf 'RESTART_%s\\n' VERIFIED",
+      "expect": "RESTART_VERIFIED",
+      "timeout_sec": 90
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "/opt/bin/sh /opt/etc/init.d/S98labprobe stop && /opt/bin/busybox test ! -e /opt/var/run/labprobe.pid && /opt/bin/busybox rm -f /opt/etc/init.d/S98labprobe /opt/var/run/labprobe.first /opt/var/run/labprobe.count && printf 'LAB_%s\\n' CLEANED",
+      "expect": "LAB_CLEANED",
+      "timeout_sec": 90
+    }
+  ]
+}

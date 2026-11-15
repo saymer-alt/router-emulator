@@ -1,0 +1,38 @@
+#!/opt/bin/sh
+# Disposable MT7621 Entware-only test service, never installed on real routers.
+set -eu
+pidfile=/opt/var/run/labprobe.pid
+counter=/opt/var/run/labprobe.count
+case "${1:-}" in
+start)
+  /opt/bin/busybox mkdir -p /opt/var/run
+  if [ -r "$pidfile" ]; then
+    old=$(/opt/bin/busybox cat "$pidfile")
+    if kill -0 "$old" 2>/dev/null; then exit 1; fi
+  fi
+  /opt/bin/busybox sleep 3600 </dev/null >/dev/null 2>&1 &
+  pid=$!
+  printf '%s\n' "$pid" > "$pidfile"
+  count=0
+  if [ -r "$counter" ]; then count=$(/opt/bin/busybox cat "$counter"); fi
+  count=$((count+1))
+  printf '%s\n' "$count" > "$counter"
+  ;;
+stop)
+  [ -r "$pidfile" ] || exit 1
+  pid=$(/opt/bin/busybox cat "$pidfile")
+  kill "$pid"
+  /opt/bin/busybox rm -f "$pidfile"
+  ;;
+restart)
+  "$0" stop
+  "$0" start
+  ;;
+status)
+  [ -r "$pidfile" ] || exit 1
+  pid=$(/opt/bin/busybox cat "$pidfile")
+  kill -0 "$pid" 2>/dev/null || exit 1
+  printf 'RUNNING %s %s\n' "$(/opt/bin/busybox cat "$counter")" "$pid"
+  ;;
+*) exit 2 ;;
+esac

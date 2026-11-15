@@ -461,6 +461,54 @@ def derive_entware_gates(scenario, report):
         "FAIL", "entware_chain_step_failed")}
 
 
+
+def derive_service_restart_gate(scenario, report):
+    """Independent guest-evidence Stage C service restart. Never infer it
+    from the existing 32-step Entware bootstrap or another native gate."""
+    checked = _checked_prefix(scenario, report)
+    if checked is None:
+        return {"MIPSEL_SERVICE_RESTART": _gate("FAIL", "report_scenario_mismatch")}
+    steps, rows, first_fail = checked
+
+    def positions(expect, needle):
+        return [i for i, s in enumerate(steps)
+                if s.get("action") == "ssh"
+                and s.get("expect") == expect
+                and needle in s.get("send", "")]
+
+    # All proof commands are executed over fresh loopback SSH sessions.
+    # Remote exit status 0 and the echo-safe actual output are validated
+    # by run_ssh_step, not assumed from these scenario descriptions.
+    applet = positions("APPLET_READY", "grep -x base64")
+    fixture = positions("LAB_SERVICE_READY", "base64 -d > /opt/etc/init.d/S98labprobe")
+    started = positions("RUNNING 1 [0-9]+", "S98labprobe start")
+    saved = positions("FIRST_SAVED", "labprobe.first")
+    restarted = positions("RUNNING 2 [0-9]+", "S98labprobe restart")
+    proof = positions("RESTART_VERIFIED", 'old" != "$now')
+    cleanup = positions("LAB_CLEANED", "S98labprobe stop")
+    post_boot = [i for i, s in enumerate(steps)
+                 if s.get("action") == "ssh"
+                 and s.get("send") == "/opt/bin/busybox cat /opt/.lab-marker"
+                 and s.get("expect") == "MARK42"]
+    stages = (applet, fixture, started, saved, restarted, proof, cleanup)
+    if not post_boot or len(post_boot) != 1 or any(len(p) != 1 for p in stages):
+        return {"MIPSEL_SERVICE_RESTART": _gate(
+            "NOT_TESTED", "scenario_lacks_service_restart_chain")}
+    order = (post_boot[0],) + tuple(p[0] for p in stages)
+    if any(a >= b for a, b in zip(order, order[1:])):
+        return {"MIPSEL_SERVICE_RESTART": _gate(
+            "NOT_TESTED", "service_restart_chain_not_ordered")}
+    if first_fail is None:
+        if report.get("outcome") != "PASS":
+            return {"MIPSEL_SERVICE_RESTART": _gate(
+                "FAIL", "report_outcome_mismatch")}
+        return {"MIPSEL_SERVICE_RESTART": _gate(
+            "PASS", "lab_service_restart_new_pid_and_liveness")}
+    if first_fail < applet[0]:
+        return {"MIPSEL_SERVICE_RESTART": _gate("NOT_TESTED", "prerequisite_failed")}
+    return {"MIPSEL_SERVICE_RESTART": _gate("FAIL", "service_restart_chain_step_failed")}
+
+
 def apply_labels(gates, statuses, reasons=None):
     """Apply controller labels; PASS is refused for native gates."""
     reasons = reasons or {}
@@ -478,7 +526,8 @@ def apply_labels(gates, statuses, reasons=None):
 def evaluate(openwrt_scenario, openwrt_report, statuses=(), reasons=None,
              ported_scenario=None, ported_report=None,
              cli_scenario=None, cli_report=None,
-             entware_scenario=None, entware_report=None):
+             entware_scenario=None, entware_report=None,
+             service_scenario=None, service_report=None):
     gates = {name: _gate("NOT_TESTED", "unattempted") for name in GATES}
     gates.update(derive_openwrt_gates(openwrt_scenario, openwrt_report))
     if ported_scenario is not None and ported_report is not None:
@@ -487,6 +536,8 @@ def evaluate(openwrt_scenario, openwrt_report, statuses=(), reasons=None,
         gates.update(derive_cli_gates(cli_scenario, cli_report))
     if entware_scenario is not None and entware_report is not None:
         gates.update(derive_entware_gates(entware_scenario, entware_report))
+    if service_scenario is not None and service_report is not None:
+        gates.update(derive_service_restart_gate(service_scenario, service_report))
     apply_labels(gates, statuses, reasons)
     return gates
 
@@ -544,6 +595,10 @@ def main():
                     help="committed Entware clean-bootstrap scenario JSON")
     ap.add_argument("--entware-report",
                     help="report.json of the Entware clean-bootstrap scenario")
+    ap.add_argument("--service-scenario",
+                    help="committed Entware disposable-service Stage C scenario")
+    ap.add_argument("--service-report",
+                    help="report.json of the independent service-restart scenario")
     ap.add_argument("--set", action="append", nargs=2, metavar=("GATE", "STATUS"),
                     default=[],
                     help="explicit gate status; PASS refused for native gates")
@@ -571,11 +626,18 @@ def main():
                 Path(args.entware_scenario).read_text(encoding="utf-8"))
             entware_report = json.loads(
                 Path(args.entware_report).read_text(encoding="utf-8"))
+        service_scenario = service_report = None
+        if args.service_scenario and args.service_report:
+            service_scenario = json.loads(
+                Path(args.service_scenario).read_text(encoding="utf-8"))
+            service_report = json.loads(
+                Path(args.service_report).read_text(encoding="utf-8"))
         reasons = {name: why for name, why in args.reason}
         gates = evaluate(scenario, report, args.set, reasons,
                          ported_scenario, ported_report,
                          cli_scenario, cli_report,
-                         entware_scenario, entware_report)
+                         entware_scenario, entware_report,
+                         service_scenario, service_report)
     except ValueError as error:
         ap.error(str(error))
     report_dir = Path(args.report_dir)
