@@ -1,0 +1,43 @@
+Full UART scan of the single clean tz-skip guest run (Issue #82 / PR #83, 2026-11-15)
+======================================================================================
+
+Run provenance
+--------------
+- Scenario: lab/scenarios/ported-mt7621-entware-tz-skip.json (33 steps)
+- Driver:   lab/mt7621/entware_e2e.py (fresh NAND copy + freshly built ext4 image
+            and pinned 25-package mipselsf mirror from lab/entware-mipselsf.lock.json)
+- Result:   PASS 33/33, 596 s, failure=None (report.json, same folder)
+- UART:     3100 lines, 2 full boot cycles (2x "Starting kernel")
+
+Crash-pattern scan over the ENTIRE UART log (not only the scenario result)
+--------------------------------------------------------------------------
+grep -i "SIGSEGV|Segmentation fault|do_page_fault|Oops|Kernel panic" -> 4 hits,
+all false positives: the kernel module name "mtdoops_proc.ko" contains "oops"
+(2 boot cycles x "loading /lib/modules/4.9-ndm-5/mtdoops_proc.ko" + 2x
+"mtdoops_proc: Attached to MTD device 8").  Zero real hits.
+
+grep -i "critical error|wget: |busybox.*error|segmentation" -> 0 hits.
+grep "wget" (any output line) -> 0 hits: the optional TZ GET is omitted for
+mipsel, so no BusyBox wget runs the timeout path that previously SIGSEGV'd
+(do_page_fault, epc=00485adc in busybox) during the doinstall window.
+
+Timing of the previously wedging window
+---------------------------------------
+[4/5] Setting timezone ... at 03:03:49
+lab-tz-begin / lab-tz-skipped / lab-tz-end / lab-dropbear-begin (same second)
+[5/5] "Entware" installed! / lab-post-begin
+configured init script + saving (http/rci) at 03:03:51  ->  window ~2 s, no wedge
+(dropbear started inside the window; SSH probes connected at 03:03:51+)
+
+Native reboot and persistence
+-----------------------------
+"reboot: Restarting system" (console line 1714), then a full second boot;
+post-reboot SSH probes PASS: /proc/mounts shows /opt ext4, opkg
+print-architecture -> mipsel-3.4_kn 200, /opt/bin/bash --version banner
+mipsel-openwrt-linux-gnu, /opt/.lab-marker -> MARK42.
+
+Sanitization
+------------
+report.json contains only step actions/outcomes/timings and the scenario name
+(no credentials, no host paths, no addresses).  The full console log stays
+outside the repository; this folder keeps only the excerpt file.

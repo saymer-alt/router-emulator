@@ -1,0 +1,36 @@
+# UART excerpt — clean tz-skip run, Issue #82 / PR #83 (2026-11-15)
+# Source: single full guest cycle, scenario lab/scenarios/ported-mt7621-entware-tz-skip.json (33/33 PASS, 596 s).
+# Sanitized: no secrets, no host paths; line numbers refer to the full console log
+# (kept privately; total 3100 lines, 2 full boot cycles).
+
+== doinstall window (console lines 1378-1396): ==
+Send EDNS
+[I] Jan  1 03:03:47 ndm: Opkg::Manager: /opt/etc/init.d/doinstall: Info: "rsa" key was created. 
+[I] Jan  1 03:03:48 ndm: Opkg::Manager: /opt/etc/init.d/doinstall: Info: Generating "ed25519" key... 
+[I] Jan  1 03:03:48 ndm: Opkg::Manager: /opt/etc/init.d/doinstall: Info: "ed25519" key was created. 
+[I] Jan  1 03:03:49 ndm: Opkg::Manager: /opt/etc/init.d/doinstall: [4/5] Setting timezone, script initrc and starting "dropbear"... 
+lab-tz-begin
+lab-tz-skipped
+lab-tz-end
+lab-dropbear-begin
+[I] Jan  1 03:03:49 dropbear[1940]: Running in background
+Send EDNS
+[5/5] "Entware" installed!
+lab-post-begin
+[I] Jan  1 03:03:51 ndm: Opkg::Manager: configured init script: "/opt/etc/init.d/rc.unslung". 
+[I] Jan  1 03:03:51 ndm: Core::System::StartupConfig: saving (http/rci). 
+init: 713 process exited.
+[I] Jan  1 03:03:51 dropbear[1950]: Child connection from 192.168.1.250:48604
+[I] Jan  1 03:03:51 dropbear[1951]: Child connection from 192.168.1.250:48614
+[I] Jan  1 03:03:51 dropbear[1950]: Exit before auth from <192.168.1.250:48604>: Exited normally
+
+== native reboot (console lines 1708-1716): ==
+reboot: stopping init...
+init: the system is going down...
+init: SIGTERM sent to all processes.
+init: 2084 process exited.
+init: SIGKILL sent to all processes.
+init: requesting system reboot...
+reboot: Restarting system
+Machine restart ... 
+
