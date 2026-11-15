@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Local stdlib tests: no QEMU, firmware, network or GitHub credentials."""
 import json
+import re
 from pathlib import Path
 import socket
 import tempfile
@@ -404,6 +405,19 @@ class InteractiveStepTests(unittest.TestCase):
             self.assertIn(b"password plain SecretToken0123456789\n", received[0])
         finally:
             server.close()
+
+
+    def test_ssh_marker_with_nonzero_exit_fails_closed(self):
+        # A command can produce a convincing marker and then fail.
+        with self.assertRaisesRegex(RuntimeError, "status 7"):
+            runner.verify_ssh_response(7, b"Configuring bash\\n", re.compile(b"Configuring bash"))
+
+    def test_ssh_zero_exit_and_expected_marker_passes(self):
+        runner.verify_ssh_response(0, b"mipsel-3.4_kn 200", re.compile(b"mipsel-3[.]4_kn 200"))
+
+    def test_ssh_zero_exit_without_expected_marker_is_failure(self):
+        with self.assertRaisesRegex(RuntimeError, "marker not matched"):
+            runner.verify_ssh_response(0, b"invalid response", re.compile(b"installed"))
 
     def test_ssh_refuses_unforwarded_port_before_paramiko(self):
         step = {"action": "ssh", "port": 9999, "send": "id", "expect": "uid",

@@ -27,7 +27,7 @@ a Ported NAND assembler and gate aggregation for the MT7621 preset family.
 | HOST_ISOLATION | PASS | guest runs with `-w offline -l user`; forwards bound to 127.0.0.1 only |
 | CLEANUP | PASS | the runner's disposable workspace copy is removed after the run |
 | PORTED_NDMC_READY | PASS | `lab/scenarios/ported-mt7621-cli.json`: the ndm CLI over the loopback telnet forward answers (prompt greeting + verified `show version` release answer) |
-| MIPSEL_ENTWARE_READY | NOT_TESTED | virtual USB ext4 mount, opkg init and native package install from the pinned mirror proven; completion blocked by a reproducible Deadwood reload loop (see below) |
+| MIPSEL_ENTWARE_READY | NOT_TESTED | clean bootstrap (pristine NAND + fresh USB + full 25-package mirror) installs all 16 base packages and reaches [4/5], then wedges with no doinstall output; the loop is a clean-bootstrap problem, not dirty recovery (see below) |
 | MIPSEL_SERVICE_RESTART, MIPSEL_PERSISTENCE | NOT_TESTED | follow-up cycle after the Entware completion |
 
 Totals: **16 PASS / 3 NOT_TESTED** of 19 gates (aggregate outcome BLOCKED while any
@@ -186,30 +186,49 @@ evidence, separate from the QEMU-reset reboot.  Command sequences
 (`user lab` → `password plain …` → tags), with `{password}`/`{username}`
 placeholders resolved only from the private credentials file.
 
-### Entware mipselsf on the virtual USB drive (2026-11-14, BLOCKED at completion)
+### Entware mipselsf on the virtual USB drive (2026-11-15, clean-bootstrap wedge at [4/5])
 
-Proven with the `mipselsf` profile (pinned installer + 24 packages in
+Proven with the `mipselsf` profile (pinned installer + 25 packages in
 `lab/entware-mipselsf.lock.json`, mirror served on 127.0.0.1 and reached
-by the guest through the `192.168.1.100:80` guestfwd):
+by the guest through the `192.168.1.100:80` guestfwd).  The clean
+bootstrap (pristine NAND assembled by `prepare_ported_mir3g.py`, fresh
+USB ext4 image, complete 25-package mirror, strong builtin admin
+password set and config saved via the ndm CLI before `opkg disk
+KASOPT:/`) now reaches much further than the 2026-11-14 partial run:
 
-* the virtual usb-storage drive is detected and its ext4 volume mounts
-  to `/opt` (`Opkg::Manager: /tmp/mnt/1111… mounted to /opt/.`);
-* opkg init refused without a privileged password
-  (`Opkg::Manager: unable to init the opkg with a weak admin password.`)
-  and proceeded after the builtin admin password was set through the
-  ndm CLI — CLI-driven guest configuration works;
-* the installer ran **native opkg installs from the pinned mirror**
-  (libgcc, libc, libpthread, librt, entware-release installed; UART
-  evidence from `/opt/etc/init.d/doinstall`).
+* USB detected, ext4 mounted to `/opt`
+  (`Opkg::Manager: /tmp/mnt/1111… mounted to /opt/.`);
+* `npkg` inflates both seeded installer archives; doinstall runs;
+* **all 16 base packages install natively from the pinned mirror**,
+  including `findutils` (the 2026-11-14 failure point) and `opt-ndmsv2`
+  (which ships `rc.unslung`); SSH keys generated ([3/5]);
+* `[4/5]` echoes (Setting timezone, script initrc and starting
+  "dropbear") — and then the script produces **no further output for
+  600 s**: the first statement after that echo is the unbounded TZ RCI
+  GET (`wget -qO - localhost:79/rci/show/clock/date/tz`), and the RCI
+  POST (`opkg initrc` + configuration save) never executes (no
+  `configured init script`, no `saving (http/rci)`).
 
-BLOCKED, exact cause: after a partial install the following boots stop
-in a reproducible Deadwood reload loop (SIGHUP restarts, no `system
-ready`, installer not retried; 2/2 reproductions).  Suspected but
-unproven: the half-installed Entware release hooks (DNS override)
-interacting with 4.9-ndm's Deadwood.  Follow-up: bisect from a fresh
-NAND (install to completion with the complete 24-package mirror), then
-the ELF checks (`opkg print-architecture`, `bash --version`), service
-restart and persistence gates.
+Discrimination result (Issue #76's narrow goal): the failure is a
+**reproducible clean-bootstrap problem, not a dirty-recovery problem** —
+2/2 clean runs wedge at the same point.  The repeating Deadwood
+`Got signal 1` messages are **not** the wedge: they run at a steady
+~15 s rate throughout (first seen during normal CLI-session config
+updates, correlated with `Http::Manager: updated configuration` and
+MT7621 Wi-Fi ACS/channel-switch events; the ARM64 reference stand shows
+**zero** such reloads), continue unchanged after the wedge, and did not
+stop ndm from installing 16 packages.  `MIPSEL_ENTWARE_READY` therefore
+stays NOT_TESTED: no install completion, no `opkg`/ELF proof, no reboot
+proof.
+
+The lab patch now bounds the TZ probe (`wget -qT 3`) and brackets the
+[4/5] tail with `/dev/console` markers (`lab-tz-begin/end`,
+`lab-dropbear-begin`, `lab-post-begin`) — the write path the `[5/5]`
+marker already proved lands on the UART even when the doinstaller stdout
+bridge stalls — so one follow-up run bisects the wedge to the exact
+statement.  Drive the whole cycle with `lab/mt7621/entware_e2e.py`
+(fresh workspace; pristine NAND; committed scenario
+`lab/scenarios/ported-mt7621-entware.json`).
 
 ## Gate aggregation
 
