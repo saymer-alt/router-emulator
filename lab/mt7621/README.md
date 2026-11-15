@@ -7,7 +7,7 @@ existing upstream `mt7621-router` machine (`qemu-system-mipsel`, patches
 rules.  No new emulator was written; this directory only adds a build script,
 a Ported NAND assembler and gate aggregation for the MT7621 preset family.
 
-## What is proven (2026-11-14, see the gate table below)
+## What is proven (2026-11-15, see the gate table below)
 
 | Gate | Status | Evidence |
 |---|---|---|
@@ -27,10 +27,10 @@ a Ported NAND assembler and gate aggregation for the MT7621 preset family.
 | HOST_ISOLATION | PASS | guest runs with `-w offline -l user`; forwards bound to 127.0.0.1 only |
 | CLEANUP | PASS | the runner's disposable workspace copy is removed after the run |
 | PORTED_NDMC_READY | PASS | `lab/scenarios/ported-mt7621-cli.json`: the ndm CLI over the loopback telnet forward answers (prompt greeting + verified `show version` release answer) |
-| MIPSEL_ENTWARE_READY | NOT_TESTED | clean bootstrap (pristine NAND + fresh USB + full 25-package mirror) installs all 16 base packages and reaches [4/5], then wedges with no doinstall output; the loop is a clean-bootstrap problem, not dirty recovery (see below) |
-| MIPSEL_SERVICE_RESTART, MIPSEL_PERSISTENCE | NOT_TESTED | follow-up cycle after the Entware completion |
+| MIPSEL_ENTWARE_READY | PASS | `lab/scenarios/ported-mt7621-entware.json` via `lab/mt7621/entware_e2e.py`: full 32-step chain PASS (2026-11-15 diag4) — installer completion, real opkg answers, native `bash --version` (`mipsel-openwrt-linux-gnu`), `DOINSTALL_ABSENT`, `MARK42`, native `system reboot`, post-reboot `/opt ext4` + opkg + bash + marker; derived by `derive_entware_gates` from the report against the committed scenario |
+| MIPSEL_SERVICE_RESTART, MIPSEL_PERSISTENCE | NOT_TESTED | separate scripted scope (Issue #76 §6); the diag4 run already observed Entware surviving a native reboot through the same chain |
 
-Totals: **16 PASS / 3 NOT_TESTED** of 19 gates (aggregate outcome BLOCKED while any
+Totals: **17 PASS / 2 NOT_TESTED** of 19 gates (aggregate outcome BLOCKED while any
 gate is not PASS).  Hardware acceptance (physical MT7621AT, full 4-VPE
 profile) is a separate acceptance criterion and is not covered by
 virtual evidence.  Native gates (`MT7621_OPENWRT_BOOT`, `MT7621_REBOOT`,
@@ -186,7 +186,7 @@ evidence, separate from the QEMU-reset reboot.  Command sequences
 (`user lab` → `password plain …` → tags), with `{password}`/`{username}`
 placeholders resolved only from the private credentials file.
 
-### Entware mipselsf on the virtual USB drive (2026-11-15, clean-bootstrap wedge at [4/5])
+### Entware mipselsf on the virtual USB drive (2026-11-15, wedge bisected and resolved)
 
 Proven with the `mipselsf` profile (pinned installer + 25 packages in
 `lab/entware-mipselsf.lock.json`, mirror served on 127.0.0.1 and reached
@@ -217,9 +217,8 @@ Discrimination result (Issue #76's narrow goal): the failure is a
 updates, correlated with `Http::Manager: updated configuration` and
 MT7621 Wi-Fi ACS/channel-switch events; the ARM64 reference stand shows
 **zero** such reloads), continue unchanged after the wedge, and did not
-stop ndm from installing 16 packages.  `MIPSEL_ENTWARE_READY` therefore
-stays NOT_TESTED: no install completion, no `opkg`/ELF proof, no reboot
-proof.
+stop ndm from installing 16 packages.  The section below records the
+follow-up diagnostic cycle that bisected and resolved this wedge.
 
 The lab patch now bounds the TZ probe (`wget -qT 3`) and brackets the
 [4/5] tail with `/dev/console` markers (`lab-tz-begin/end`,
@@ -229,6 +228,56 @@ bridge stalls — so one follow-up run bisects the wedge to the exact
 statement.  Drive the whole cycle with `lab/mt7621/entware_e2e.py`
 (fresh workspace; pristine NAND; committed scenario
 `lab/scenarios/ported-mt7621-entware.json`).
+
+### The follow-up diagnostic cycle (2026-11-15, Issue #76): the wedge is the doinstall TZ RCI GET window
+
+One clean diagnostic run on merged main (`entware_e2e.py`, freshly
+assembled pristine NAND, fresh USB image, mirror rebuilt from the pinned
+25-package lock) fired **all five markers in order** (`lab-tz-begin` →
+`lab-tz-end` → `lab-dropbear-begin` → `[5/5]` → `lab-post-begin`) and
+reached `configured init script` in 87 s — the [4/5] wedge is the
+unbounded TZ RCI GET, exactly as bisected.  The run then failed only on
+the committed `bash --version` answer marker, which offline `strings`
+proof showed can never match: the Entware mipselsf bash 5.3.20(1)
+carries the triplet `mipsel-openwrt-linux-gnu` and no
+`mipsel-unknown-linux` string at all (the only "unknown" strings are
+bash error messages).  The scenario marker was corrected and the next
+full cycle **passed 32/32 in 545 s**: real `opkg print-architecture`
+(`mipsel-3.4_kn 200`), `opkg list-installed`, `opkg install bash`,
+native `bash --version`, `DOINSTALL_ABSENT`, `MARK42`, native
+`system reboot`, second 4-VPE boot to `system ready`, and post-reboot
+persistence (`/opt ext4` mount, opkg, bash, marker).  `MIPSEL_ENTWARE_READY`
+derives PASS from that report (`derive_entware_gates`).
+
+Why the RCI GET was never served (verified, not inferred):
+
+* Outside the doinstall window the same endpoint answers immediately
+  (`GET /rci/show/clock/date/tz` → `200 OK`, JSON with
+  `"locality": "Europe/Moscow"` — live probe on a disposable boot of the
+  same NAND image, plus `GET /rci/show/clock` → JSON).  The request
+  format is valid for this firmware.
+* Inside the doinstall window ndm never answers it: with the unbounded
+  wget the UART went silent for 600 s (2/2 runs); with `-qT 3` the
+  timeout fires at 3 s — and busybox wget 1.38 (MIPSel) then segfaults
+  in its own timeout path (`do_page_fault(): sending SIGSEGV to wget`,
+  `epc = 00485adc in busybox`), visible on the UART.  The script
+  survives the segfault (empty command substitution) and continues.
+* The POST to the same `localhost:79` one statement later **is** served
+  during the same window (`configured init script` + `saving (http/rci)`
+  2–3 s after the segfault, no second page fault in the UART).
+
+So the blocking operator is the doinstall TZ RCI GET statement, and the
+non-serving is specific to the synchronous doinstaller execution window
+— most plausibly the RCI show handler waits on state held by the
+running Opkg::Manager script (a circular wait: the GET waits for
+doinstall to finish, doinstall waits for the GET answer), while the
+POST path is exempt.  That lock mechanism is a hypothesis about the
+proprietary ndm binary and is not provable from outside; what is proven
+is the window asymmetry itself (healthy endpoint, unbounded GET hang,
+bounded-timeout SEGV, served POST seconds apart).  The bounded probe is
+a workaround with verified end-to-end effect, not a claim that the ndm
+side was fixed; the timezone value is simply left empty by the installer
+in that case, which does not block the deployment.
 
 ## Gate aggregation
 
