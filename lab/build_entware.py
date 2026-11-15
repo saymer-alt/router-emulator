@@ -169,8 +169,10 @@ def bootstrap_archive(source, destination, password, arch="aarch64"):
                         "echo 'lab-tz-begin' > /dev/console 2>/dev/null\n"
                         + tz_stmt +
                         "\necho 'lab-tz-end' > /dev/console 2>/dev/null", 1)
-                elif "rci/show/clock/date/tz" in text:
-                    raise ValueError("unexpected native Entware timezone probe")
+                elif arch == "mipsel" or "rci/show/clock/date/tz" in text:
+                    # A missing TZ line is drift too: MIPSel must explicitly
+                    # replace exactly the known unsafe optional GET.
+                    raise ValueError("unexpected or missing native Entware timezone probe")
                 # A silent no-op replace would reintroduce the swallowed [5/5]
                 # after the next upstream installer rotation; fail loudly
                 # instead so the lab refuses to build a mis-patched bootstrap.

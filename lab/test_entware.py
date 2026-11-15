@@ -201,6 +201,28 @@ class EntwareTests(unittest.TestCase):
             self.assertLess(script.index(b'S51dropbear start'), post_begin)
             self.assertLess(post_begin, post)
 
+    def test_mipsel_missing_timezone_probe_is_refused(self):
+        """Do not silently accept a rotated MIPSel installer without the known TZ GET."""
+        with tempfile.TemporaryDirectory() as td:
+            source = pathlib.Path(td) / 'source.tar.gz'
+            target = pathlib.Path(td) / 'target.tar.gz'
+            install = (b'#!/bin/sh\n'
+                       b'/opt/etc/init.d/S51dropbear start\n'
+                       b"wget -qO - --post-data='[]' localhost:79/rci/ >/dev/null 2>&1\n"
+                       b'if grep -q "222"; then\necho port\nfi\n'
+                       b"echo '[5/5] \\"Entware\\" installed!'\n"
+                       b'rm /opt/etc/init.d/doinstall\n'
+                       b'rm "$0"\n')
+            with tarfile.open(source, 'w:gz') as archive:
+                item = tarfile.TarInfo('bin/install')
+                item.size = len(install)
+                archive.addfile(item, io.BytesIO(install))
+            with patch.object(entware.subprocess, 'run',
+                              return_value=SimpleNamespace(stdout=b'$6$synthetic-hash\n')):
+                with self.assertRaisesRegex(ValueError, 'timezone probe'):
+                    entware.bootstrap_archive(
+                        source, target, 'PrivateSyntheticToken0123456789', arch='mipsel')
+
     def test_timezone_probe_drift_is_refused(self):
         """A silently mis-patched TZ probe would hide the wedge again; the
         patch must refuse a drifted upstream line instead of no-oping."""
