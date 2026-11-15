@@ -323,6 +323,26 @@ def run_telnet_step(step, forwards, credentials, deadline, ensure_running):
             sock.close()
 
 
+def safe_step_failure_reason(action, error):
+    """Classify known SSH failures without leaking guest output or commands.
+
+    Only fixed controller-generated categories are exposed. Unexpected
+    exceptions keep the existing generic, secret-safe diagnostic.
+    """
+    if isinstance(error, TimeoutError):
+        return type(error).__name__ + ": " + str(error)
+    if action == "ssh" and isinstance(error, RuntimeError):
+        message = str(error)
+        if message == "ssh answer marker not matched":
+            return "RuntimeError: ssh_answer_mismatch"
+        if message == "ssh authentication rejected":
+            return "RuntimeError: ssh_authentication_rejected"
+        match = re.fullmatch(r"ssh command exited with status ([0-9]{1,3})", message)
+        if match and 1 <= int(match.group(1)) <= 255:
+            return "RuntimeError: ssh_exit_nonzero_%d" % int(match.group(1))
+    return type(error).__name__ + ": step execution failed"
+
+
 def verify_ssh_response(exit_status, output, expected):
     """Require both remote command success and an answer not faked by the command."""
     if exit_status != 0:
@@ -772,9 +792,7 @@ def run(args):
                         proc is not None and proc.poll() is None), flush=True)
                 # Do not echo guest console, commands, URL or firmware content
                 # into the structured report or status line.
-                reason = type(error).__name__ + ": " + (
-                    str(error) if isinstance(error, TimeoutError) else "step execution failed"
-                )
+                reason = safe_step_failure_reason(action, error)
                 rows.append({"action": action, "outcome": "FAIL",
                              "elapsed_seconds": round(time.monotonic() - start, 2),
                              "reason": reason})
