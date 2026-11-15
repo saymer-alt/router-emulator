@@ -77,6 +77,20 @@ CLI_REBOOT_SEND = "system reboot"
 CLI_REBOOT_ANSWER = "Activated system reboot"
 CLI_REBOOT_KERNEL_MARKER = "reboot: Restarting system"
 
+# Entware clean-bootstrap chain (ported-mt7621-entware.json): real opkg
+# answers, a native Entware ELF answer, the installer completion marker,
+# a native reboot and post-reboot persistence.  The banner triplet is the
+# Entware mipselsf bash 5.3.20(1) one; "mipsel-unknown-linux" can never
+# appear in the answer (2026-11-15 diagnostic, see the MT7621 README).
+ENTWARE_ARCH_SEND = "opkg print-architecture"
+ENTWARE_ARCH_ANSWER = "mipsel-3.4_kn 200"
+ENTWARE_ELF_SEND = "/opt/bin/bash --version"
+ENTWARE_ELF_ANSWER = "mipsel-openwrt-linux-gnu"
+ENTWARE_INITRC_MARKER = "configured init script"
+ENTWARE_REBOOT_MARKER = "reboot: Restarting system"
+ENTWARE_PERSIST_SEND = "/opt/.lab-marker"
+ENTWARE_PERSIST_ANSWER = "MARK42"
+
 
 def _gate(status, reason):
     return {"status": status, "reason": reason}
@@ -376,6 +390,53 @@ def derive_cli_gates(scenario, report):
         "PASS", "ndm_cli_prompt_and_version_answer_on_telnet")}
 
 
+def derive_entware_gates(scenario, report):
+    """Derive MIPSEL_ENTWARE_READY from a report against its committed
+    Entware scenario: the installer completion marker, real opkg answers,
+    a native Entware ELF answer with the pinned banner triplet, a native
+    reboot and post-reboot persistence — all from scenario-ordered report
+    rows.  A failure before the installer completion marker is a
+    prerequisite problem (NOT_TESTED); any failure at or after it is an
+    Entware-chain failure (FAIL).  The gate never PASSes from a report
+    that stops short of the scenario or does not carry the whole chain."""
+    checked = _checked_prefix(scenario, report)
+    if checked is None:
+        return {"MIPSEL_ENTWARE_READY": _gate("FAIL", "report_scenario_mismatch")}
+    steps, rows, first_fail = checked
+
+    def step_idx(predicate):
+        return [i for i, s in enumerate(steps) if predicate(s)]
+
+    initrc = step_idx(lambda s: s.get("action") == "wait_serial"
+                      and ENTWARE_INITRC_MARKER in s.get("pattern", ""))
+    reboot = step_idx(lambda s: s.get("action") == "wait_serial"
+                      and ENTWARE_REBOOT_MARKER in s.get("pattern", ""))
+    arch = step_idx(lambda s: s.get("action") == "ssh"
+                    and ENTWARE_ARCH_SEND in s.get("send", "")
+                    and ENTWARE_ARCH_ANSWER
+                    in s.get("expect", "").replace("\\", ""))
+    elf = step_idx(lambda s: s.get("action") == "ssh"
+                   and ENTWARE_ELF_SEND in s.get("send", "")
+                   and ENTWARE_ELF_ANSWER in s.get("expect", ""))
+    persist = step_idx(lambda s: s.get("action") == "ssh"
+                       and ENTWARE_PERSIST_SEND in s.get("send", "")
+                       and ENTWARE_PERSIST_ANSWER in s.get("expect", ""))
+    # A committed scenario missing any part of the chain (including the
+    # post-reboot ELF answer and the post-reboot persistence marker) is a
+    # lab bug: fail closed to NOT_TESTED rather than inventing a PASS.
+    if not (initrc and reboot and arch and len(elf) >= 2 and len(persist) >= 2):
+        return {"MIPSEL_ENTWARE_READY": _gate(
+            "NOT_TESTED", "scenario_lacks_entware_chain")}
+    if first_fail is None:
+        return {"MIPSEL_ENTWARE_READY": _gate(
+            "PASS", "entware_clean_bootstrap_opkg_elf_reboot_persistence")}
+    if first_fail < initrc[0]:
+        return {"MIPSEL_ENTWARE_READY": _gate(
+            "NOT_TESTED", "prerequisite_failed")}
+    return {"MIPSEL_ENTWARE_READY": _gate(
+        "FAIL", "entware_chain_step_failed")}
+
+
 def apply_labels(gates, statuses, reasons=None):
     """Apply controller labels; PASS is refused for native gates."""
     reasons = reasons or {}
@@ -392,13 +453,16 @@ def apply_labels(gates, statuses, reasons=None):
 
 def evaluate(openwrt_scenario, openwrt_report, statuses=(), reasons=None,
              ported_scenario=None, ported_report=None,
-             cli_scenario=None, cli_report=None):
+             cli_scenario=None, cli_report=None,
+             entware_scenario=None, entware_report=None):
     gates = {name: _gate("NOT_TESTED", "unattempted") for name in GATES}
     gates.update(derive_openwrt_gates(openwrt_scenario, openwrt_report))
     if ported_scenario is not None and ported_report is not None:
         gates.update(derive_ported_gates(ported_scenario, ported_report))
     if cli_scenario is not None and cli_report is not None:
         gates.update(derive_cli_gates(cli_scenario, cli_report))
+    if entware_scenario is not None and entware_report is not None:
+        gates.update(derive_entware_gates(entware_scenario, entware_report))
     apply_labels(gates, statuses, reasons)
     return gates
 
@@ -452,6 +516,10 @@ def main():
                     help="committed ndm CLI telnet scenario JSON")
     ap.add_argument("--cli-report",
                     help="report.json of the ndm CLI telnet scenario")
+    ap.add_argument("--entware-scenario",
+                    help="committed Entware clean-bootstrap scenario JSON")
+    ap.add_argument("--entware-report",
+                    help="report.json of the Entware clean-bootstrap scenario")
     ap.add_argument("--set", action="append", nargs=2, metavar=("GATE", "STATUS"),
                     default=[],
                     help="explicit gate status; PASS refused for native gates")
@@ -473,10 +541,17 @@ def main():
                 Path(args.cli_scenario).read_text(encoding="utf-8"))
             cli_report = json.loads(
                 Path(args.cli_report).read_text(encoding="utf-8"))
+        entware_scenario = entware_report = None
+        if args.entware_scenario and args.entware_report:
+            entware_scenario = json.loads(
+                Path(args.entware_scenario).read_text(encoding="utf-8"))
+            entware_report = json.loads(
+                Path(args.entware_report).read_text(encoding="utf-8"))
         reasons = {name: why for name, why in args.reason}
         gates = evaluate(scenario, report, args.set, reasons,
                          ported_scenario, ported_report,
-                         cli_scenario, cli_report)
+                         cli_scenario, cli_report,
+                         entware_scenario, entware_report)
     except ValueError as error:
         ap.error(str(error))
     report_dir = Path(args.report_dir)
