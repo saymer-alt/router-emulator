@@ -168,6 +168,16 @@
    "Depends": "libpthread"
   },
   {
+   "Package": "libstdcpp",
+   "Version": "8.4.0-12",
+   "Architecture": "mipsel-3.4",
+   "SHA256sum": "5e1c6a59222ed9bc65a9a55f7f48aaba53655b53f4f9e3f36d5845bb101dcddc",
+   "Filename": "libstdcpp_8.4.0-12_mipsel-3.4.ipk",
+   "Size": "374443",
+   "feed": "entware",
+   "url": "https://bin.entware.net/mipselsf-k3.4/libstdcpp_8.4.0-12_mipsel-3.4.ipk"
+  },
+  {
    "Package": "libssp",
    "Version": "8.4.0-12",
    "Architecture": "mipsel-3.4",
