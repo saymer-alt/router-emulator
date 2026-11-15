@@ -1,0 +1,70 @@
+Full UART scan of the single clean service-restart guest run
+(Issue #81 / Draft PR #85, 2026-11-15)
+=============================================================
+
+Run provenance
+--------------
+- Scenario: lab/scenarios/ported-mt7621-entware-service-restart.json (40 steps)
+  = the 33-step TZ-safe clean/bootstrap/reboot baseline + 7 appended
+  disposable-service steps (S98labprobe start/PID/restart/liveness/stop).
+- Driver:   lab/mt7621/entware_e2e.py on PR #85 HEAD b32f803
+  (fresh NAND copy, freshly built ext4 image, pinned 25-package
+  mipselsf mirror from lab/entware-mipselsf.lock.json).
+- Result:   PASS 40/40, 562.38 s, failure=None (report.json, same folder).
+- UART:     3185 lines, 2 full boot cycles (2x "Starting kernel"); native
+  "reboot: Restarting system" at console line 1762.
+
+Crash-pattern scan over the ENTIRE UART log (not only the scenario result)
+--------------------------------------------------------------------------
+grep -i "SIGSEGV|Segmentation fault|do_page_fault|Oops|Kernel panic" -> 4 hits,
+all false positives: the kernel module name "mtdoops_proc.ko" contains "oops"
+(2 boot cycles x "loading /lib/modules/4.9-ndm-5/mtdoops_proc.ko" + 2x
+"mtdoops_proc: Attached to MTD device 8"; console lines 303/304 and 2066/2067).
+Zero real hits: 4 of 4 hits are mtdoops.
+
+grep -i "wget|busybox.*(error|fail)" -> 0 hits: the optional TZ GET is omitted
+for mipsel, so no BusyBox wget runs the timeout path that previously SIGSEGV'd.
+grep "Critical error" -> 0 hits.
+
+TZ-safe window (same as the 33/33 cycle)
+----------------------------------------
+[4/5] Setting timezone ... at 03:03:59 (console line 1389)
+lab-tz-begin / lab-tz-skipped / lab-tz-end / lab-dropbear-begin (same second)
+[5/5] "Entware" installed! / lab-post-begin
+configured init script + saving (http/rci) at 03:04:01 -> window ~2 s, no wedge.
+
+Disposable service chain (steps 35-40; loopback SSH, no UART trace by design)
+-----------------------------------------------------------------------------
+S98labprobe is a /bin/sh probe service decoded from an echo-safe base64 blob
+into /opt/etc/init.d/ (step 35 LAB_SERVICE_READY), never installed on real
+routers.  Its state machine: start -> busybox sleep 3600 in background, PID
+recorded in /opt/var/run/labprobe.pid, generation counter in labprobe.count;
+status -> "RUNNING <generation> <pid>" only if the PID is alive (kill -0);
+stop -> kill + pidfile removal; restart -> stop+start (fresh PID, counter+1).
+
+Step-by-step outcomes from report.json (each also requires remote exit 0 and
+the echo-safe marker, run.py verify_ssh_response):
+- step 35 ssh: PASS (0.58 s)
+- step 36 ssh: PASS (0.73 s)
+- step 37 ssh: PASS (0.65 s)
+- step 38 ssh: PASS (1.07 s)
+- step 39 ssh: PASS (0.56 s)
+- step 40 ssh: PASS (0.82 s)
+
+Numeric PID values are intentionally not persisted anywhere: the runner keeps
+guest output out of reports (secret-safe), and step 40 deletes the pidfiles.
+The PID-change proof is the committed on-guest contract in step 39: it exits 0
+and echoes RESTART_VERIFIED only if old PID != new PID, kill -0 succeeds on the
+new PID (process liveness) and the counter file reads 2 — exactly the
+MIPSEL_SERVICE_RESTART chain derived by derive_service_restart_gate.
+
+Persistence scope note (Issue #81 §6): this cycle validates MIPSEL_SERVICE_RESTART
+only; it does NOT independently prove post-boot rc.unslung autostart of the
+service (MIPSEL_PERSISTENCE, Draft PR #84 stays separate and NOT_TESTED).
+
+Sanitization
+------------
+report.json contains only step actions/outcomes/timings and the scenario name
+(no credentials, no host paths, no addresses); junit.xml contains only action
+names and durations.  The full console log stays outside the repository; this
+folder keeps only the excerpt file uart-doinstall-window.log.

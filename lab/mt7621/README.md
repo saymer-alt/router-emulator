@@ -28,9 +28,10 @@ a Ported NAND assembler and gate aggregation for the MT7621 preset family.
 | CLEANUP | PASS | the runner's disposable workspace copy is removed after the run |
 | PORTED_NDMC_READY | PASS | `lab/scenarios/ported-mt7621-cli.json`: the ndm CLI over the loopback telnet forward answers (prompt greeting + verified `show version` release answer) |
 | MIPSEL_ENTWARE_READY | PASS | `lab/scenarios/ported-mt7621-entware.json` via `lab/mt7621/entware_e2e.py`: full 32-step chain PASS (2026-11-15 diag4) — installer completion, real opkg answers, native `bash --version` (`mipsel-openwrt-linux-gnu`), `DOINSTALL_ABSENT`, `MARK42`, native `system reboot`, post-reboot `/opt ext4` + opkg + bash + marker; derived by `derive_entware_gates` from the report against the committed scenario; re-confirmed 33/33 by the SIGSEGV-free tz-skip cycle (see below) |
-| MIPSEL_SERVICE_RESTART, MIPSEL_PERSISTENCE | NOT_TESTED | separate scripted scope (Issue #76 §6); the diag4 run already observed Entware surviving a native reboot through the same chain |
+| MIPSEL_SERVICE_RESTART | PASS | `lab/scenarios/ported-mt7621-entware-service-restart.json` via `lab/mt7621/entware_e2e.py`: 40-step chain PASS (2026-11-15, see the service cycle below) — start/status generation 1 with recorded PID, saved pidfile, real restart, status generation 2, on-guest proof of different PID + `kill -0` liveness + counter 2 (`RESTART_VERIFIED`), then stop and cleanup (`LAB_CLEANED`); derived by `derive_service_restart_gate` |
+| MIPSEL_PERSISTENCE | NOT_TESTED | separate scripted scope (Issue #76 §6, Draft PR #84); the service-restart cycle explicitly does **not** prove post-boot `rc.unslung` autostart |
 
-Totals: **17 PASS / 2 NOT_TESTED** of 19 gates (aggregate outcome BLOCKED while any
+Totals: **18 PASS / 1 NOT_TESTED** of 19 gates (aggregate outcome BLOCKED while any
 gate is not PASS).  Hardware acceptance (physical MT7621AT, full 4-VPE
 profile) is a separate acceptance criterion and is not covered by
 virtual evidence.  Native gates (`MT7621_OPENWRT_BOOT`, `MT7621_REBOOT`,
@@ -311,6 +312,44 @@ GET/POST window asymmetry stands exactly as described above, and the
 skip is confined to the lab bootstrap — production images and the
 aarch64 path are untouched.
 
+### The Stage C service-restart guest cycle (2026-11-15, Issue #81 / PR #85): disposable service start/restart/PID proof
+
+The committed scenario
+`lab/scenarios/ported-mt7621-entware-service-restart.json` (40 steps)
+keeps the whole 33-step TZ-safe clean/bootstrap/reboot baseline and then
+installs a **disposable** `/bin/sh` probe service `S98labprobe` from an
+echo-safe base64 blob (busybox-only, `/opt/var/run` pidfile + generation
+counter; never shipped by any real image).  The appended seven SSH steps
+prove, in one run: decode + install (`LAB_SERVICE_READY`), start + status
+reporting `RUNNING 1 <pid>` with a live process, the pidfile copied aside
+(`FIRST_SAVED`), a real restart with status `RUNNING 2 <pid>`, and the
+on-guest contract step that exits 0 and echoes `RESTART_VERIFIED` only if
+the old PID differs from the new one, `kill -0` confirms the new process
+is alive and the counter reads 2 — then `LAB_CLEANED` (stop, pidfile
+removed, service and scratch files deleted).
+
+One clean guest cycle on a fresh NAND copy and a newly built ext4 image
+(`entware_e2e.py`, pinned 25-package mirror) passed **40/40 in 562 s**
+on PR #85 HEAD `b32f803`: the TZ-safe doinstall window closed in ~2 s
+again, the native `system reboot` + second boot + Entware persistence
+checks all held, and the whole service chain took under 5 s total.
+A scan of the **entire** UART log again found zero `wget` output lines,
+zero busybox errors, zero `Critical error` and zero real SIGSEGV/
+page-fault/oops events — the only four pattern hits are the kernel
+module name `mtdoops_proc.ko` (2 boots).  Numeric PID values are
+deliberately not persisted (the runner keeps guest output out of
+reports; step 40 deletes the pidfiles), which is why the proof is the
+committed on-guest contract validated by `verify_ssh_response`.
+Sanitized evidence:
+`lab/mt7621/evidence/ported-mt7621-entware-service-restart-20261115/`.
+
+Honest scope: this cycle validates `MIPSEL_SERVICE_RESTART` only.  It
+does **not** independently prove post-boot `rc.unslung` autostart
+(`MIPSEL_PERSISTENCE`, Draft PR #84, stays separate and NOT_TESTED), the
+probe service itself is not installed across the reboot (start happens
+post-boot, stop happens before the run ends), and the restart was of the
+probe service only — Dropbear itself was never restarted.
+
 ## Gate aggregation
 
 ```bash
@@ -321,10 +360,11 @@ python3 lab/mt7621/mt7621_gates.py --report-dir work/reports/mt7621-gates \
   --ported-report work/reports/ported-mt7621-ndms/report.json \
   --cli-scenario lab/scenarios/ported-mt7621-cli.json \
   --cli-report work/reports/ported-mt7621-cli/report.json \
+  --service-scenario lab/scenarios/ported-mt7621-entware-service-restart.json \
+  --service-report work/reports/ported-mt7621-service/report.json \
   --set MT7621_QEMU_BUILD PASS --reason MT7621_QEMU_BUILD qemu_mipsel_built_from_pinned_source \
   --set PORTED_IMAGE_VALIDATION PASS --reason PORTED_IMAGE_VALIDATION pinned_sha256_and_header_validated \
   --set MIPSEL_ENTWARE_READY NOT_TESTED --reason MIPSEL_ENTWARE_READY entware_is_next_cycle_after_ndms \
-  --set MIPSEL_SERVICE_RESTART NOT_TESTED --reason MIPSEL_SERVICE_RESTART service_state_across_reboot_not_scripted \
   --set MIPSEL_PERSISTENCE NOT_TESTED --reason MIPSEL_PERSISTENCE config_persistence_not_scripted \
   --set NEGATIVE_IMAGE_REJECT PASS --reason NEGATIVE_IMAGE_REJECT unit_tests_refuse_bad_inputs \
   --set HOST_ISOLATION PASS --reason HOST_ISOLATION offline_wan_loopback_lan_only \

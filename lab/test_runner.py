@@ -407,6 +407,42 @@ class InteractiveStepTests(unittest.TestCase):
             server.close()
 
 
+    def test_safe_ssh_failure_categories(self):
+        cases = (
+            ("ssh answer marker not matched", "RuntimeError: ssh_answer_mismatch"),
+            ("ssh authentication rejected", "RuntimeError: ssh_authentication_rejected"),
+            ("ssh command exited with status 1", "RuntimeError: ssh_exit_nonzero_1"),
+            ("ssh command exited with status 127", "RuntimeError: ssh_exit_nonzero_127"),
+        )
+        for failure, category in cases:
+            with self.subTest(failure=failure):
+                self.assertEqual(
+                    runner.safe_step_failure_reason("ssh", RuntimeError(failure)),
+                    category)
+
+    def test_safe_ssh_failure_never_leaks_unrecognized_text(self):
+        secret = "PrivateSyntheticToken0123456789"
+        failures = (
+            RuntimeError("password=" + secret),
+            RuntimeError("ssh command exited with status 999: " + secret),
+            ValueError("ssh remote reply " + secret),
+        )
+        for failure in failures:
+            with self.subTest(kind=type(failure).__name__):
+                reason = runner.safe_step_failure_reason("ssh", failure)
+                self.assertEqual(reason, type(failure).__name__ + ": step execution failed")
+                self.assertNotIn(secret, reason)
+        self.assertEqual(
+            runner.safe_step_failure_reason("telnet",
+                                            RuntimeError("ssh answer marker not matched")),
+            "RuntimeError: step execution failed")
+
+    def test_safe_ssh_timeout_keeps_bounded_reason(self):
+        self.assertEqual(
+            runner.safe_step_failure_reason(
+                "ssh", TimeoutError("ssh answer marker not reached")),
+            "TimeoutError: ssh answer marker not reached")
+
     def test_ssh_marker_with_nonzero_exit_fails_closed(self):
         # A command can produce a convincing marker and then fail.
         with self.assertRaisesRegex(RuntimeError, "status 7"):

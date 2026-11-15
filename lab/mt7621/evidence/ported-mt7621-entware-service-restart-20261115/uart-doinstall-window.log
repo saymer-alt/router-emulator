@@ -1,0 +1,54 @@
+UART excerpt of the single clean service-restart guest run
+(Issue #81 / Draft PR #85, 2026-11-15)
+===========================================================
+
+Provenance: lab/scenarios/ported-mt7621-entware-service-restart.json (40 steps)
+via lab/mt7621/entware_e2e.py on commit b32f803f4681d4225a34caae1fcd700d07bdc12d
+(PR #85 HEAD); fresh NAND copy, freshly built ext4 image, pinned 25-package
+mipselsf mirror from lab/entware-mipselsf.lock.json.  PASS 40/40, 562 s,
+failure=None (report.json, same folder).  The full private console log and
+all images/NAND stay outside the repository.
+
+--- doinstall window, console lines 1389-1399 (boot 1) ---
+1389 [I] Jan  1 03:03:59 ndm: Opkg::Manager: /opt/etc/init.d/doinstall: [4/5] Setting timezone, script initrc and starting "dropbear"...
+1390 lab-tz-begin
+1391 lab-tz-skipped
+1392 lab-tz-end
+1393 lab-dropbear-begin
+1394 [I] Jan  1 03:04:00 dropbear[1951]: Running in background
+1395 [5/5] "Entware" installed!
+1396 lab-post-begin
+1397 [I] Jan  1 03:04:01 ndm: Opkg::Manager: configured init script: "/opt/etc/init.d/rc.unslung".
+1398 [I] Jan  1 03:04:01 ndm: Core::System::StartupConfig: saving (http/rci).
+1399 init: 720 process exited.
+
+--- native reboot boundary, console lines 1758-1768 ---
+1758 init: SIGTERM sent to all processes.
+1759 init: 2094 process exited.
+1760 init: SIGKILL sent to all processes.
+1761 init: requesting system reboot...
+1762 reboot: Restarting system
+1763 Machine restart ...
+1764 
+1765 Boot and Recovery Environment for Embedded Devices
+1766 Copyright (C) 2022 HackPascal <hackpascal@gmail.com>
+1767 Build date 2022-07-24 [git-46ae2a1]
+1768 Version 1.2 (r1416)
+
+--- post-reboot Entware persistence, console lines 2945-2949 and 2953 ---
+2945 [I] Jan  1 03:04:14 ndm: Opkg::Manager: disk is set to: KASOPT:/.
+2946 [I] Jan  1 03:04:14 ndm: Opkg::Manager: configured init script: "/opt/etc/init.d/rc.unslung".
+2947 [I] Jan  1 03:04:14 ndm: Components::Manager: components auto-update disabled.
+2948 [I] Jan  1 03:04:14 ndm: Components::Manager: auto-update channel is "stable".
+2949 [I] Jan  1 03:04:14 ndm: Core::Server: system ready, core startup time is 105 seconds.
+2953 [I] Jan  1 03:04:16 telnetd: waiting for connections...
+
+Notes: the lab-tz-begin/lab-tz-skipped/lab-tz-end markers (lines 1390-1392)
+prove the mipsel TZ-skip bootstrap ran with no BusyBox wget timeout path;
+the window [4/5] -> configured init script closed in ~2 s (03:03:59 -> 03:04:01).
+The seven service steps (S98labprobe) run over loopback SSH (port 8022), so
+they leave no UART trace by design; their proof is the committed-contract
+expect chain in report.json (RUNNING 1 / FIRST_SAVED / RUNNING 2 /
+RESTART_VERIFIED / LAB_CLEANED), see uart-scan-summary.txt.
+The first dropbear child-connection line after the window (03:04:02) was
+omitted from this excerpt because it quotes the guest-side forward address.
