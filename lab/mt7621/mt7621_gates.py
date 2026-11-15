@@ -421,13 +421,37 @@ def derive_entware_gates(scenario, report):
     persist = step_idx(lambda s: s.get("action") == "ssh"
                        and ENTWARE_PERSIST_SEND in s.get("send", "")
                        and ENTWARE_PERSIST_ANSWER in s.get("expect", ""))
-    # A committed scenario missing any part of the chain (including the
-    # post-reboot ELF answer and the post-reboot persistence marker) is a
-    # lab bug: fail closed to NOT_TESTED rather than inventing a PASS.
-    if not (initrc and reboot and arch and len(elf) >= 2 and len(persist) >= 2):
+    ready = step_idx(lambda s: s.get("action") == "wait_serial"
+                     and NDMS_READY_MARKER in s.get("pattern", ""))
+    first_mount = step_idx(lambda s: s.get("action") == "wait_serial"
+                           and "mounted to /opt" in s.get("pattern", ""))
+    second_mount = step_idx(lambda s: s.get("action") == "ssh"
+                            and "/proc/mounts" in s.get("send", "")
+                            and "/opt ext4" in s.get("expect", ""))
+    install = step_idx(lambda s: s.get("action") == "ssh"
+                       and "opkg install bash" in s.get("send", "")
+                       and "Configuring bash" in s.get("expect", ""))
+    absent = step_idx(lambda s: s.get("action") == "ssh"
+                      and "test ! -e /opt/etc/init.d/doinstall" in s.get("send", "")
+                      and "DOINSTALL_ABSENT" in s.get("expect", ""))
+    # A changed scenario cannot pass by moving the post-reboot proof to
+    # before reboot, or omitting system-ready/mount/second opkg entirely.
+    if not (initrc and reboot and len(arch) >= 2 and len(elf) >= 2
+            and len(persist) >= 2 and len(ready) >= 2 and first_mount
+            and second_mount and install and absent):
         return {"MIPSEL_ENTWARE_READY": _gate(
             "NOT_TESTED", "scenario_lacks_entware_chain")}
+    evidence_order = (ready[0], first_mount[0], initrc[0], arch[0],
+                      install[0], elf[0], absent[0], persist[0],
+                      reboot[0], ready[1], second_mount[0],
+                      arch[1], elf[1], persist[1])
+    if any(a >= b for a, b in zip(evidence_order, evidence_order[1:])):
+        return {"MIPSEL_ENTWARE_READY": _gate(
+            "NOT_TESTED", "entware_chain_not_ordered")}
     if first_fail is None:
+        if report.get("outcome") != "PASS":
+            return {"MIPSEL_ENTWARE_READY": _gate(
+                "FAIL", "report_outcome_mismatch")}
         return {"MIPSEL_ENTWARE_READY": _gate(
             "PASS", "entware_clean_bootstrap_opkg_elf_reboot_persistence")}
     if first_fail < initrc[0]:
