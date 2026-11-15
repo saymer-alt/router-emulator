@@ -775,7 +775,8 @@ class PersistenceStageCContractTests(unittest.TestCase):
         altered = copy.deepcopy(stage)
         steps = altered["steps"]
         matches = [i for i, s in enumerate(steps) if s.get("action") == "ssh"
-                   and s.get("send", "").endswith("cat /opt/etc/.lab-persist")]
+                   and s.get("send", "").endswith("cat /opt/etc/.lab-persist")
+                   and " > /opt/etc/.lab-persist" not in s.get("send", "")]
         self.assertEqual(len(matches), 2)
         del steps[matches[0]]
         r = self.report(steps, altered["name"])
