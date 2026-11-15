@@ -171,12 +171,68 @@ def add_packages(mirror, cache, lock):
         index.write_bytes(gzip.compress(('\n\n'.join(blocks.values()) + '\n\n').encode(), mtime=0))
 
 
+def validate_mipsel_lock(lock):
+    """Fail closed on incomplete MIPSel local feed before any downloads.
+
+    Package names and verified Provides aliases are used for dependency
+    resolution; no assumption that a missing library exists in the guest.
+    This intentionally does not alter the existing ARM64 lab contract.
+    """
+    import re
+
+    packages = lock.get("packages")
+    if not isinstance(packages, list) or not packages:
+        raise ValueError("mipsel lock has no packages")
+    names = set()
+    provided = set()
+    for package in packages:
+        name = package.get("Package", "")
+        if not name or name in names:
+            raise ValueError("duplicate or invalid mipsel lock package: " + str(name))
+        names.add(name)
+        if package.get("Architecture") not in ("mipsel-3.4", "mipsel-3.4_kn", "all"):
+            raise ValueError("invalid MIPSel package architecture: " + name)
+        feed = package.get("feed")
+        if feed not in ("entware", "keenetic"):
+            raise ValueError("invalid MIPSel package feed: " + name)
+        prefix = MIPSLSF_ORIGIN + ("keenetic/" if feed == "keenetic" else "")
+        filename = package.get("Filename", "")
+        if not filename or "/" in filename or package.get("url") != prefix + filename:
+            raise ValueError("unexpected MIPSel package URL: " + name)
+        if not re.fullmatch(r"[0-9a-f]{64}", package.get("SHA256sum", "")):
+            raise ValueError("invalid MIPSel package SHA256: " + name)
+        for alias in package.get("Provides", "").split(","):
+            alias = alias.strip().split(" ", 1)[0]
+            if alias:
+                provided.add(alias)
+    missing = set()
+    for package in packages:
+        for group in package.get("Depends", "").split(","):
+            if not group.strip():
+                continue
+            alternatives = []
+            for alternative in group.split("|"):
+                match = re.fullmatch(
+                    r"\s*([A-Za-z0-9_.+-]+)(?:\s*\([^)]+\))?\s*",
+                    alternative)
+                if match is None:
+                    raise ValueError("unrecognized dependency syntax: " + group)
+                alternatives.append(match.group(1))
+            if not any(alt in names or alt in provided for alt in alternatives):
+                missing.add(package["Package"] + " -> " + " | ".join(alternatives))
+    if missing:
+        raise ValueError("incomplete MIPSel dependency closure: " + "; ".join(sorted(missing)))
+    return len(packages)
+
+
 def build(image, mirror, cache, credentials, arch="aarch64", lock_path=None):
     image, mirror, cache = (Path(p).resolve() for p in (image, mirror, cache))
     if image.exists() or mirror.exists():
         raise ValueError("output image and mirror must be new")
     lock = json.loads(Path(lock_path).read_text(encoding="utf8") if lock_path
                       else LOCK.read_text(encoding="utf8"))
+    if arch == "mipsel":
+        validate_mipsel_lock(lock)
     cache.mkdir(parents=True, exist_ok=True)
     source = fetch(lock["installer"]["url"], lock["installer"]["sha256"], cache / "installer.tar.gz")
     mirror.mkdir(parents=True, mode=0o700)
