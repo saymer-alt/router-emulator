@@ -751,8 +751,105 @@ class EntwareTimezoneSkipScenarioTests(unittest.TestCase):
         self.assertEqual(candidate["steps"][-1]["expect"], "MARK42")
 
 
+class ServiceRestartStageCContractTests(unittest.TestCase):
+    """No guest execution here: tests validate proof requirements only."""
+
+    @staticmethod
+    def inputs():
+        import json
+        from pathlib import Path
+        from lab import run as runner
+        folder = Path(__file__).resolve().parents[1] / "lab" / "scenarios"
+        original = runner.load_scenario(str(folder / "ported-mt7621-entware-tz-skip.json"))
+        stage = runner.load_scenario(str(folder / "ported-mt7621-entware-service-restart.json"))
+        return original, stage
+
+    @staticmethod
+    def report(data, failed=None, outcome=None):
+        rows = [row(s["action"]) for s in data["steps"]]
+        if failed is not None:
+            rows = rows[:failed + 1]
+            rows[-1]["outcome"] = "FAIL"
+        return {"scenario": data["name"],
+                "outcome": outcome or ("FAIL" if failed is not None else "PASS"),
+                "steps": rows}
+
+    def test_committed_fixture_matches_seeded_encoded_service(self):
+        import base64
+        from pathlib import Path
+        original, stage = self.inputs()
+        self.assertEqual(len(original["steps"]), 33)
+        self.assertEqual(len(stage["steps"]), 40)
+        self.assertEqual(stage["steps"][:33], original["steps"])
+        command = stage["steps"][34]["send"]
+        # The first quoted token is printf's '%s' format, the second
+        # one is the actual encoded fixture.
+        self.assertTrue(command.startswith("printf '%s' '"))
+        encoded = command.split("'", 4)[3]
+        decoded = base64.b64decode(encoded, validate=True)
+        fixture = (Path(__file__).resolve().parents[1] / "lab" / "mt7621"
+                   / "fixtures" / "S98labprobe").read_bytes()
+        self.assertEqual(decoded, fixture)
+        self.assertNotIn(b"/etc/init.d/S51dropbear", fixture)
+        self.assertIn(b"kill -0", fixture)
+        self.assertIn(b"sleep 3600", fixture)
+
+    def test_complete_guest_report_may_pass(self):
+        _, s = self.inputs()
+        gate = mg.derive_service_restart_gate(s, self.report(s))["MIPSEL_SERVICE_RESTART"]
+        self.assertEqual(gate["status"], "PASS")
+
+    def test_original_entware_report_cannot_pass_service(self):
+        s, _ = self.inputs()
+        gate = mg.derive_service_restart_gate(s, self.report(s))["MIPSEL_SERVICE_RESTART"]
+        self.assertEqual(gate["status"], "NOT_TESTED")
+
+    def test_mismatch_never_passes(self):
+        _, s = self.inputs()
+        report = self.report(s)
+        report["scenario"] = "wrong"
+        gate = mg.derive_service_restart_gate(s, report)["MIPSEL_SERVICE_RESTART"]
+        self.assertEqual(gate["status"], "FAIL")
+
+    def test_missing_pid_change_proof_is_not_tested(self):
+        import copy
+        _, s = self.inputs()
+        changed = copy.deepcopy(s)
+        changed["steps"] = [x for x in changed["steps"]
+                            if x.get("expect") != "RESTART_VERIFIED"]
+        gate = mg.derive_service_restart_gate(changed, self.report(changed))
+        self.assertEqual(gate["MIPSEL_SERVICE_RESTART"]["status"], "NOT_TESTED")
+
+    def test_incorrect_stage_order_is_not_tested(self):
+        import copy
+        _, s = self.inputs()
+        changed = copy.deepcopy(s)
+        steps = changed["steps"]
+        steps[-2], steps[-3] = steps[-3], steps[-2]
+        gate = mg.derive_service_restart_gate(changed, self.report(changed))
+        self.assertEqual(gate["MIPSEL_SERVICE_RESTART"]["status"], "NOT_TESTED")
+
+    def test_failure_during_restart_is_fail(self):
+        _, s = self.inputs()
+        gate = mg.derive_service_restart_gate(
+            s, self.report(s, failed=36))["MIPSEL_SERVICE_RESTART"]
+        self.assertEqual(gate["status"], "FAIL")
+
+    def test_prior_boot_failure_is_not_tested(self):
+        _, s = self.inputs()
+        gate = mg.derive_service_restart_gate(
+            s, self.report(s, failed=4))["MIPSEL_SERVICE_RESTART"]
+        self.assertEqual(gate["status"], "NOT_TESTED")
+
+    def test_all_pass_rows_with_nonpass_report_is_fail(self):
+        _, s = self.inputs()
+        gate = mg.derive_service_restart_gate(
+            s, self.report(s, outcome="BLOCKED"))["MIPSEL_SERVICE_RESTART"]
+        self.assertEqual(gate["status"], "FAIL")
+
+
 class PersistenceStageCContractTests(unittest.TestCase):
-    """Preparation only: PASS stays impossible without a real guest report."""
+    """The real guest report is independently stored as evidence; test is a contract."""
 
     @staticmethod
     def inputs():
@@ -834,6 +931,41 @@ class PersistenceStageCContractTests(unittest.TestCase):
         r = self.report(steps, altered["name"])
         gate = mg.derive_persistence_gate(altered, r)["MIPSEL_PERSISTENCE"]
         self.assertEqual(gate["status"], "NOT_TESTED")
+
+
+class CombinedStageCGatesTests(unittest.TestCase):
+    """Combining independently verified reports must not drop either gate."""
+
+    @staticmethod
+    def payload(filename):
+        import json
+        from pathlib import Path
+        folder = Path(__file__).resolve().parents[1] / "lab" / "scenarios"
+        candidate = json.loads((folder / filename).read_text(encoding="utf-8"))
+        result = {"scenario": candidate["name"], "outcome": "PASS",
+                  "steps": [row(step["action"]) for step in candidate["steps"]]}
+        return candidate, result
+
+    def test_two_reports_can_pass_independently_in_same_aggregator(self):
+        svc, svc_report = self.payload("ported-mt7621-entware-service-restart.json")
+        per, per_report = self.payload("ported-mt7621-entware-persistence.json")
+        openwrt = scenario(steps=BOOT_STEPS)
+        boot_report = {"scenario": openwrt["name"], "outcome": "PASS",
+                       "steps": [row(x["action"]) for x in openwrt["steps"]]}
+        both = mg.evaluate(openwrt, boot_report,
+                           service_scenario=svc, service_report=svc_report,
+                           persistence_scenario=per, persistence_report=per_report)
+        self.assertEqual(len(both), 19)
+        self.assertEqual(both["MIPSEL_SERVICE_RESTART"]["status"], "PASS")
+        self.assertEqual(both["MIPSEL_PERSISTENCE"]["status"], "PASS")
+        only_service = mg.evaluate(openwrt, boot_report, service_scenario=svc,
+                                   service_report=svc_report)
+        self.assertEqual(only_service["MIPSEL_SERVICE_RESTART"]["status"], "PASS")
+        self.assertEqual(only_service["MIPSEL_PERSISTENCE"]["status"], "NOT_TESTED")
+        only_persist = mg.evaluate(openwrt, boot_report, persistence_scenario=per,
+                                   persistence_report=per_report)
+        self.assertEqual(only_persist["MIPSEL_PERSISTENCE"]["status"], "PASS")
+        self.assertEqual(only_persist["MIPSEL_SERVICE_RESTART"]["status"], "NOT_TESTED")
 
 
 if __name__ == "__main__":
