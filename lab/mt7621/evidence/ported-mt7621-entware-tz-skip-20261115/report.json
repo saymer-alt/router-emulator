@@ -1,0 +1,175 @@
+{
+  "scenario": "KeeneticOS MT7621 clean Entware MIPSel optional timezone GET skip: UART no SIGSEGV, native reboot",
+  "evidence": "KEENETIC_PORTED_EXPERIMENTAL",
+  "outcome": "PASS",
+  "elapsed_seconds": 596.35,
+  "steps": [
+    {
+      "action": "wait_serial",
+      "outcome": "PASS",
+      "elapsed_seconds": 1.0
+    },
+    {
+      "action": "wait_serial",
+      "outcome": "PASS",
+      "elapsed_seconds": 36.54
+    },
+    {
+      "action": "wait_serial",
+      "outcome": "PASS",
+      "elapsed_seconds": 0.0
+    },
+    {
+      "action": "wait_serial",
+      "outcome": "PASS",
+      "elapsed_seconds": 20.02
+    },
+    {
+      "action": "wait_serial",
+      "outcome": "PASS",
+      "elapsed_seconds": 120.9
+    },
+    {
+      "action": "wait_serial",
+      "outcome": "PASS",
+      "elapsed_seconds": 2.25
+    },
+    {
+      "action": "sleep",
+      "outcome": "PASS",
+      "elapsed_seconds": 15.01
+    },
+    {
+      "action": "telnet",
+      "outcome": "PASS",
+      "elapsed_seconds": 0.25
+    },
+    {
+      "action": "telnet",
+      "outcome": "PASS",
+      "elapsed_seconds": 0.21
+    },
+    {
+      "action": "telnet",
+      "outcome": "PASS",
+      "elapsed_seconds": 7.36
+    },
+    {
+      "action": "telnet",
+      "outcome": "PASS",
+      "elapsed_seconds": 2.59
+    },
+    {
+      "action": "wait_serial",
+      "outcome": "PASS",
+      "elapsed_seconds": 0.25
+    },
+    {
+      "action": "wait_serial",
+      "outcome": "PASS",
+      "elapsed_seconds": 3.25
+    },
+    {
+      "action": "wait_serial",
+      "outcome": "PASS",
+      "elapsed_seconds": 88.11
+    },
+    {
+      "action": "wait_serial",
+      "outcome": "PASS",
+      "elapsed_seconds": 2.0
+    },
+    {
+      "action": "ssh",
+      "outcome": "PASS",
+      "elapsed_seconds": 0.62
+    },
+    {
+      "action": "ssh",
+      "outcome": "PASS",
+      "elapsed_seconds": 0.43
+    },
+    {
+      "action": "ssh",
+      "outcome": "PASS",
+      "elapsed_seconds": 2.28
+    },
+    {
+      "action": "ssh",
+      "outcome": "PASS",
+      "elapsed_seconds": 0.51
+    },
+    {
+      "action": "ssh",
+      "outcome": "PASS",
+      "elapsed_seconds": 0.4
+    },
+    {
+      "action": "ssh",
+      "outcome": "PASS",
+      "elapsed_seconds": 2.32
+    },
+    {
+      "action": "telnet",
+      "outcome": "PASS",
+      "elapsed_seconds": 2.81
+    },
+    {
+      "action": "wait_serial",
+      "outcome": "PASS",
+      "elapsed_seconds": 80.1
+    },
+    {
+      "action": "wait_serial",
+      "outcome": "PASS",
+      "elapsed_seconds": 0.5
+    },
+    {
+      "action": "wait_serial",
+      "outcome": "PASS",
+      "elapsed_seconds": 34.04
+    },
+    {
+      "action": "wait_serial",
+      "outcome": "PASS",
+      "elapsed_seconds": 20.02
+    },
+    {
+      "action": "wait_serial",
+      "outcome": "PASS",
+      "elapsed_seconds": 108.13
+    },
+    {
+      "action": "wait_serial",
+      "outcome": "PASS",
+      "elapsed_seconds": 2.5
+    },
+    {
+      "action": "telnet",
+      "outcome": "PASS",
+      "elapsed_seconds": 2.82
+    },
+    {
+      "action": "ssh",
+      "outcome": "PASS",
+      "elapsed_seconds": 34.97
+    },
+    {
+      "action": "ssh",
+      "outcome": "PASS",
+      "elapsed_seconds": 1.96
+    },
+    {
+      "action": "ssh",
+      "outcome": "PASS",
+      "elapsed_seconds": 0.59
+    },
+    {
+      "action": "ssh",
+      "outcome": "PASS",
+      "elapsed_seconds": 0.55
+    }
+  ],
+  "failure": null,
+  "warning": "Virtual test evidence is NOT physical-router acceptance."
+}

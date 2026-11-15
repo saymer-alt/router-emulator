@@ -720,6 +720,36 @@ class EntwareGateDerivationTests(unittest.TestCase):
                          "entware_chain_step_failed")
 
 
+class EntwareTimezoneSkipScenarioTests(unittest.TestCase):
+    """Explicit MIPSel TZ-skip guest evidence without rewriting the 32-step baseline."""
+
+    def test_tz_skip_scenario_adds_one_echo_safe_uart_check(self):
+        import copy
+        import json
+        from pathlib import Path
+        from lab import run as runner
+
+        folder = Path(__file__).resolve().parents[1] / "lab" / "scenarios"
+        baseline = json.loads((folder / "ported-mt7621-entware.json").read_text())
+        candidate = runner.load_scenario(str(
+            folder / "ported-mt7621-entware-tz-skip.json"))
+        self.assertEqual(len(baseline["steps"]), 32)
+        self.assertEqual(len(candidate["steps"]), 33)
+        expected = copy.deepcopy(baseline["steps"])
+        expected.insert(13, {
+            "action": "wait_serial",
+            "pattern": "lab-tz-skipped",
+            "reject_pattern": r"do_page_fault\(\)|Segmentation fault|SIGSEGV",
+            "timeout_sec": 600,
+        })
+        expected[14]["reject_pattern"] = (
+            r"Critical error:|Please use ext2/ext3/ext4|do_page_fault\(\)|"
+            r"Segmentation fault|SIGSEGV")
+        self.assertEqual(candidate["steps"], expected)
+        # Rejection must cover the stage after TZ skipped as well.
+        self.assertIn("Segmentation fault", candidate["steps"][14]["reject_pattern"])
+        self.assertEqual(candidate["steps"][-1]["expect"], "MARK42")
+
 
 class PersistenceStageCContractTests(unittest.TestCase):
     """Preparation only: PASS stays impossible without a real guest report."""
@@ -730,7 +760,7 @@ class PersistenceStageCContractTests(unittest.TestCase):
         from pathlib import Path
         from lab import run as runner
         folder = Path(__file__).resolve().parents[1] / "lab" / "scenarios"
-        original = runner.load_scenario(str(folder / "ported-mt7621-entware.json"))
+        original = runner.load_scenario(str(folder / "ported-mt7621-entware-tz-skip.json"))
         stage = runner.load_scenario(str(folder / "ported-mt7621-entware-persistence.json"))
         return original, stage
 
@@ -746,10 +776,10 @@ class PersistenceStageCContractTests(unittest.TestCase):
     def test_committed_stage_c_is_bootstrap_plus_independent_reset(self):
         original, stage = self.inputs()
         base, steps = original["steps"], stage["steps"]
-        self.assertEqual(len(base), 32)
-        self.assertEqual(len(steps), 46)
-        self.assertEqual(steps[:20], base[:20])
-        self.assertEqual(steps[21:33], base[20:32])
+        self.assertEqual(len(base), 33)
+        self.assertEqual(len(steps), 47)
+        self.assertEqual(steps[:21], base[:21])
+        self.assertEqual(steps[22:34], base[21:33])
         self.assertEqual(sum(s["action"] == "reset" for s in steps), 1)
         self.assertEqual(steps[-1]["expect"], "MARK42")
         self.assertEqual(steps[-2]["expect"], "PERSIST_OK")
@@ -759,7 +789,7 @@ class PersistenceStageCContractTests(unittest.TestCase):
         r = self.report(stage["steps"], stage["name"])
         self.assertEqual(mg.derive_persistence_gate(stage, r)["MIPSEL_PERSISTENCE"]["status"], "PASS")
 
-    def test_original_32_step_report_cannot_fake_stage_c(self):
+    def test_original_33_step_report_cannot_fake_stage_c(self):
         original, _ = self.inputs()
         r = self.report(original["steps"], original["name"])
         self.assertEqual(mg.derive_persistence_gate(original, r)["MIPSEL_PERSISTENCE"]["status"], "NOT_TESTED")

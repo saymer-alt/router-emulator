@@ -1,5 +1,5 @@
 {
-  "name": "KeeneticOS MT7621 Entware Stage C: config persists across native reboot and QEMU system_reset",
+  "name": "KeeneticOS MT7621 Entware Stage C: TZ-safe native reboot + QEMU reset persistence",
   "evidence": "KEENETIC_PORTED_EXPERIMENTAL",
   "steps": [
     {
@@ -85,8 +85,14 @@
     },
     {
       "action": "wait_serial",
+      "pattern": "lab-tz-skipped",
+      "reject_pattern": "do_page_fault\\(\\)|Segmentation fault|SIGSEGV",
+      "timeout_sec": 600
+    },
+    {
+      "action": "wait_serial",
       "pattern": "configured init script",
-      "reject_pattern": "Critical error:|Please use ext2/ext3/ext4",
+      "reject_pattern": "Critical error:|Please use ext2/ext3/ext4|do_page_fault\\(\\)|Segmentation fault|SIGSEGV",
       "timeout_sec": 600
     },
     {

@@ -1,0 +1,223 @@
+{
+  "name": "KeeneticOS MT7621 clean Entware MIPSel optional timezone GET skip: UART no SIGSEGV, native reboot",
+  "evidence": "KEENETIC_PORTED_EXPERIMENTAL",
+  "steps": [
+    {
+      "action": "wait_serial",
+      "pattern": "Boot and Recovery Environment",
+      "timeout_sec": 120
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Starting kernel",
+      "timeout_sec": 240
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Linux version",
+      "timeout_sec": 120
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Brought up 4 CPUs",
+      "timeout_sec": 240
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "system ready",
+      "timeout_sec": 600
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "waiting for connections",
+      "timeout_sec": 120
+    },
+    {
+      "action": "sleep",
+      "seconds": 15
+    },
+    {
+      "action": "telnet",
+      "port": 8023,
+      "greeting": "\\(config\\)>",
+      "timeout_sec": 60
+    },
+    {
+      "action": "telnet",
+      "port": 8023,
+      "send": "show version",
+      "expect": "release: 5\\.01\\.C\\.8\\.0-2",
+      "timeout_sec": 60,
+      "greeting": "\\(config\\)>"
+    },
+    {
+      "action": "telnet",
+      "port": 8023,
+      "send": "show running-config",
+      "expect": "Model:|interface|dns|opkg|hostname",
+      "timeout_sec": 60,
+      "greeting": "\\(config\\)>"
+    },
+    {
+      "action": "telnet",
+      "port": 8023,
+      "greeting": "\\(config\\)>",
+      "send": [
+        "user admin",
+        "password plain {password}",
+        "exit",
+        "system configuration save",
+        "opkg disk KASOPT:/"
+      ],
+      "expect": "\\(config\\)>",
+      "timeout_sec": 180
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "mounted to /opt",
+      "timeout_sec": 180
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "\\[1/5\\]",
+      "reject_pattern": "Critical error:|Please use ext2/ext3/ext4",
+      "timeout_sec": 300
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "lab-tz-skipped",
+      "reject_pattern": "do_page_fault\\(\\)|Segmentation fault|SIGSEGV",
+      "timeout_sec": 600
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "configured init script",
+      "reject_pattern": "Critical error:|Please use ext2/ext3/ext4|do_page_fault\\(\\)|Segmentation fault|SIGSEGV",
+      "timeout_sec": 600
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "/opt/bin/opkg print-architecture",
+      "expect": "mipsel-3\\.4_kn 200",
+      "timeout_sec": 120
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "/opt/bin/opkg list-installed",
+      "expect": "entware-release - ",
+      "timeout_sec": 60
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "/opt/bin/opkg install bash",
+      "expect": "Configuring bash",
+      "timeout_sec": 300
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "/opt/bin/bash --version",
+      "expect": "mipsel-openwrt-linux-gnu",
+      "timeout_sec": 60
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "/opt/bin/busybox test ! -e /opt/etc/init.d/doinstall && printf 'DOINSTALL_%s\\n' ABSENT",
+      "expect": "DOINSTALL_ABSENT",
+      "timeout_sec": 60
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "printf MARK$((7*6)) > /opt/.lab-marker; /opt/bin/busybox cat /opt/.lab-marker",
+      "expect": "MARK42",
+      "timeout_sec": 60
+    },
+    {
+      "action": "telnet",
+      "port": 8023,
+      "greeting": "Login:|\\(config\\)>",
+      "send": [
+        "admin",
+        "{password}",
+        "system reboot"
+      ],
+      "expect": "Activated system reboot",
+      "timeout_sec": 120
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "reboot: Restarting system",
+      "timeout_sec": 120
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Boot and Recovery Environment",
+      "timeout_sec": 240
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Starting kernel",
+      "timeout_sec": 240
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Brought up 4 CPUs",
+      "timeout_sec": 240
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "system ready",
+      "timeout_sec": 600
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "waiting for connections",
+      "timeout_sec": 120
+    },
+    {
+      "action": "telnet",
+      "port": 8023,
+      "greeting": "Login:|\\(config\\)>",
+      "send": [
+        "admin",
+        "{password}",
+        "show version"
+      ],
+      "expect": "release: 5\\.01\\.C\\.8\\.0-2",
+      "timeout_sec": 120
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "/opt/bin/busybox cat /proc/mounts",
+      "expect": "/opt ext4",
+      "timeout_sec": 180
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "/opt/bin/opkg print-architecture",
+      "expect": "mipsel-3\\.4_kn 200",
+      "timeout_sec": 180
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "/opt/bin/bash --version",
+      "expect": "mipsel-openwrt-linux-gnu",
+      "timeout_sec": 120
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "/opt/bin/busybox cat /opt/.lab-marker",
+      "expect": "MARK42",
+      "timeout_sec": 120
+    }
+  ]
+}
