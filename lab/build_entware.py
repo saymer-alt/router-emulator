@@ -171,12 +171,39 @@ def add_packages(mirror, cache, lock):
         index.write_bytes(gzip.compress(('\n\n'.join(blocks.values()) + '\n\n').encode(), mtime=0))
 
 
+def validate_offline_dependency_closure(packages):
+    """Fail before creating an image if the pinned offline feed lacks a dependency.
+
+    Both ARM64 and MIPSLE are intended as self-contained mirrors. This does
+    not replace opkg dependency resolution or prove that packages install.
+    """
+    import re
+
+    names = [entry["Package"] for entry in packages]
+    if len(names) != len(set(names)):
+        raise ValueError("offline mirror has duplicate package names")
+    available = set(names)
+    for entry in packages:
+        for raw in entry.get("Depends", "").split(","):
+            dep = raw.strip()
+            if not dep:
+                continue
+            # The pinned research locks presently use plain package names.
+            # Fail closed if their dependency syntax changes; don't claim a
+            # false complete mirror for versioned/alternative dependencies.
+            if not re.fullmatch(r"[A-Za-z0-9_.+@-]+", dep):
+                raise ValueError(f"unsupported offline dependency: {entry['Package']} -> {dep}")
+            if dep not in available:
+                raise ValueError(f"incomplete offline mirror: {entry['Package']} missing {dep}")
+
+
 def build(image, mirror, cache, credentials, arch="aarch64", lock_path=None):
     image, mirror, cache = (Path(p).resolve() for p in (image, mirror, cache))
     if image.exists() or mirror.exists():
         raise ValueError("output image and mirror must be new")
     lock = json.loads(Path(lock_path).read_text(encoding="utf8") if lock_path
                       else LOCK.read_text(encoding="utf8"))
+    validate_offline_dependency_closure(lock["packages"])
     cache.mkdir(parents=True, exist_ok=True)
     source = fetch(lock["installer"]["url"], lock["installer"]["sha256"], cache / "installer.tar.gz")
     mirror.mkdir(parents=True, mode=0o700)
