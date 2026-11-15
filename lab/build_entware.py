@@ -110,7 +110,14 @@ def bootstrap_archive(source, destination, password, arch="aarch64"):
                                     # The source archive has no Dropbear config:
                                     # opkg creates it earlier in bin/install.
                                     # Set the lab transport PID only afterwards.
-                                    "printf '%s\\n' 'PORT=222' 'PIDFILE=\"/var/run/lab-dropbear.pid\"' > /opt/etc/config/dropbear.conf\n" + needle)
+                                    "printf '%s\\n' 'PORT=222' 'PIDFILE=\"/var/run/lab-dropbear.pid\"' > /opt/etc/config/dropbear.conf\n"
+                                    # The [4/5] wedge (MT7621 clean run 2026-11-15:
+                                    # no script output for 600 s after the [4/5]
+                                    # echo) is bisected from here on the next run:
+                                    # these markers bypass the doinstaller stdout
+                                    # bridge via /dev/console, so the UART shows
+                                    # how far the script actually got.
+                                    "echo 'lab-dropbear-begin' > /dev/console 2>/dev/null\n" + needle)
                 start = text.index('if grep -q "222"')
                 end = text.index("\nfi", start) + 3
                 text = text[:start] + text[end:]
@@ -136,12 +143,38 @@ def bootstrap_archive(source, destination, password, arch="aarch64"):
                     "echo '[5/5] \"Entware\" installed!'\n"
                     "echo '[5/5] \"Entware\" installed!' > /dev/console 2>/dev/null\n\n"
                     "rm /opt/etc/init.d/doinstall\n\n"
+                    "echo 'lab-post-begin' > /dev/console 2>/dev/null\n\n"
                     "wget -qO - --post-data=", 1)
+                # The timezone RCI probe is the first statement after the
+                # [4/5] echo and the only network call before dropbear.  The
+                # MT7621 clean run wedged there with the unbounded wget, so
+                # bound it and bracket it with /dev/console markers (the
+                # completion markers below already proved this write path).
+                tz_needle = ('timezone="$(echo $(wget -qO - localhost:79/rci/'
+                             'show/clock/date/tz | grep locality | cut -d\':\''
+                             ' -f2 | sed \'s#\\("\\|,\\)##g\'))"')
+                tz_bounded = tz_needle.replace("wget -qO - localhost:79",
+                                               "wget -qT 3 -O - localhost:79")
+                if tz_needle in text:
+                    text = text.replace(tz_needle,
+                                        "echo 'lab-tz-begin' > /dev/console 2>/dev/null\n"
+                                        + tz_bounded +
+                                        "\necho 'lab-tz-end' > /dev/console 2>/dev/null", 1)
+                elif "rci/show/clock/date/tz" in text:
+                    raise ValueError("unexpected native Entware timezone probe")
                 # A silent no-op replace would reintroduce the swallowed [5/5]
                 # after the next upstream installer rotation; fail loudly
                 # instead so the lab refuses to build a mis-patched bootstrap.
                 if text.index("echo '[5/5] \"Entware\" installed!'") > text.index('wget -qO - --post-data=') \
                         or text.index('rm /opt/etc/init.d/doinstall') > text.index('wget -qO - --post-data='):
+                    raise ValueError('unexpected native Entware bootstrap tail')
+                if text.index("lab-dropbear-begin") > text.index('wget -qO - --post-data=') \
+                        or text.index("lab-post-begin") > text.index('wget -qO - --post-data='):
+                    raise ValueError('unexpected native Entware bootstrap tail')
+                if "lab-tz-begin" in text and (
+                        text.index("lab-tz-begin") > text.index("lab-tz-end")
+                        or text.index("lab-tz-end") > text.index("lab-dropbear-begin")
+                        or "wget -qO - localhost:79" in text):
                     raise ValueError('unexpected native Entware bootstrap tail')
                 data = text.encode()
             if data is not None:

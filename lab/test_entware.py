@@ -130,6 +130,88 @@ class EntwareTests(unittest.TestCase):
         self.assertIn('download digest mismatch', str(raised.exception))
         self.assertIn('/payload.bin', str(raised.exception))
 
+    def test_45_wedge_is_bisectable_and_the_tz_probe_is_bounded(self):
+        """MT7621 clean run (2026-11-15, pristine NAND + fresh USB + complete
+        25-package mirror): every doinstall statement produced output through
+        the [4/5] echo and then nothing for 600 s, while Deadwood kept its
+        steady ~15 s reload cycle.  The first statement after that echo is the
+        unbounded TZ RCI GET, so the lab patch bounds it (busybox -T) and
+        brackets the [4/5] tail with /dev/console markers — the same write
+        path the [5/5] marker already proved lands on the UART even when the
+        doinstaller stdout bridge stalls.  One follow-up run then bisects the
+        wedge: lab-tz-begin/end, lab-dropbear-begin, lab-post-begin."""
+        with tempfile.TemporaryDirectory() as td:
+            source, target = pathlib.Path(td) / 'source.tar.gz', pathlib.Path(td) / 'target.tar.gz'
+            install = (b'#!/bin/sh\n'
+                       b'timezone="$(echo $(wget -qO - localhost:79/rci/show/clock/date/tz '
+                       b"| grep locality | cut -d':' -f2 | sed 's#\\(\"\\|,\\)##g'))\"\n"
+                       b'\n'
+                       b'if [ -n "$timezone" ]; then\n'
+                       b'  ln -sf /opt/share/zoneinfo/"$timezone" /opt/etc/localtime\n'
+                       b'fi\n'
+                       b'/opt/etc/init.d/S51dropbear start\n'
+                       b"wget -qO - --post-data='[{\"opkg\":{\"initrc\":{\"path\":\"/opt/etc/init.d/rc.unslung\"}}}]' localhost:79/rci/ >/dev/null 2>&1\n"
+                       b'\n'
+                       b'if grep -q "222" /opt/etc/config/dropbear.conf; then\n'
+                       b"\techo 'Log on to start an SSH session using login - root, password - keenetic, port - 222.'\n"
+                       b'  else\n'
+                       b"\techo 'Log on to start an SSH session using login - root, password - keenetic.'\n"
+                       b'fi\n'
+                       b'\n'
+                       b"echo '[5/5] \"Entware\" installed!'\n"
+                       b'\n'
+                       b'rm /opt/etc/init.d/doinstall\n'
+                       b'\n'
+                       b'rm "$0"\n')
+            with tarfile.open(source, 'w:gz') as archive:
+                item = tarfile.TarInfo('bin/install')
+                item.size = len(install)
+                archive.addfile(item, io.BytesIO(install))
+            with patch.object(entware.subprocess, 'run', return_value=SimpleNamespace(stdout=b'$6$synthetic-hash\n')):
+                entware.bootstrap_archive(source, target, 'PrivateSyntheticToken0123456789')
+            with tarfile.open(target) as archive:
+                script = archive.extractfile('bin/install').read()
+            post = script.index(b'wget -qO - --post-data=')
+            self.assertIn(b'wget -qT 3 -O - localhost:79/rci/show/clock/date/tz', script)
+            self.assertNotIn(b'wget -qO - localhost:79/rci/show/clock/date/tz', script)
+            tz_begin = script.index(b"echo 'lab-tz-begin' > /dev/console")
+            tz_end = script.index(b"echo 'lab-tz-end' > /dev/console")
+            dropbear_begin = script.index(b"echo 'lab-dropbear-begin' > /dev/console")
+            post_begin = script.index(b"echo 'lab-post-begin' > /dev/console")
+            self.assertLess(tz_begin, script.index(b'timezone='))
+            self.assertLess(script.index(b'timezone='), tz_end)
+            self.assertLess(tz_end, dropbear_begin)
+            self.assertLess(dropbear_begin, script.index(b'S51dropbear start'))
+            self.assertLess(script.index(b'S51dropbear start'), post_begin)
+            self.assertLess(post_begin, post)
+
+    def test_timezone_probe_drift_is_refused(self):
+        """A silently mis-patched TZ probe would hide the wedge again; the
+        patch must refuse a drifted upstream line instead of no-oping."""
+        with tempfile.TemporaryDirectory() as td:
+            source, target = pathlib.Path(td) / 'source.tar.gz', pathlib.Path(td) / 'target.tar.gz'
+            drifted = (b'timezone="$(echo $(wget -qO - localhost:79/rci/show/clock/date/tz '
+                       b'| grep locality | cut -d, -f2))"\n'
+                       b'/opt/etc/init.d/S51dropbear start\n'
+                       b"wget -qO - --post-data='[]' localhost:79/rci/ >/dev/null 2>&1\n"
+                       b'\n'
+                       b'if grep -q "222" /opt/etc/config/dropbear.conf; then\n'
+                       b"\techo 'hint'\n"
+                       b'fi\n'
+                       b'\n'
+                       b"echo '[5/5] \"Entware\" installed!'\n"
+                       b'\n'
+                       b'rm /opt/etc/init.d/doinstall\n'
+                       b'\n'
+                       b'rm "$0"\n')
+            with tarfile.open(source, 'w:gz') as archive:
+                item = tarfile.TarInfo('bin/install')
+                item.size = len(drifted)
+                archive.addfile(item, io.BytesIO(drifted))
+            with patch.object(entware.subprocess, 'run', return_value=SimpleNamespace(stdout=b'$6$h\n')):
+                with self.assertRaisesRegex(ValueError, 'timezone probe'):
+                    entware.bootstrap_archive(source, target, 'PrivateSyntheticToken0123456789')
+
     def test_completion_markers_precede_the_saving_rci_post(self):
         """The 2026-11-09 installer's final RCI POST carries
         system.configuration.save=true; ndm's doinstaller console bridge stops

@@ -546,3 +546,35 @@ class SummaryClaimTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EntwareScenarioContractTests(unittest.TestCase):
+    """The committed MT7621 Entware scenario must stay loadable and honest.
+
+    It is the single reusable evidence path for MIPSEL_ENTWARE_READY: boot
+    gates, the native install markers with failure rejects, the SSH proof
+    steps and the second-boot verification must all survive load_scenario's
+    validation (echo-safety, loopback-only ports, positive timeouts).
+    """
+
+    def test_committed_entware_scenario_loads_and_covers_the_contract(self):
+        import json
+        from pathlib import Path
+
+        from lab import run as runner
+
+        path = (Path(__file__).resolve().parents[1] / "lab" / "scenarios"
+                / "ported-mt7621-entware.json")
+        scenario = runner.load_scenario(str(path))
+        actions = [step["action"] for step in scenario["steps"]]
+        self.assertEqual(actions.count("wait_serial"), 15)
+        self.assertEqual(actions.count("telnet"), 6)
+        self.assertEqual(actions.count("ssh"), 10)
+        # first boot gates, install markers and the second boot are all present
+        text = json.dumps(scenario)
+        self.assertIn("mounted to /opt", text)
+        self.assertIn("configured init script", text)
+        self.assertIn("Critical error:", text)
+        self.assertIn("4_kn 200", text)
+        self.assertIn("MARK42", text)
+        self.assertIn("Activated system reboot", text)
