@@ -343,3 +343,20 @@ report that matches the committed scenario.
 * Breed cannot persist its environment through emulated flash writes —
   the stand pre-constructs the env block instead.
 * Keenetic Ported components stay local; nothing proprietary is committed.
+
+### Stage C persistence candidate (Draft PR #84, not guest-verified)
+
+After the validated MIPSel-only optional TZ GET skip (merged PR #83),
+the Stage C persistence scenario is `lab/scenarios/ported-mt7621-entware-persistence.json`
+(**47 steps**). It adds a non-secret file under `/opt/etc` before the native
+`system reboot`, verifies it after that reboot, then uses a *distinct*
+QEMU monitor `system_reset` and checks a third boot, `/opt ext4`,
+native `opkg` and `bash`, and the persisted values again.
+
+This scenario is **not** the evidence for the existing 17/19 PASS.
+`MIPSEL_PERSISTENCE` remains `NOT_TESTED` until an isolated, real
+Ported MT7621 guest run produces a full matching `report.json`.
+Keep NAND, firmware, root credentials and full UART private. Do not
+substitute standard GitHub CI (which tests scenario contracts but does
+not execute this private guest) for Stage C acceptance. Issue #81
+also requires a separate `rc.unslung` autostart check.
