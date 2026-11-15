@@ -1,0 +1,63 @@
+#!/bin/sh
+# Disposable MT7621 Entware-only autostart probe, never installed on real routers.
+# The pinned rc.unslung (opt-ndmsv2 1.0-17) SOURCES every executable S* script
+# in /opt/etc/init.d inside one shell: this probe must not alter shell options
+# or terminate the sourcing shell, so all logic stays inside functions and
+# every branch returns instead of exiting.
+pidfile=/opt/var/run/labboot.pid
+genfile=/opt/var/run/labboot.gen
+
+labboot_worker_alive() {
+    [ -n "$1" ] && [ -r "/proc/$1/cmdline" ] || return 1
+    /opt/bin/busybox tr '\0' ' ' < "/proc/$1/cmdline" 2>/dev/null | /opt/bin/busybox grep -q 'sleep 3600'
+}
+
+labboot_main() {
+    case "$1" in
+    start)
+        /opt/bin/busybox mkdir -p /opt/var/run
+        if [ -r "$pidfile" ]; then
+            old=$(/opt/bin/busybox cat "$pidfile" 2>/dev/null)
+            if labboot_worker_alive "$old"; then
+                # genuine worker from the current boot: idempotent no-op
+                return 0
+            fi
+        fi
+        /opt/bin/busybox sleep 3600 </dev/null >/dev/null 2>&1 &
+        pid=$!
+        printf '%s\n' "$pid" > "$pidfile"
+        gen=0
+        if [ -r "$genfile" ]; then
+            gen=$(/opt/bin/busybox cat "$genfile" 2>/dev/null)
+        fi
+        case "$gen" in ''|*[!0-9]*) gen=0 ;; esac
+        gen=$((gen+1))
+        printf '%s\n' "$gen" > "$genfile"
+        /opt/bin/busybox echo "labboot-autostart gen=$gen pid=$pid" > /dev/console 2>/dev/null
+        ;;
+    stop)
+        [ -r "$pidfile" ] || return 1
+        pid=$(/opt/bin/busybox cat "$pidfile")
+        kill "$pid" 2>/dev/null
+        /opt/bin/busybox rm -f "$pidfile"
+        ;;
+    restart)
+        labboot_main stop
+        labboot_main start
+        ;;
+    status)
+        [ -r "$pidfile" ] || return 1
+        pid=$(/opt/bin/busybox cat "$pidfile")
+        labboot_worker_alive "$pid" || return 1
+        gen=0
+        if [ -r "$genfile" ]; then
+            gen=$(/opt/bin/busybox cat "$genfile" 2>/dev/null)
+        fi
+        case "$gen" in ''|*[!0-9]*) gen=0 ;; esac
+        printf 'LABBOOT gen=%s pid=%s\n' "$gen" "$pid"
+        ;;
+    *) return 2 ;;
+    esac
+}
+
+labboot_main "$@"

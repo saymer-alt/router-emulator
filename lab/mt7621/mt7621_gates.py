@@ -572,6 +572,81 @@ def derive_persistence_gate(scenario, report):
     return {"MIPSEL_PERSISTENCE": _gate("FAIL", "persistence_chain_step_failed")}
 
 
+def derive_autostart_gate(scenario, report):
+    """Independent guest evidence: the pinned rc.unslung actually STARTS an
+    Entware init script after boot (real worker + boot-generation marker),
+    not merely the "configured init script" setting being applied.
+
+    Deliberately outside GATES: the 19 core gates stay unchanged; this gate
+    only appears when its own scenario/report pair is supplied.  Because the
+    name is not in GATES, apply_labels() refuses any --set for it, so a PASS
+    can only ever come from a validated scenario report.
+    """
+    checked = _checked_prefix(scenario, report)
+    if checked is None:
+        return {"MIPSEL_AUTOSTART": _gate("FAIL", "report_scenario_mismatch")}
+    steps, rows, first_fail = checked
+
+    def positions(expect, needle):
+        return [i for i, s in enumerate(steps)
+                if s.get("action") == "ssh"
+                and s.get("expect") == expect
+                and needle in s.get("send", "")]
+
+    # The probe is seeded before the native reboot and never started by hand;
+    # gen=1 after that reboot and gen=2 after the separate QEMU monitor reset
+    # are the only ways these echo-safe markers can be produced.
+    seed = positions("LABBOOT_READY", "base64 -d > /opt/etc/init.d/S99labboot")
+    preboot = positions("LABBOOT_OFF", "labboot.gen")
+    persisted = positions("PROBE_PERSISTED", "test -x /opt/etc/init.d/S99labboot")
+    status1 = positions("LABBOOT gen=1 pid=[0-9]+", "S99labboot status")
+    gen1 = positions("GEN_ONE", "labboot.gen")
+    identity = positions("WORKER_LIVE", "/proc/$pid/cmdline")
+    single = positions("WORKER_SINGLE", "*sleep*3600*")
+    sync = positions("SYNC_COMPLETE", "busybox sync")
+    status2 = positions("LABBOOT gen=2 pid=[0-9]+", "S99labboot status")
+    gen2 = positions("GEN_TWO", "labboot.gen")
+    pids = positions("PIDS [0-9]+ [0-9]+", "labboot.pid1")
+    resets = [i for i, s in enumerate(steps) if s.get("action") == "reset"]
+    reboot = [i for i, s in enumerate(steps)
+              if s.get("action") == "wait_serial"
+              and s.get("pattern") == "reboot: Restarting system"]
+    ready = [i for i, s in enumerate(steps)
+             if s.get("action") == "wait_serial"
+             and s.get("pattern") == "system ready"]
+    initrc = [i for i, s in enumerate(steps)
+              if s.get("action") == "wait_serial"
+              and s.get("pattern") == "configured init script"]
+    mounts = [i for i, s in enumerate(steps)
+              if s.get("action") == "ssh" and s.get("expect") == "/opt ext4"]
+    if not (len(seed) == 1 and len(preboot) == 1 and len(persisted) == 1
+            and len(status1) == 1 and len(gen1) == 1 and len(identity) == 2
+            and len(single) == 2 and len(sync) == 1 and len(status2) == 1
+            and len(gen2) == 1 and len(pids) == 1 and len(resets) == 1
+            and len(reboot) == 1 and len(ready) >= 3 and len(initrc) >= 3
+            and len(mounts) == 2):
+        return {"MIPSEL_AUTOSTART": _gate("NOT_TESTED", "scenario_lacks_autostart_chain")}
+    # The pre-boot negative check proves no worker existed before the native
+    # reboot; two /proc/<pid>/cmdline identities (a stale pidfile cannot fake
+    # them) plus the boot-generation increments prove the script ran in each
+    # of the two post-reboot boots, in boot order.
+    ordered = (ready[0], initrc[0], seed[0], preboot[0], reboot[0],
+               initrc[1], ready[1], persisted[0], status1[0], gen1[0],
+               identity[0], single[0], sync[0], resets[0],
+               initrc[2], ready[2], status2[0], gen2[0], identity[1],
+               pids[0], single[1])
+    if any(a >= b for a, b in zip(ordered, ordered[1:])):
+        return {"MIPSEL_AUTOSTART": _gate("NOT_TESTED", "autostart_chain_not_ordered")}
+    if first_fail is None:
+        return {"MIPSEL_AUTOSTART": _gate(
+            "PASS" if report.get("outcome") == "PASS" else "FAIL",
+            "native_reboot_then_qemu_reset_service_autostarted"
+            if report.get("outcome") == "PASS" else "report_outcome_mismatch")}
+    if first_fail <= seed[0]:
+        return {"MIPSEL_AUTOSTART": _gate("NOT_TESTED", "prerequisite_failed")}
+    return {"MIPSEL_AUTOSTART": _gate("FAIL", "autostart_chain_step_failed")}
+
+
 def apply_labels(gates, statuses, reasons=None):
     """Apply controller labels; PASS is refused for native gates."""
     reasons = reasons or {}
@@ -591,7 +666,8 @@ def evaluate(openwrt_scenario, openwrt_report, statuses=(), reasons=None,
              cli_scenario=None, cli_report=None,
              entware_scenario=None, entware_report=None,
              service_scenario=None, service_report=None,
-             persistence_scenario=None, persistence_report=None):
+             persistence_scenario=None, persistence_report=None,
+             autostart_scenario=None, autostart_report=None):
     gates = {name: _gate("NOT_TESTED", "unattempted") for name in GATES}
     gates.update(derive_openwrt_gates(openwrt_scenario, openwrt_report))
     if ported_scenario is not None and ported_report is not None:
@@ -604,6 +680,8 @@ def evaluate(openwrt_scenario, openwrt_report, statuses=(), reasons=None,
         gates.update(derive_service_restart_gate(service_scenario, service_report))
     if persistence_scenario is not None and persistence_report is not None:
         gates.update(derive_persistence_gate(persistence_scenario, persistence_report))
+    if autostart_scenario is not None and autostart_report is not None:
+        gates.update(derive_autostart_gate(autostart_scenario, autostart_report))
     apply_labels(gates, statuses, reasons)
     return gates
 
@@ -669,6 +747,10 @@ def main():
                     help="committed Entware native-reboot and QEMU-reset Stage C scenario")
     ap.add_argument("--persistence-report",
                     help="report.json of the independent Stage C persistence scenario")
+    ap.add_argument("--autostart-scenario",
+                    help="committed Entware rc.unslung autostart Stage C scenario")
+    ap.add_argument("--autostart-report",
+                    help="report.json of the independent rc.unslung autostart scenario")
     ap.add_argument("--set", action="append", nargs=2, metavar=("GATE", "STATUS"),
                     default=[],
                     help="explicit gate status; PASS refused for native gates")
@@ -708,13 +790,20 @@ def main():
                 Path(args.persistence_scenario).read_text(encoding="utf-8"))
             persistence_report = json.loads(
                 Path(args.persistence_report).read_text(encoding="utf-8"))
+        autostart_scenario = autostart_report = None
+        if args.autostart_scenario and args.autostart_report:
+            autostart_scenario = json.loads(
+                Path(args.autostart_scenario).read_text(encoding="utf-8"))
+            autostart_report = json.loads(
+                Path(args.autostart_report).read_text(encoding="utf-8"))
         reasons = {name: why for name, why in args.reason}
         gates = evaluate(scenario, report, args.set, reasons,
                          ported_scenario, ported_report,
                          cli_scenario, cli_report,
                          entware_scenario, entware_report,
                          service_scenario, service_report,
-                         persistence_scenario, persistence_report)
+                         persistence_scenario, persistence_report,
+                         autostart_scenario, autostart_report)
     except ValueError as error:
         ap.error(str(error))
     report_dir = Path(args.report_dir)
