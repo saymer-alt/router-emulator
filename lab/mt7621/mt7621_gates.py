@@ -617,24 +617,37 @@ def derive_autostart_gate(scenario, report):
     initrc = [i for i, s in enumerate(steps)
               if s.get("action") == "wait_serial"
               and s.get("pattern") == "configured init script"]
+    # The probe echoes its boot generation to /dev/console when rc.unslung
+    # actually sources it; the scenario synchronizes the SSH proofs on these
+    # UART execution markers (ndm runs rc.unslung asynchronously ~30-50 s
+    # after "system ready", once the USB disk has mounted — a bare SSH probe
+    # raced ahead of it in the second guest cycle).
+    echo1 = [i for i, s in enumerate(steps)
+             if s.get("action") == "wait_serial"
+             and s.get("pattern") == "labboot-autostart gen=1"]
+    echo2 = [i for i, s in enumerate(steps)
+             if s.get("action") == "wait_serial"
+             and s.get("pattern") == "labboot-autostart gen=2"]
     mounts = [i for i, s in enumerate(steps)
               if s.get("action") == "ssh" and s.get("expect") == "/opt ext4"]
     if not (len(seed) == 1 and len(preboot) == 1 and len(persisted) == 1
             and len(status1) == 1 and len(gen1) == 1 and len(identity) == 2
             and len(single) == 2 and len(sync) == 1 and len(status2) == 1
             and len(gen2) == 1 and len(pids) == 1 and len(resets) == 1
-            and len(reboot) == 1 and len(ready) >= 3 and len(initrc) >= 3
+            and len(reboot) == 1 and len(echo1) == 1 and len(echo2) == 1
+            and len(ready) >= 3 and len(initrc) >= 3
             and len(mounts) == 2):
         return {"MIPSEL_AUTOSTART": _gate("NOT_TESTED", "scenario_lacks_autostart_chain")}
     # The pre-boot negative check proves no worker existed before the native
-    # reboot; two /proc/<pid>/cmdline identities (a stale pidfile cannot fake
+    # reboot; the UART markers pin the probe's execution inside each boot
+    # stage; two /proc/<pid>/cmdline identities (a stale pidfile cannot fake
     # them) plus the boot-generation increments prove the script ran in each
     # of the two post-reboot boots, in boot order.
     ordered = (ready[0], initrc[0], seed[0], preboot[0], reboot[0],
-               initrc[1], ready[1], persisted[0], status1[0], gen1[0],
-               identity[0], single[0], sync[0], resets[0],
-               initrc[2], ready[2], status2[0], gen2[0], identity[1],
-               pids[0], single[1])
+               initrc[1], ready[1], echo1[0], persisted[0], status1[0],
+               gen1[0], identity[0], single[0], sync[0], resets[0],
+               initrc[2], ready[2], echo2[0], status2[0], gen2[0],
+               identity[1], pids[0], single[1])
     if any(a >= b for a, b in zip(ordered, ordered[1:])):
         return {"MIPSEL_AUTOSTART": _gate("NOT_TESTED", "autostart_chain_not_ordered")}
     if first_fail is None:

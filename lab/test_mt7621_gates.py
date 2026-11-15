@@ -1005,7 +1005,7 @@ class AutostartStageCContractTests(unittest.TestCase):
         from pathlib import Path
         baseline, stage = self.inputs()
         self.assertEqual(len(baseline["steps"]), 33)
-        self.assertEqual(len(stage["steps"]), 57)
+        self.assertEqual(len(stage["steps"]), 59)
         # Boot 1 up to the persistence marker is the committed baseline;
         # the native reboot of the baseline then triggers the autostart.
         self.assertEqual(stage["steps"][:21], baseline["steps"][:21])
@@ -1047,6 +1047,18 @@ class AutostartStageCContractTests(unittest.TestCase):
         self.assertEqual(len(identities), 2)
         for step in identities:
             self.assertIn("*sleep*3600*", step["send"])
+
+    def test_missing_uart_execution_marker_is_not_tested(self):
+        import copy
+        _, s = self.inputs()
+        changed = copy.deepcopy(s)
+        changed["steps"] = [x for x in changed["steps"]
+                            if not str(x.get("pattern", "")).startswith(
+                                "labboot-autostart gen=")]
+        gate = mg.derive_autostart_gate(changed, self.report(changed))
+        self.assertEqual(gate["MIPSEL_AUTOSTART"]["status"], "NOT_TESTED")
+        self.assertEqual(gate["MIPSEL_AUTOSTART"]["reason"],
+                         "scenario_lacks_autostart_chain")
 
     def test_complete_guest_report_may_pass(self):
         _, s = self.inputs()
@@ -1108,7 +1120,7 @@ class AutostartStageCContractTests(unittest.TestCase):
         steps = changed["steps"]
         # Swap the boot-2 and boot-3 status proofs: the generation-2 answer
         # would then be accepted before any QEMU reset happened.
-        steps[38], steps[52] = steps[52], steps[38]
+        steps[39], steps[54] = steps[54], steps[39]
         gate = mg.derive_autostart_gate(changed, self.report(changed))
         self.assertEqual(gate["MIPSEL_AUTOSTART"]["status"], "NOT_TESTED")
         self.assertEqual(gate["MIPSEL_AUTOSTART"]["reason"],
@@ -1117,13 +1129,13 @@ class AutostartStageCContractTests(unittest.TestCase):
     def test_failure_during_boot2_status_is_fail(self):
         _, s = self.inputs()
         gate = mg.derive_autostart_gate(
-            s, self.report(s, failed=38))["MIPSEL_AUTOSTART"]
+            s, self.report(s, failed=39))["MIPSEL_AUTOSTART"]
         self.assertEqual(gate["status"], "FAIL")
 
     def test_failure_during_boot3_identity_is_fail(self):
         _, s = self.inputs()
         gate = mg.derive_autostart_gate(
-            s, self.report(s, failed=54))["MIPSEL_AUTOSTART"]
+            s, self.report(s, failed=56))["MIPSEL_AUTOSTART"]
         self.assertEqual(gate["status"], "FAIL")
 
     def test_prior_boot_failure_is_not_tested(self):

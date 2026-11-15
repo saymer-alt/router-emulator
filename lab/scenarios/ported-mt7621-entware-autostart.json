@@ -207,6 +207,11 @@
       "timeout_sec": 120
     },
     {
+      "action": "wait_serial",
+      "pattern": "labboot-autostart gen=1",
+      "timeout_sec": 600
+    },
+    {
       "action": "telnet",
       "port": 8023,
       "greeting": "Login:|\\(config\\)>",
@@ -321,6 +326,11 @@
       "action": "wait_serial",
       "pattern": "waiting for connections",
       "timeout_sec": 120
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "labboot-autostart gen=2",
+      "timeout_sec": 600
     },
     {
       "action": "telnet",
