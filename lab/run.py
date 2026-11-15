@@ -323,6 +323,14 @@ def run_telnet_step(step, forwards, credentials, deadline, ensure_running):
             sock.close()
 
 
+def verify_ssh_response(exit_status, output, expected):
+    """Require both remote command success and an answer not faked by the command."""
+    if exit_status != 0:
+        raise RuntimeError("ssh command exited with status %d" % exit_status)
+    if not expected.search(output):
+        raise RuntimeError("ssh answer marker not matched")
+
+
 def run_ssh_step(step, credentials, forwards, deadline, ensure_running):
     """127.0.0.1-only SSH exec with private per-run credentials: one
     command, one verified answer.  Output goes nowhere except the in-memory
@@ -374,13 +382,13 @@ def run_ssh_step(step, credentials, forwards, deadline, ensure_running):
                         and not channel.recv_stderr_ready():
                     break
                 time.sleep(0.025)
+            # No PASS from text alone: a failing command may print the expected
+            # marker before returning non-zero (e.g. partial opkg install).
+            exit_status = channel.recv_exit_status()
             client.close()
             client = None
-            if expect.search(data):
-                return
-            # The guest answered, just not with the verified marker: a real
-            # FAIL, not a transport retry.
-            raise RuntimeError("ssh answer marker not matched")
+            verify_ssh_response(exit_status, data, expect)
+            return
         except paramiko.AuthenticationException:
             if client:
                 client.close()

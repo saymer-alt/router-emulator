@@ -544,10 +544,6 @@ class SummaryClaimTests(unittest.TestCase):
         self.assertIn("NOT_TESTED", claim)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class EntwareScenarioContractTests(unittest.TestCase):
     """The committed MT7621 Entware scenario must stay loadable and honest.
 
@@ -577,4 +573,10 @@ class EntwareScenarioContractTests(unittest.TestCase):
         self.assertIn("Critical error:", text)
         self.assertIn("4_kn 200", text)
         self.assertIn("MARK42", text)
+        self.assertIn("DOINSTALL_ABSENT", text)
         self.assertIn("Activated system reboot", text)
+
+if __name__ == "__main__":
+    unittest.main()
+
+
