@@ -103,24 +103,24 @@
   },
   {
    "Package": "libncurses",
-   "Version": "6.6.20260801-4",
+   "Version": "6.6.20260801-4a",
    "Architecture": "mipsel-3.4",
-   "SHA256sum": "db8de964972f1699d4ec5459adb739a29d120a49c27d08016dce7408a8c7cedb",
-   "Filename": "libncurses_6.6.20260801-4_mipsel-3.4.ipk",
-   "Size": "1130",
+   "SHA256sum": "da5e21ed89df952f13ba91e8d0a26b7ab4245ee7d444f159ab534c108620c76a",
+   "Filename": "libncurses_6.6.20260801-4a_mipsel-3.4.ipk",
+   "Size": "1134",
    "feed": "entware",
-   "url": "https://bin.entware.net/mipselsf-k3.4/libncurses_6.6.20260801-4_mipsel-3.4.ipk",
+   "url": "https://bin.entware.net/mipselsf-k3.4/libncurses_6.6.20260801-4a_mipsel-3.4.ipk",
    "Depends": "libc, libssp, librt, libpthread, libncursesw"
   },
   {
    "Package": "libncursesw",
-   "Version": "6.6.20260801-4",
+   "Version": "6.6.20260801-4a",
    "Architecture": "mipsel-3.4",
-   "SHA256sum": "a541ff694fd80c1fcfca84b0e4f9ccca1554f61fb86b02bbbb8226b45c49f932",
-   "Filename": "libncursesw_6.6.20260801-4_mipsel-3.4.ipk",
-   "Size": "236439",
+   "SHA256sum": "e79fb11c52b93b2372a68c375982a6f9d5b0183bcca5807eaad0f979f2f7f016",
+   "Filename": "libncursesw_6.6.20260801-4a_mipsel-3.4.ipk",
+   "Size": "236438",
    "feed": "entware",
-   "url": "https://bin.entware.net/mipselsf-k3.4/libncursesw_6.6.20260801-4_mipsel-3.4.ipk",
+   "url": "https://bin.entware.net/mipselsf-k3.4/libncursesw_6.6.20260801-4a_mipsel-3.4.ipk",
    "Depends": "libc, libssp, librt, libpthread, terminfo"
   },
   {
@@ -210,13 +210,13 @@
   },
   {
    "Package": "terminfo",
-   "Version": "6.6.20260801-4",
+   "Version": "6.6.20260801-4a",
    "Architecture": "mipsel-3.4",
-   "SHA256sum": "570fd377977645a4de6178405e62289fe9ae7e2a5437ad358388a72fdf592f07",
-   "Filename": "terminfo_6.6.20260801-4_mipsel-3.4.ipk",
-   "Size": "9977",
+   "SHA256sum": "6d151d0c672192178bd8180eea537cf2b3f713391623e639bd8f70b427b23314",
+   "Filename": "terminfo_6.6.20260801-4a_mipsel-3.4.ipk",
+   "Size": "9976",
    "feed": "entware",
-   "url": "https://bin.entware.net/mipselsf-k3.4/terminfo_6.6.20260801-4_mipsel-3.4.ipk",
+   "url": "https://bin.entware.net/mipselsf-k3.4/terminfo_6.6.20260801-4a_mipsel-3.4.ipk",
    "Depends": "libc, libssp, librt, libpthread"
   },
   {
