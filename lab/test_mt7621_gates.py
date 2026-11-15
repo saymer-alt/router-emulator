@@ -720,6 +720,37 @@ class EntwareGateDerivationTests(unittest.TestCase):
                          "entware_chain_step_failed")
 
 
+class EntwareTimezoneSkipScenarioTests(unittest.TestCase):
+    """Explicit MIPSel TZ-skip guest evidence without rewriting the 32-step baseline."""
+
+    def test_tz_skip_scenario_adds_one_echo_safe_uart_check(self):
+        import copy
+        import json
+        from pathlib import Path
+        from lab import run as runner
+
+        folder = Path(__file__).resolve().parents[1] / "lab" / "scenarios"
+        baseline = json.loads((folder / "ported-mt7621-entware.json").read_text())
+        candidate = runner.load_scenario(str(
+            folder / "ported-mt7621-entware-tz-skip.json"))
+        self.assertEqual(len(baseline["steps"]), 32)
+        self.assertEqual(len(candidate["steps"]), 33)
+        expected = copy.deepcopy(baseline["steps"])
+        expected.insert(13, {
+            "action": "wait_serial",
+            "pattern": "lab-tz-skipped",
+            "reject_pattern": r"do_page_fault\(\)|Segmentation fault|SIGSEGV",
+            "timeout_sec": 600,
+        })
+        expected[14]["reject_pattern"] = (
+            r"Critical error:|Please use ext2/ext3/ext4|do_page_fault\(\)|"
+            r"Segmentation fault|SIGSEGV")
+        self.assertEqual(candidate["steps"], expected)
+        # Rejection must cover the stage after TZ skipped as well.
+        self.assertIn("Segmentation fault", candidate["steps"][14]["reject_pattern"])
+        self.assertEqual(candidate["steps"][-1]["expect"], "MARK42")
+
+
 class ServiceRestartStageCContractTests(unittest.TestCase):
     """No guest execution here: tests validate proof requirements only."""
 
@@ -729,7 +760,7 @@ class ServiceRestartStageCContractTests(unittest.TestCase):
         from pathlib import Path
         from lab import run as runner
         folder = Path(__file__).resolve().parents[1] / "lab" / "scenarios"
-        original = runner.load_scenario(str(folder / "ported-mt7621-entware.json"))
+        original = runner.load_scenario(str(folder / "ported-mt7621-entware-tz-skip.json"))
         stage = runner.load_scenario(str(folder / "ported-mt7621-entware-service-restart.json"))
         return original, stage
 
@@ -747,10 +778,10 @@ class ServiceRestartStageCContractTests(unittest.TestCase):
         import base64
         from pathlib import Path
         original, stage = self.inputs()
-        self.assertEqual(len(original["steps"]), 32)
-        self.assertEqual(len(stage["steps"]), 39)
-        self.assertEqual(stage["steps"][:32], original["steps"])
-        command = stage["steps"][33]["send"]
+        self.assertEqual(len(original["steps"]), 33)
+        self.assertEqual(len(stage["steps"]), 40)
+        self.assertEqual(stage["steps"][:33], original["steps"])
+        command = stage["steps"][34]["send"]
         # The first quoted token is printf's '%s' format, the second
         # one is the actual encoded fixture.
         self.assertTrue(command.startswith("printf '%s' '"))

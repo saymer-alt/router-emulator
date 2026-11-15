@@ -27,7 +27,7 @@ a Ported NAND assembler and gate aggregation for the MT7621 preset family.
 | HOST_ISOLATION | PASS | guest runs with `-w offline -l user`; forwards bound to 127.0.0.1 only |
 | CLEANUP | PASS | the runner's disposable workspace copy is removed after the run |
 | PORTED_NDMC_READY | PASS | `lab/scenarios/ported-mt7621-cli.json`: the ndm CLI over the loopback telnet forward answers (prompt greeting + verified `show version` release answer) |
-| MIPSEL_ENTWARE_READY | PASS | `lab/scenarios/ported-mt7621-entware.json` via `lab/mt7621/entware_e2e.py`: full 32-step chain PASS (2026-11-15 diag4) — installer completion, real opkg answers, native `bash --version` (`mipsel-openwrt-linux-gnu`), `DOINSTALL_ABSENT`, `MARK42`, native `system reboot`, post-reboot `/opt ext4` + opkg + bash + marker; derived by `derive_entware_gates` from the report against the committed scenario |
+| MIPSEL_ENTWARE_READY | PASS | `lab/scenarios/ported-mt7621-entware.json` via `lab/mt7621/entware_e2e.py`: full 32-step chain PASS (2026-11-15 diag4) — installer completion, real opkg answers, native `bash --version` (`mipsel-openwrt-linux-gnu`), `DOINSTALL_ABSENT`, `MARK42`, native `system reboot`, post-reboot `/opt ext4` + opkg + bash + marker; derived by `derive_entware_gates` from the report against the committed scenario; re-confirmed 33/33 by the SIGSEGV-free tz-skip cycle (see below) |
 | MIPSEL_SERVICE_RESTART, MIPSEL_PERSISTENCE | NOT_TESTED | separate scripted scope (Issue #76 §6); the diag4 run already observed Entware surviving a native reboot through the same chain |
 
 Totals: **17 PASS / 2 NOT_TESTED** of 19 gates (aggregate outcome BLOCKED while any
@@ -278,6 +278,38 @@ bounded-timeout SEGV, served POST seconds apart).  The bounded probe is
 a workaround with verified end-to-end effect, not a claim that the ndm
 side was fixed; the timezone value is simply left empty by the installer
 in that case, which does not block the deployment.
+
+### The SIGSEGV-free fix cycle (2026-11-15, Issue #82): the optional TZ GET is skipped on mipsel
+
+The bounded `-qT 3` workaround removed the wedge but still made BusyBox
+wget 1.38 (MIPSel) segfault in its own timeout path on every run —
+harmless to the install, yet a crash in every UART log.  The fix cycle
+replaces the optional TZ GET with an explicit skip **in the mipsel lab
+bootstrap only** (`lab/build_entware.py`): `timezone=""` plus a
+`lab-tz-skipped` console marker, bracketed by `lab-tz-begin`/`lab-tz-end`
+exactly where the GET used to sit; aarch64 keeps the bounded probe, and
+the patch refuses a rotated MIPSel installer without the known TZ line
+(fail-closed, unit-tested).  The new committed scenario
+`lab/scenarios/ported-mt7621-entware-tz-skip.json` (33 steps) inserts a
+UART wait on `lab-tz-skipped` with `reject_pattern` for
+`do_page_fault()/Segmentation fault/SIGSEGV`, and that rejection covers
+the post-TZ stage too.
+
+One clean guest cycle on a fresh NAND copy and a newly built ext4 image
+(`entware_e2e.py`, pinned 25-package mirror) passed **33/33 in 596 s**:
+the doinstall window closed in ~2 s (`[4/5]` → `lab-tz-skipped` →
+`lab-dropbear-begin` → `[5/5]` → `configured init script` + `saving
+(http/rci)`), real `opkg`, native bash, `DOINSTALL_ABSENT`, native
+`system reboot`, post-reboot `/opt ext4` + opkg + bash + `MARK42`.  A
+scan of the **entire** UART log found zero `wget` output lines, zero
+busybox errors and zero SIGSEGV/page-fault/oops events — the only four
+pattern hits are the kernel module name `mtdoops_proc.ko` (2 boots).
+Sanitized evidence: `lab/mt7621/evidence/ported-mt7621-entware-tz-skip-20261115/`.
+
+Honest scope: the TZ value is still empty after install, the ndm-side
+GET/POST window asymmetry stands exactly as described above, and the
+skip is confined to the lab bootstrap — production images and the
+aarch64 path are untouched.
 
 ## Gate aggregation
 

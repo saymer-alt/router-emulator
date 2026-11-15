@@ -145,23 +145,34 @@ def bootstrap_archive(source, destination, password, arch="aarch64"):
                     "rm /opt/etc/init.d/doinstall\n\n"
                     "echo 'lab-post-begin' > /dev/console 2>/dev/null\n\n"
                     "wget -qO - --post-data=", 1)
-                # The timezone RCI probe is the first statement after the
-                # [4/5] echo and the only network call before dropbear.  The
-                # MT7621 clean run wedged there with the unbounded wget, so
-                # bound it and bracket it with /dev/console markers (the
-                # completion markers below already proved this write path).
+                # The optional TZ RCI GET is unsafe only during the MIPSel
+                # lab's doinstall; preserve the bounded probe on aarch64.
+                # Stage-C and production code are not changed.
                 tz_needle = ('timezone="$(echo $(wget -qO - localhost:79/rci/'
                              'show/clock/date/tz | grep locality | cut -d\':\''
                              ' -f2 | sed \'s#\\("\\|,\\)##g\'))"')
                 tz_bounded = tz_needle.replace("wget -qO - localhost:79",
                                                "wget -qT 3 -O - localhost:79")
                 if tz_needle in text:
-                    text = text.replace(tz_needle,
-                                        "echo 'lab-tz-begin' > /dev/console 2>/dev/null\n"
-                                        + tz_bounded +
-                                        "\necho 'lab-tz-end' > /dev/console 2>/dev/null", 1)
-                elif "rci/show/clock/date/tz" in text:
-                    raise ValueError("unexpected native Entware timezone probe")
+                    if arch == "mipsel":
+                        # The optional RCI show GET stalls while doinstall
+                        # is active. BusyBox 1.38 MIPSel SIGSEGVs on the
+                        # bounded wget timeout (Issue #82). In this LAB
+                        # bootstrap alone, explicitly omit the optional TZ
+                        # probe; the prior failure left TZ empty anyway.
+                        tz_stmt = ('timezone=""\n'
+                                   "echo 'lab-tz-skipped' > /dev/console 2>/dev/null")
+                    else:
+                        tz_stmt = tz_bounded
+                    text = text.replace(
+                        tz_needle,
+                        "echo 'lab-tz-begin' > /dev/console 2>/dev/null\n"
+                        + tz_stmt +
+                        "\necho 'lab-tz-end' > /dev/console 2>/dev/null", 1)
+                elif arch == "mipsel" or "rci/show/clock/date/tz" in text:
+                    # A missing TZ line is drift too: MIPSel must explicitly
+                    # replace exactly the known unsafe optional GET.
+                    raise ValueError("unexpected or missing native Entware timezone probe")
                 # A silent no-op replace would reintroduce the swallowed [5/5]
                 # after the next upstream installer rotation; fail loudly
                 # instead so the lab refuses to build a mis-patched bootstrap.
@@ -174,7 +185,8 @@ def bootstrap_archive(source, destination, password, arch="aarch64"):
                 if "lab-tz-begin" in text and (
                         text.index("lab-tz-begin") > text.index("lab-tz-end")
                         or text.index("lab-tz-end") > text.index("lab-dropbear-begin")
-                        or "wget -qO - localhost:79" in text):
+                        or "wget -qO - localhost:79" in text
+                        or (arch == "mipsel" and "rci/show/clock/date/tz" in text)):
                     raise ValueError('unexpected native Entware bootstrap tail')
                 data = text.encode()
             if data is not None:

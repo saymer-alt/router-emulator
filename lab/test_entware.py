@@ -169,6 +169,22 @@ class EntwareTests(unittest.TestCase):
                 archive.addfile(item, io.BytesIO(install))
             with patch.object(entware.subprocess, 'run', return_value=SimpleNamespace(stdout=b'$6$synthetic-hash\n')):
                 entware.bootstrap_archive(source, target, 'PrivateSyntheticToken0123456789')
+                mipsel_target = pathlib.Path(td) / 'target-mipsel.tar.gz'
+                entware.bootstrap_archive(source, mipsel_target, 'PrivateSyntheticToken0123456789',
+                                          arch='mipsel')
+            with tarfile.open(mipsel_target) as archive:
+                mipsel_script = archive.extractfile('bin/install').read()
+            self.assertIn(b'timezone=""', mipsel_script)
+            self.assertIn(b"echo 'lab-tz-skipped' > /dev/console", mipsel_script)
+            self.assertNotIn(b'rci/show/clock/date/tz', mipsel_script)
+            self.assertNotIn(b'wget -qT 3', mipsel_script)
+            self.assertLess(mipsel_script.index(b'lab-tz-begin'),
+                            mipsel_script.index(b'lab-tz-skipped'))
+            self.assertLess(mipsel_script.index(b'lab-tz-skipped'),
+                            mipsel_script.index(b'lab-tz-end'))
+            self.assertLess(mipsel_script.index(b'lab-tz-end'),
+                            mipsel_script.index(b'lab-dropbear-begin'))
+            self.assertIn(b'wget -qO - --post-data=', mipsel_script)
             with tarfile.open(target) as archive:
                 script = archive.extractfile('bin/install').read()
             post = script.index(b'wget -qO - --post-data=')
@@ -184,6 +200,28 @@ class EntwareTests(unittest.TestCase):
             self.assertLess(dropbear_begin, script.index(b'S51dropbear start'))
             self.assertLess(script.index(b'S51dropbear start'), post_begin)
             self.assertLess(post_begin, post)
+
+    def test_mipsel_missing_timezone_probe_is_refused(self):
+        """Do not silently accept a rotated MIPSel installer without the known TZ GET."""
+        with tempfile.TemporaryDirectory() as td:
+            source = pathlib.Path(td) / 'source.tar.gz'
+            target = pathlib.Path(td) / 'target.tar.gz'
+            install = (b'#!/bin/sh\n'
+                       b'/opt/etc/init.d/S51dropbear start\n'
+                       b"wget -qO - --post-data='[]' localhost:79/rci/ >/dev/null 2>&1\n"
+                       b'if grep -q "222"; then\necho port\nfi\n'
+                       b"echo '[5/5] \"Entware\" installed!'\n"
+                       b'rm /opt/etc/init.d/doinstall\n'
+                       b'rm "$0"\n')
+            with tarfile.open(source, 'w:gz') as archive:
+                item = tarfile.TarInfo('bin/install')
+                item.size = len(install)
+                archive.addfile(item, io.BytesIO(install))
+            with patch.object(entware.subprocess, 'run',
+                              return_value=SimpleNamespace(stdout=b'$6$synthetic-hash\n')):
+                with self.assertRaisesRegex(ValueError, 'timezone probe'):
+                    entware.bootstrap_archive(
+                        source, target, 'PrivateSyntheticToken0123456789', arch='mipsel')
 
     def test_timezone_probe_drift_is_refused(self):
         """A silently mis-patched TZ probe would hide the wedge again; the
