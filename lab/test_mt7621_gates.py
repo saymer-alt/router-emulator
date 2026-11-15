@@ -719,6 +719,38 @@ class EntwareGateDerivationTests(unittest.TestCase):
         self.assertEqual(gates["MIPSEL_ENTWARE_READY"]["reason"],
                          "entware_chain_step_failed")
 
+
+class EntwareTimezoneSkipScenarioTests(unittest.TestCase):
+    """Explicit MIPSel TZ-skip guest evidence without rewriting the 32-step baseline."""
+
+    def test_tz_skip_scenario_adds_one_echo_safe_uart_check(self):
+        import copy
+        import json
+        from pathlib import Path
+        from lab import run as runner
+
+        folder = Path(__file__).resolve().parents[1] / "lab" / "scenarios"
+        baseline = json.loads((folder / "ported-mt7621-entware.json").read_text())
+        candidate = runner.load_scenario(str(
+            folder / "ported-mt7621-entware-tz-skip.json"))
+        self.assertEqual(len(baseline["steps"]), 32)
+        self.assertEqual(len(candidate["steps"]), 33)
+        expected = copy.deepcopy(baseline["steps"])
+        expected.insert(13, {
+            "action": "wait_serial",
+            "pattern": "lab-tz-skipped",
+            "reject_pattern": r"do_page_fault\(\)|Segmentation fault|SIGSEGV",
+            "timeout_sec": 600,
+        })
+        expected[14]["reject_pattern"] = (
+            r"Critical error:|Please use ext2/ext3/ext4|do_page_fault\(\)|"
+            r"Segmentation fault|SIGSEGV")
+        self.assertEqual(candidate["steps"], expected)
+        # Rejection must cover the stage after TZ skipped as well.
+        self.assertIn("Segmentation fault", candidate["steps"][14]["reject_pattern"])
+        self.assertEqual(candidate["steps"][-1]["expect"], "MARK42")
+
+
 if __name__ == "__main__":
     unittest.main()
 
