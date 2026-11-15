@@ -169,6 +169,22 @@ class EntwareTests(unittest.TestCase):
                 archive.addfile(item, io.BytesIO(install))
             with patch.object(entware.subprocess, 'run', return_value=SimpleNamespace(stdout=b'$6$synthetic-hash\n')):
                 entware.bootstrap_archive(source, target, 'PrivateSyntheticToken0123456789')
+                mipsel_target = pathlib.Path(td) / 'target-mipsel.tar.gz'
+                entware.bootstrap_archive(source, mipsel_target, 'PrivateSyntheticToken0123456789',
+                                          arch='mipsel')
+            with tarfile.open(mipsel_target) as archive:
+                mipsel_script = archive.extractfile('bin/install').read()
+            self.assertIn(b'timezone=""', mipsel_script)
+            self.assertIn(b"echo 'lab-tz-skipped' > /dev/console", mipsel_script)
+            self.assertNotIn(b'rci/show/clock/date/tz', mipsel_script)
+            self.assertNotIn(b'wget -qT 3', mipsel_script)
+            self.assertLess(mipsel_script.index(b'lab-tz-begin'),
+                            mipsel_script.index(b'lab-tz-skipped'))
+            self.assertLess(mipsel_script.index(b'lab-tz-skipped'),
+                            mipsel_script.index(b'lab-tz-end'))
+            self.assertLess(mipsel_script.index(b'lab-tz-end'),
+                            mipsel_script.index(b'lab-dropbear-begin'))
+            self.assertIn(b'wget -qO - --post-data=', mipsel_script)
             with tarfile.open(target) as archive:
                 script = archive.extractfile('bin/install').read()
             post = script.index(b'wget -qO - --post-data=')
