@@ -751,7 +751,10 @@ class ServiceRestartStageCContractTests(unittest.TestCase):
         self.assertEqual(len(stage["steps"]), 39)
         self.assertEqual(stage["steps"][:32], original["steps"])
         command = stage["steps"][33]["send"]
-        encoded = command.split("'", 2)[1]
+        # The first quoted token is printf's '%s' format, the second
+        # one is the actual encoded fixture.
+        self.assertTrue(command.startswith("printf '%s' '"))
+        encoded = command.split("'", 4)[3]
         decoded = base64.b64decode(encoded, validate=True)
         fixture = (Path(__file__).resolve().parents[1] / "lab" / "mt7621"
                    / "fixtures" / "S98labprobe").read_bytes()
