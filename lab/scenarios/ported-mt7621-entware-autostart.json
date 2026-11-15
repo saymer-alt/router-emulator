@@ -154,7 +154,7 @@
     {
       "action": "ssh",
       "port": 8022,
-      "send": "/opt/bin/busybox test ! -e /opt/var/run/labboot.pid && /opt/bin/busybox test ! -e /opt/var/run/labboot.gen || exit 1; n=0; for p in /proc/[0-9]*; do cmd=$(/opt/bin/busybox tr '\\0' ' ' < \"$p/cmdline\" 2>/dev/null); case \"$cmd\" in *sleep*3600*) n=$((n+1));; esac; done; [ \"$n\" = 0 ] || exit 1; printf 'LABBOOT_%s\\n' OFF",
+      "send": "/opt/bin/busybox test ! -e /opt/var/run/labboot.pid && /opt/bin/busybox test ! -e /opt/var/run/labboot.gen || exit 1; n=0; for p in /proc/[0-9]*; do cmd=$(/opt/bin/busybox tr '\\0' ' ' < \"$p/cmdline\" 2>/dev/null); case \"$cmd\" in *\"sleep 36\"\"00\"*) n=$((n+1));; esac; done; [ \"$n\" = 0 ] || exit 1; printf 'LABBOOT_%s\\n' OFF",
       "expect": "LABBOOT_OFF",
       "timeout_sec": 90
     },
@@ -277,7 +277,7 @@
     {
       "action": "ssh",
       "port": 8022,
-      "send": "n=0; for p in /proc/[0-9]*; do cmd=$(/opt/bin/busybox tr '\\0' ' ' < \"$p/cmdline\" 2>/dev/null); case \"$cmd\" in *sleep*3600*) n=$((n+1));; esac; done; [ \"$n\" = 1 ] && printf 'WORKER_%s\\n' SINGLE",
+      "send": "n=0; for p in /proc/[0-9]*; do cmd=$(/opt/bin/busybox tr '\\0' ' ' < \"$p/cmdline\" 2>/dev/null); case \"$cmd\" in *\"sleep 36\"\"00\"*) n=$((n+1));; esac; done; [ \"$n\" = 1 ] && printf 'WORKER_%s\\n' SINGLE",
       "expect": "WORKER_SINGLE",
       "timeout_sec": 90
     },
@@ -372,7 +372,7 @@
     {
       "action": "ssh",
       "port": 8022,
-      "send": "n=0; for p in /proc/[0-9]*; do cmd=$(/opt/bin/busybox tr '\\0' ' ' < \"$p/cmdline\" 2>/dev/null); case \"$cmd\" in *sleep*3600*) n=$((n+1));; esac; done; [ \"$n\" = 1 ] && printf 'WORKER_%s\\n' SINGLE",
+      "send": "n=0; for p in /proc/[0-9]*; do cmd=$(/opt/bin/busybox tr '\\0' ' ' < \"$p/cmdline\" 2>/dev/null); case \"$cmd\" in *\"sleep 36\"\"00\"*) n=$((n+1));; esac; done; [ \"$n\" = 1 ] && printf 'WORKER_%s\\n' SINGLE",
       "expect": "WORKER_SINGLE",
       "timeout_sec": 90
     }

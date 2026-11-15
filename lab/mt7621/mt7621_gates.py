@@ -602,7 +602,7 @@ def derive_autostart_gate(scenario, report):
     status1 = positions("LABBOOT gen=1 pid=[0-9]+", "S99labboot status")
     gen1 = positions("GEN_ONE", "labboot.gen")
     identity = positions("WORKER_LIVE", "/proc/$pid/cmdline")
-    single = positions("WORKER_SINGLE", "*sleep*3600*")
+    single = positions("WORKER_SINGLE", "for p in /proc/[0-9]*")
     sync = positions("SYNC_COMPLETE", "busybox sync")
     status2 = positions("LABBOOT gen=2 pid=[0-9]+", "S99labboot status")
     gen2 = positions("GEN_TWO", "labboot.gen")

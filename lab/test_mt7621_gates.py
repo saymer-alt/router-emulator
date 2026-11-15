@@ -1028,6 +1028,26 @@ class AutostartStageCContractTests(unittest.TestCase):
         self.assertIn(b"/proc/$1/cmdline", fixture)
         self.assertNotIn(b"exit ", fixture)
 
+    def test_proc_scans_cannot_match_their_own_command_line(self):
+        _, s = self.inputs()
+        scans = [x for x in s["steps"]
+                 if "for p in /proc/[0-9]*" in x.get("send", "")]
+        self.assertEqual(len(scans), 3)
+        for step in scans:
+            # The guest runs every SSH command inline: a scanner whose own
+            # command text contains the contiguous worker literal would
+            # match its own /proc/<pid>/cmdline and report a phantom
+            # worker — the exact first-run divergence (ssh_exit_nonzero_1
+            # at the pre-reboot negative step).
+            self.assertNotIn("sleep 3600", step["send"])
+        # The identity probes read one specific /proc/<pid>/cmdline file
+        # (never their own), so they still match the real worker text.
+        identities = [x for x in s["steps"]
+                      if "/proc/$pid/cmdline" in x.get("send", "")]
+        self.assertEqual(len(identities), 2)
+        for step in identities:
+            self.assertIn("*sleep*3600*", step["send"])
+
     def test_complete_guest_report_may_pass(self):
         _, s = self.inputs()
         gate = mg.derive_autostart_gate(s, self.report(s))["MIPSEL_AUTOSTART"]
