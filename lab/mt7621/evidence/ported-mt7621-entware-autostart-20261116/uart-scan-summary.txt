@@ -1,0 +1,110 @@
+Full UART scan of the clean 59-step rc.unslung autostart guest run (Issue #81 / PR #86, 2026-11-16)
+===================================================================================================
+
+Run provenance
+--------------
+- Scenario: lab/scenarios/ported-mt7621-entware-autostart.json (59 steps)
+- Tested source SHA: abf9f25 (PR #86 HEAD; branch from the combined candidate
+  acb32ae; CI green on both SHAs)
+- Driver:   lab/mt7621/entware_e2e.py run() path (fresh NAND copy + freshly built
+            ext4 image and pinned 25-package mipselsf mirror from
+            lab/entware-mipselsf.lock.json; private WSL/QEMU MT7621 stand)
+- Result:   PASS 59/59, 744.57 s, failure=None (report.json, same folder)
+- UART:     4593 lines, 3 full boot cycles ("Starting kernel" at lines 31, 1809, 3226)
+- 4 VPE per boot: "Brought up 4 CPUs" at lines 96, 1874, 3291
+
+Crash-pattern scan over the ENTIRE UART log
+-------------------------------------------
+grep -i "SIGSEGV|Segmentation fault|do_page_fault|Oops|Kernel panic|kernel BUG"
+  -> 6 hits, ALL of them the benign mtdoops_proc.ko module-name false positive
+     (lines 303/304, 2081/2082, 3498/3499: "loading /lib/modules/4.9-ndm-5/
+     mtdoops_proc.ko." + "mtdoops_proc: Attached to MTD device 8" — once per
+     boot, the module NAME merely contains "oops").  There are no
+     do_page_fault/SIGSEGV/panic lines anywhere in the log.
+grep -c "wget"  -> 0 (the optional TZ GET is omitted for mipsel, Issue #82 fix).
+grep -c "Critical error" -> 0.
+Scenario reject patterns never fired; all 59 steps PASS.
+
+The autostart chain (the acceptance core)
+-----------------------------------------
+- Boot 1: TZ-safe install completes; S99labboot is seeded over SSH into
+  /opt/etc/init.d/ with NO manual start; the pre-reboot negative step proves
+  no pidfile, no /opt/var/run/labboot.gen and no sleep-3600 worker exist
+  (step 24, LABBOOT_OFF).
+- Event 1, NATIVE reboot: the only "reboot: Restarting system" line in the
+  whole log is at console line 1777 (init SIGKILL -> requesting system reboot
+  -> Machine restart), between boot 1 and boot 2.
+- Boot 2: config applied ("disk is set to: KASOPT:/" + "configured init
+  script: /opt/etc/init.d/rc.unslung" + "system ready", console 2958-2963).
+  ~29 s later the USB disk mounts to /opt and is initialized (console
+  3135-3136), dropbear daemonizes, and rc.unslung EXECUTES the probe —
+  console 3139: "labboot-autostart gen=1 pid=701" (the probe's
+  /dev/console echo, printed from inside rc.unslung's sourced start call).
+  SSH proofs: /opt ext4, probe still executable, status "LABBOOT gen=1
+  pid=[0-9]+", generation file exactly 1, live sleep-3600 worker identified
+  via /proc/<pid>/cmdline, exactly one worker in /proc (steps 34-43).
+- Event 2, QEMU monitor reset: scenario step 45 is action "reset"; run.py
+  records the console EOF offset BEFORE sending "system_reset" via the
+  monitor.  Boot 3 (console 3226) follows the breed "Booting image from
+  flash bank 0" block with NO init-shutdown lines and NO reboot line — the
+  two events are separate in the guest log.
+- Boot 3: same ndm sequence (4379-4383); disk mounts at 4547-4548; rc.unslung
+  executes the probe again — console 4551: "labboot-autostart gen=2 pid=702".
+  SSH proofs: /opt ext4, status "LABBOOT gen=2 pid=[0-9]+", generation file
+  exactly 2 (unchanged files cannot produce this), live worker identity,
+  both PID numerals recorded echo-safe (PIDS step; PID reuse across reboots
+  is legal, so they are recorded and never asserted), exactly one worker
+  (steps 53-59).
+
+What this proves, and what it does not
+--------------------------------------
+- PROVEN: KeeneticOS Ported actually EXECUTES the configured Entware init
+  script after every boot — observed as a live guest process started by
+  rc.unslung (not a pidfile echo), on both a native reboot and a separate
+  QEMU monitor reset, with the boot generation incrementing 1 -> 2 and the
+  execution markers visible in the UART.  The mechanism is: ndm mounts the
+  USB disk to /opt (~26-29 s after "system ready"), runs
+  /opt/etc/init.d/rc.unslung, which sources every executable S* script in
+  /opt/etc/init.d (verified verbatim from the pinned opt-ndmsv2 1.0-17
+  package) with the "start" argument.
+- NOT part of this run: any other Entware init script, real-world service
+  managers (opkg services with restart on crash), or physical hardware.
+
+Two prior cycles documented (the learning path)
+-----------------------------------------------
+- Cycle 1 (lab cycle 1, scenario at 1fa8b20): FAIL at the pre-reboot negative
+  step, ssh_exit_nonzero_1 after 329 s.  Root cause, proven host-side
+  without QEMU: every SSH step runs inline on the guest, so a scanner
+  looping over /proc/[0-9]* with the pattern *sleep*3600* matches its OWN
+  command line and reports a phantom worker.  Fixed in 767c154: scan steps
+  use the concatenation-built needle *"sleep 36""00"* that cannot appear in
+  their own command text; regression test pins the property.
+- Cycle 2 (lab cycle 2, scenario at 767c154): boot 2 PROVED the real autostart
+  (rc.unslung executed the probe, gen=1, live worker), but boot 3 diverged
+  at the gen=2 status step, ssh_exit_nonzero_1.  Root cause, read from the
+  private UART: ndm mounts the disk and runs rc.unslung ~26-46 s AFTER
+  "system ready", asynchronously; the runner's SSH probes raced ahead of
+  that (dropbear itself only finishes daemonizing right after the mount).
+  Fixed in abf9f25: the scenario synchronizes the SSH proof blocks on the
+  probe's UART execution marker ("labboot-autostart gen=1"/"gen=2"
+  wait_serial) instead of racing it; derive_autostart_gate requires the
+  markers.  The third cycle is the single clean run recorded here.
+
+MIPSEL_AUTOSTART derivation
+---------------------------
+python3 lab/mt7621/mt7621_gates.py --openwrt-scenario
+lab/scenarios/openwrt-mt7621-native-elf.json --openwrt-report
+<real reg2 report> --autostart-scenario lab/scenarios/
+ported-mt7621-entware-autostart.json --autostart-report <real report.json>
+derives MIPSEL_AUTOSTART = PASS
+(native_reboot_then_qemu_reset_service_autostarted) alongside the 19 core
+gates.  The name is deliberately outside GATES/NATIVE_GATES: the 19-gate
+count is unchanged, apply_labels refuses any --set for the name, and a
+PASS can only come from a validated scenario report.  No manual override.
+
+Sanitization
+------------
+report.json contains only step actions/outcomes/timings and the scenario
+name (no credentials, no host paths, no addresses).  junit.xml contains
+only action names and durations.  The full console log stays outside the
+repository; the excerpt file keeps only the segments shown there.

@@ -1,0 +1,138 @@
+Bounded UART excerpt: real rc.unslung autostart guest run (Issue #81 / PR #86, 2026-11-16)
+==========================================================================================
+
+Provenance
+----------
+- Scenario: lab/scenarios/ported-mt7621-entware-autostart.json (59 steps)
+- Tested source SHA: abf9f25 (PR #86 HEAD, CI green on that SHA; branch
+  lab/mt7621-entware-autostart-20261115 from the combined candidate acb32ae)
+- Driver:   lab/mt7621/entware_e2e.py run() path (fresh NAND copy, freshly
+            built ext4 image, pinned 25-package mipselsf mirror per
+            lab/entware-mipselsf.lock.json; private WSL/QEMU MT7621 stand,
+            offline WAN, loopback-only forwards)
+- Result:   PASS 59/59, 744.57 s, failure=None (report.json, same folder)
+- UART:     private console log, 4593 lines, 3 full boot cycles
+            ("Starting kernel" at console lines 31, 1809, 3226)
+- The full UART log stays outside the repository; below are the only excerpted
+  segments (console line numbers from that private log).
+- What the run proves: KeeneticOS Ported actually EXECUTES the configured
+  Entware init script (/opt/etc/init.d/rc.unslung) at boot — once per boot,
+  right after the USB disk is mounted to /opt — and the S99labboot probe
+  starts a live worker and increments a persistent boot-generation marker,
+  with NO manual start anywhere.  This is process evidence, not the
+  "configured init script" log line alone.
+
+Segment 1 - boot 1: doinstall window closes, the init-script setting saved
+--------------------------------------------------------------------------
+1388: [I] Jan  1 03:03:50 ndm: Opkg::Manager: /opt/etc/init.d/doinstall: Info: "rsa" key was created.
+1391: [I] Jan  1 03:03:53 ndm: Opkg::Manager: /opt/etc/init.d/doinstall: [4/5] Setting timezone, script initrc and starting "dropbear"...
+1392: lab-tz-begin
+1393: lab-tz-skipped
+1394: lab-tz-end
+1396: [I] Jan  1 03:03:53 dropbear[1959]: Running in background
+1397: [5/5] "Entware" installed!
+1398: lab-post-begin
+1399: [I] Jan  1 03:03:54 ndm: Opkg::Manager: configured init script: "/opt/etc/init.d/rc.unslung".
+1400: [I] Jan  1 03:03:55 ndm: Core::System::StartupConfig: saving (http/rci).
+
+(Consecutive lab-tz-begin / lab-tz-skipped / lab-tz-end lines: the optional TZ
+RCI GET is omitted for mipsel, no busybox wget timeout SIGSEGV — the proven
+TZ-safe baseline.  The probe was seeded afterwards over SSH, with NO manual
+start; the scenario's pre-reboot negative step verified no pidfile, no
+generation file and no sleep-3600 worker existed on boot 1 (step 24,
+LABBOOT_OFF).)
+
+Segment 2 - boot 1 -> boot 2: NATIVE "system reboot" boundary (event 1)
+----------------------------------------------------------------------
+1770: reboot: waiting for process termination...
+1772: init: the system is going down...
+1775: init: SIGKILL sent to all processes.
+1776: init: requesting system reboot...
+1777: reboot: Restarting system
+1778: Machine restart ...
+1780: Boot and Recovery Environment for Embedded Devices
+1809: Starting kernel at 0x813e3e44...
+1812: Linux version 4.9-ndm-5 (t.me/project_athens)
+
+Segment 3 - boot 2: rc.unslung EXECUTES the probe after the disk mounts
+-----------------------------------------------------------------------
+2958: [I] Jan  1 03:04:07 ndm: Opkg::Manager: disk is set to: KASOPT:/.
+2960: [I] Jan  1 03:04:07 ndm: Opkg::Manager: configured init script: "/opt/etc/init.d/rc.unslung".
+2963: [I] Jan  1 03:04:07 ndm: Core::Server: system ready, core startup time is 107 seconds.
+   ...[~170 lines of WLAN/DNS/hotplug startup noise]...
+3135: [I] Jan  1 03:04:36 ndm: Opkg::Manager: /tmp/mnt/11111111-2222-4333-8444-555555555555 mounted to /opt/.
+3136: [I] Jan  1 03:04:36 ndm: Opkg::Manager: /tmp/mnt/11111111-2222-4333-8444-555555555555 initialized.
+3137: [I] Jan  1 00:04:37 dropbear[694]: Running in background
+3138: Got signal 1 to process...
+3139: labboot-autostart gen=1 pid=701
+
+(ndm applies the init-script setting at config time, but rc.unslung runs
+~29 s AFTER "system ready", once the USB disk is mounted to /opt and
+initialized; the probe's /dev/console echo lands immediately after the
+mount.  The SSH proofs then confirmed: /proc/mounts "/opt ext4", the probe
+still executable, "LABBOOT gen=1 pid=[0-9]+" from status, the generation
+file exactly 1, a live sleep-3600 worker identified via /proc/<pid>/cmdline
+and exactly one worker in /proc — report steps 34-43.  The marker wait
+"labboot-autostart gen=1" (step 33) is part of the committed scenario.)
+
+Segment 4 - boot 2 -> boot 3: QEMU monitor "system_reset" boundary (event 2)
+----------------------------------------------------------------------------
+3205: Clocks: CPU: 880MHz, DDR: 1200MHz, Bus: 220MHz, Ref: 40MHz
+3217: Booting image from flash bank 0 at 0x180000 ...
+3226: Starting kernel at 0x813e3e44...
+3230: Linux version 4.9-ndm-5 (t.me/project_athens)
+
+(Scenario step 45 is the runner action "reset": run.py records the console
+EOF offset BEFORE sending "system_reset" via the QEMU monitor, then sends
+it.  Boot 3 is the post-reset cold start: NO init-shutdown lines and NO
+"reboot: Restarting system" line appear between boot 2 and boot 3 — the
+only native reboot line in the entire log is at console line 1777, so the
+native reboot and the QEMU reset are two separate, individually observable
+events.)
+
+Segment 5 - boot 3: rc.unslung EXECUTES the probe again, generation 2
+---------------------------------------------------------------------
+4379: [I] Jan  1 03:04:05 ndm: Opkg::Manager: disk is set to: KASOPT:/.
+4380: [I] Jan  1 03:04:05 ndm: Opkg::Manager: configured init script: "/opt/etc/init.d/rc.unslung".
+4383: [I] Jan  1 03:04:05 ndm: Core::Server: system ready, core startup time is 95 seconds.
+   ...[~160 lines of startup noise]...
+4547: [I] Jan  1 03:04:31 ndm: Opkg::Manager: /tmp/mnt/11111111-2222-4333-8444-555555555555 mounted to /opt/.
+4548: [I] Jan  1 03:04:31 ndm: Opkg::Manager: /tmp/mnt/11111111-2222-4333-8444-555555555555 initialized.
+4549: [I] Jan  1 00:04:32 dropbear[694]: Running in background
+4550: Got signal 1 to process...
+4551: labboot-autostart gen=2 pid=702
+
+(The persistent generation file survived the reset and the probe incremented
+it 1 -> 2; the worker PID numeral changed 701 -> 702.  PID reuse across
+reboots is legal, so the scenario records both numerals (PIDS step) but
+never asserts equality/difference; the liveness proof is the
+/proc/<pid>/cmdline identity, not the numeral.  The SSH proofs confirmed:
+"/opt ext4", "LABBOOT gen=2 pid=[0-9]+", generation file exactly 2, live
+worker identity, PIDS "701's value 702's value" recorded echo-safe, and
+exactly one worker — report steps 53-59.)
+
+MIPSEL_AUTOSTART derivation
+---------------------------
+python3 lab/mt7621/mt7621_gates.py --autostart-scenario
+lab/scenarios/ported-mt7621-entware-autostart.json --autostart-report
+<real report.json> derives:
+  MIPSEL_AUTOSTART = PASS
+  (native_reboot_then_qemu_reset_service_autostarted)
+The gate requires the UART execution markers on both post-reboot boots, a
+live worker identity per boot via /proc/<pid>/cmdline, the boot-generation
+increments 1 then exactly 2, the pre-reboot negative state, one native
+reboot wait plus one separate reset action, and report outcome PASS.  The
+name is outside GATES/NATIVE_GATES (the 19 core gates stay unchanged) and
+apply_labels refuses any --set for it, so a PASS can only come from a
+validated scenario report.  No manual gate override was used.
+
+Sanitization notes
+------------------
+- The dropbear child-connection lines quoting the guest-side forwarded
+  address are kept only as console context; no credentials, no host paths,
+  no firmware/NAND content appear here — every quoted line is guest console
+  output plus provenance.
+- Guest wall-clock shows "Jan 1 03:0x"/"00:0x" (no RTC in the emulated
+  board), as in all prior cycles on this stand.
+- junit.xml contains only action names and durations; report.json contains
+  only step actions/outcomes/timings and the scenario name.
