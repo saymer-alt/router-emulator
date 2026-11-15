@@ -20,15 +20,37 @@ import urllib.request
 
 LOCK = Path(__file__).with_name("entware.lock.json")
 TRUSTED_ORIGIN = "https://bin.entware.net/aarch64-k3.10/"
+# KeeneticOS mipsel devices (KN-1913 Ported on MT7621) install Entware from
+# the soft-float distribution; the repo directory is mipselsf-k3.4 while its
+# packages carry the mipsel-3.4 ABI name.
+MIPSLSF_ORIGIN = "https://bin.entware.net/mipselsf-k3.4/"
 MIRROR = "http://192.168.1.100"
 FS_OFFSET = 1024 * 1024
 FS_SIZE = 256 * 1024 * 1024
 FS_UUID = "11111111-2222-4333-8444-555555555555"  # synthetic, never a real drive
 
+# Per-architecture Entware profiles: the opkg architecture lines the installer
+# ships and the file name(s) NDMS looks for on the OPKG volume (the aarch64
+# name is proven by the ARM64 lab; the mipsel name follows the platform arch
+# plus the upstream distribution's own file name).
+ARCH_LINES = {
+    "aarch64": "arch all 100\narch aarch64-3.10 150\narch aarch64-3.10_kn 200\n",
+    "mipsel": "arch all 100\narch mipsel-3.4 150\narch mipsel-3.4_kn 200\n",
+}
+INSTALLER_NAMES = {
+    "aarch64": ("aarch64-installer.tar.gz",),
+    "mipsel": ("mipsel-installer.tar.gz", "mips-installer.tar.gz"),
+}
+
+
+def trusted_origins():
+    # Evaluated per call so tests can patch TRUSTED_ORIGIN.
+    return (TRUSTED_ORIGIN, MIPSLSF_ORIGIN)
+
 
 def fetch(url, digest, destination):
     destination = Path(destination)
-    if not url.startswith(TRUSTED_ORIGIN):
+    if not any(url.startswith(origin) for origin in trusted_origins()):
         raise ValueError("unexpected bootstrap origin")
     if not destination.exists():
         # bin.entware.net intermittently answers 503 to runner IPs; three
@@ -62,7 +84,7 @@ def fetch(url, digest, destination):
     return destination
 
 
-def bootstrap_archive(source, destination, password):
+def bootstrap_archive(source, destination, password, arch="aarch64"):
     root_hash = subprocess.run(["openssl", "passwd", "-6", "-stdin"],
                                input=(password + "\n").encode(), capture_output=True, check=True).stdout.strip()
     passwd = b"root:" + root_hash + b":0:0:lab:/opt/root:/opt/bin/sh\n"
@@ -77,7 +99,7 @@ def bootstrap_archive(source, destination, password):
                 data = ("src/gz entware " + MIRROR + "/entware\n"
                         "src/gz keendev " + MIRROR + "/keenetic\n"
                         "dest root /\nlists_dir ext /opt/var/opkg-lists\n"
-                        "arch all 100\narch aarch64-3.10 150\narch aarch64-3.10_kn 200\n").encode()
+                        + ARCH_LINES[arch]).encode()
             if name == "bin/install":
                 text = data.decode("utf8")
                 needle = "/opt/etc/init.d/S51dropbear start"
@@ -149,11 +171,12 @@ def add_packages(mirror, cache, lock):
         index.write_bytes(gzip.compress(('\n\n'.join(blocks.values()) + '\n\n').encode(), mtime=0))
 
 
-def build(image, mirror, cache, credentials):
+def build(image, mirror, cache, credentials, arch="aarch64", lock_path=None):
     image, mirror, cache = (Path(p).resolve() for p in (image, mirror, cache))
     if image.exists() or mirror.exists():
         raise ValueError("output image and mirror must be new")
-    lock = json.loads(LOCK.read_text(encoding="utf8"))
+    lock = json.loads(Path(lock_path).read_text(encoding="utf8") if lock_path
+                      else LOCK.read_text(encoding="utf8"))
     cache.mkdir(parents=True, exist_ok=True)
     source = fetch(lock["installer"]["url"], lock["installer"]["sha256"], cache / "installer.tar.gz")
     mirror.mkdir(parents=True, mode=0o700)
@@ -173,7 +196,8 @@ def build(image, mirror, cache, credentials):
         stage = Path(td)
         (stage / "install").mkdir()
         private = json.loads(Path(credentials).read_text())
-        bootstrap_archive(source, stage / "install" / "aarch64-installer.tar.gz", private["password"])
+        for name in INSTALLER_NAMES[arch]:
+            bootstrap_archive(source, stage / "install" / name, private["password"], arch=arch)
         image.parent.mkdir(parents=True, exist_ok=True)
         with image.open("xb") as fh:
             os.chmod(image, 0o600)

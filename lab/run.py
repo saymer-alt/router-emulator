@@ -24,7 +24,8 @@ from urllib.parse import urlsplit
 import xml.etree.ElementTree as ET
 
 
-ALLOWED_ACTIONS = {"wait_serial", "send_serial", "probe_http", "reset", "sleep"}
+ALLOWED_ACTIONS = {"wait_serial", "send_serial", "probe_http", "reset", "sleep",
+                   "telnet", "ssh"}
 ALLOWED_EVIDENCE = {
     "OPENWRT_QEMU_SMOKE",
     "KEENETIC_PORTED_EXPERIMENTAL",
@@ -64,9 +65,46 @@ def load_scenario(path):
                 raise ValueError("step %d: unsupported credential field" % index)
             if not isinstance(step.get("enter", True), bool):
                 raise ValueError("step %d: enter must be boolean" % index)
-        if action in ("sleep", "wait_serial", "probe_http"):
+        if action in ("sleep", "wait_serial", "probe_http", "telnet", "ssh"):
             if float(step.get("seconds" if action == "sleep" else "timeout_sec", 0)) <= 0:
                 raise ValueError("step %d: positive timeout/seconds required" % index)
+        if action in ("telnet", "ssh"):
+            port = step.get("port")
+            if isinstance(port, bool) or not isinstance(port, int) or not 1024 <= port <= 65535:
+                raise ValueError("step %d: port must be an integer in 1024..65535" % index)
+            # The only reachable endpoints are the runner's own 127.0.0.1
+            # forwards; no host field may broaden this.
+            if "host" in step or "hostname" in step:
+                raise ValueError("step %d: only 127.0.0.1 forwards are reachable" % index)
+            for key in ("greeting", "expect"):
+                if key in step:
+                    re.compile(step[key].encode())
+            if action == "telnet":
+                if "greeting" not in step and "send" not in step:
+                    raise ValueError("step %d: telnet step needs greeting or send" % index)
+            else:
+                if "greeting" in step:
+                    raise ValueError("step %d: ssh has no greeting prompt" % index)
+                if "send" not in step:
+                    raise ValueError("step %d: ssh step needs send" % index)
+            if "send" in step:
+                if action == "ssh" and isinstance(step["send"], list):
+                    raise ValueError("step %d: ssh send must be a single command" % index)
+                sends = step["send"] if isinstance(step["send"], list) \
+                    else [step["send"]]
+                if not sends or not all(isinstance(item, str) for item in sends):
+                    raise ValueError("step %d: send must be a string or a list of strings" % index)
+                if any("\n" in item or "\r" in item for item in sends):
+                    raise ValueError("step %d: one command per send item" % index)
+                if "expect" not in step:
+                    raise ValueError("step %d: sent command needs a verified answer" % index)
+                # The guest echoes the command line: an answer marker that
+                # matches the sent text could be faked by the echo itself.
+                if re.search(step["expect"].encode(),
+                             "\n".join(sends).encode()):
+                    raise ValueError("step %d: echo-unsafe answer marker" % index)
+            elif "expect" in step:
+                raise ValueError("step %d: expect without send" % index)
     return data
 
 
@@ -97,6 +135,261 @@ def send_monitor(path, text):
         sock.settimeout(3)
         sock.connect(str(path))
         sock.sendall(text.encode() + b"\n")
+
+
+def forwarded_ports(lan_forwards):
+    """Host-side 127.0.0.1 ports the runner asked QEMU to forward."""
+    ports = set()
+    for token in lan_forwards.replace(",", ";").split(";"):
+        token = token.strip()
+        if token and ":" in token:
+            ports.add(int(token.split(":")[0]))
+    return ports
+
+
+def validate_runtime_access(steps, forwards, credentials):
+    """Fail fast before any guest work: interactive steps may only target
+    ports the runner itself forwarded on 127.0.0.1, and steps with private
+    credential placeholders need the credentials file."""
+    for index, step in enumerate(steps, 1):
+        if step["action"] in ("telnet", "ssh") and step["port"] not in forwards:
+            raise ValueError("step %d: port %d is not forwarded via --lan-forwards"
+                             % (index, step["port"]))
+        if step["action"] in ("telnet", "ssh"):
+            joined = "\n".join(send_items(step))
+            if ("{username}" in joined or "{password}" in joined) \
+                    and credentials is None:
+                raise ValueError("step %d: credential placeholders need --credentials-file"
+                                 % index)
+    if any(step["action"] == "ssh" for step in steps) and credentials is None:
+        raise ValueError("ssh steps need --credentials-file")
+
+
+class TelnetCleaner:
+    """Stateful filter leaving only the CLI's text stream.
+
+    Strips IAC negotiation sequences (split across recv boundaries) and ANSI
+    CSI escapes so regex matching sees the prompt and answers, never the
+    protocol chatter.  The filtered stream is used for matching only; no
+    guest bytes are logged."""
+
+    def __init__(self):
+        self._buf = b""
+
+    def feed(self, raw):
+        raw = self._buf + raw
+        self._buf = b""
+        out = bytearray()
+        i, n = 0, len(raw)
+        while i < n:
+            byte = raw[i]
+            if byte == 0xFF:
+                if i + 1 >= n:
+                    self._buf = raw[i:]
+                    break
+                cmd = raw[i + 1]
+                if cmd in (0xFB, 0xFC, 0xFD, 0xFE):
+                    if i + 2 >= n:
+                        self._buf = raw[i:]
+                        break
+                    i += 3
+                elif cmd == 0xFA:  # SB ... IAC SE
+                    end = raw.find(b"\xff\xf0", i)
+                    if end < 0:
+                        self._buf = raw[i:]
+                        break
+                    i = end + 2
+                else:
+                    i += 2
+            elif byte == 0x1B:
+                if i + 1 >= n:
+                    self._buf = raw[i:]
+                    break
+                if raw[i + 1:i + 2] == b"[":
+                    j = i + 2
+                    while j < n and not 0x40 <= raw[j] <= 0x7E:
+                        j += 1
+                    if j >= n:
+                        self._buf = raw[i:]
+                        break
+                    i = j + 1
+                else:
+                    i += 2
+            else:
+                out.append(byte)
+                i += 1
+        return bytes(out)
+
+
+def substitute_credentials(text, credentials):
+    """Resolve {username}/{password} placeholders from the private runtime
+    credentials.  The resolved text is only ever sent over the loopback
+    socket; it is never logged or written into reports."""
+    if "{username}" not in text and "{password}" not in text:
+        return text
+    if credentials is None:
+        raise ValueError("credential placeholder without --credentials-file")
+    return text.replace("{username}", credentials["username"]) \
+               .replace("{password}", credentials["password"])
+
+
+def send_items(step):
+    """A telnet step sends one command (string) or a sequence of commands
+    on the same CLI session (list), e.g. user-context configuration."""
+    send = step.get("send")
+    items = send if isinstance(send, list) else ([send] if send is not None else [])
+    return list(items)
+
+
+def run_telnet_step(step, forwards, credentials, deadline, ensure_running):
+    """127.0.0.1-only telnet probe: optional greeting, one command or a
+    command sequence, one verified answer.  Guest bytes are matched, never
+    stored or logged; a closed or refused session is retried until the
+    deadline (a freshly booted guest accepts hostfwd TCP before its daemon
+    listens)."""
+    port = step["port"]
+    if port not in forwards:
+        raise ValueError("telnet port %d is not in --lan-forwards" % port)
+    cleaner = TelnetCleaner()
+    greeting = (re.compile(step["greeting"].encode())
+                if "greeting" in step else None)
+    expect = (re.compile(step["expect"].encode())
+              if "expect" in step else None)
+    queue = [substitute_credentials(item, credentials) for item in send_items(step)]
+    until = deadline(float(step["timeout_sec"]))
+    sock = None
+    pending = b""
+    greeted = greeting is None
+    last_send = 0.0
+    try:
+        while time.monotonic() < until:
+            ensure_running()
+            try:
+                if sock is None:
+                    sock = socket.create_connection(("127.0.0.1", port),
+                                                    timeout=3)
+                    sock.settimeout(0.5)
+                # Send before recv: a quiet CLI session must not block the
+                # next item of the sequence (recv timeouts would otherwise
+                # deadlock a session that answers only after the last item).
+                if greeted and queue and time.monotonic() - last_send >= 0.4:
+                    # The ndm CLI submits on LF; CR alone only echoes.  Items
+                    # of a sequence follow with a short settle delay on the
+                    # same session.
+                    sock.sendall(queue.pop(0).encode() + b"\n")
+                    last_send = time.monotonic()
+                if greeted and not queue and expect is None:
+                    return  # greeting-only step: prompt reached
+                chunk = sock.recv(65536)
+            except socket.timeout:
+                continue
+            except OSError:
+                if sock is not None:
+                    sock.close()
+                    sock = None
+                pending = b""
+                greeted = greeting is None
+                last_send = 0.0
+                queue = [substitute_credentials(item, credentials)
+                         for item in send_items(step)]
+                time.sleep(0.5)
+                continue
+            if not chunk:
+                sock.close()
+                sock = None
+                pending = b""
+                greeted = greeting is None
+                last_send = 0.0
+                # A session that dropped before the verified answer: the
+                # commands are replayed on the fresh session (each telnet
+                # connection is an independent CLI).
+                queue = [substitute_credentials(item, credentials)
+                         for item in send_items(step)]
+                time.sleep(0.5)
+                continue
+            pending = (pending + cleaner.feed(chunk))[-1048576:]
+            if not greeted:
+                match = greeting.search(pending)
+                if match:
+                    pending = pending[match.end():]
+                    greeted = True
+            if expect is not None and greeted and not queue \
+                    and expect.search(pending):
+                return
+        raise TimeoutError("telnet marker not reached"
+                           if expect is not None else "telnet greeting not reached")
+    finally:
+        if sock is not None:
+            sock.close()
+
+
+def run_ssh_step(step, credentials, forwards, deadline, ensure_running):
+    """127.0.0.1-only SSH exec with private per-run credentials: one
+    command, one verified answer.  Output goes nowhere except the in-memory
+    match; the host key of the disposable guest is pinned per run."""
+    port = step["port"]
+    if port not in forwards:
+        raise ValueError("ssh port %d is not in --lan-forwards" % port)
+    import paramiko  # lazy: keeps the runner stdlib-only without ssh steps
+
+    expect = re.compile(step["expect"].encode())
+    until = deadline(float(step["timeout_sec"]))
+    pinned_key = None
+    while time.monotonic() < until:
+        ensure_running()
+        client = None
+        try:
+            if pinned_key is None:
+                with socket.create_connection(("127.0.0.1", port),
+                                              timeout=5) as probe:
+                    transport = paramiko.Transport(probe)
+                    try:
+                        transport.start_client(timeout=10)
+                        pinned_key = transport.get_remote_server_key()
+                    finally:
+                        transport.close()
+            client = paramiko.SSHClient()
+            client.set_missing_host_key_policy(paramiko.RejectPolicy())
+            client.get_host_keys().add("[127.0.0.1]:%d" % port,
+                                       pinned_key.get_name(), pinned_key)
+            client.connect("127.0.0.1", port=port,
+                           username=credentials["username"],
+                           password=credentials["password"],
+                           allow_agent=False, look_for_keys=False,
+                           timeout=5, banner_timeout=10, auth_timeout=10)
+            stdin, stdout, _ = client.exec_command(
+                step["send"],
+                timeout=max(1, int(until - time.monotonic())))
+            stdin.close()
+            channel = stdout.channel
+            data = b""
+            while True:
+                if time.monotonic() >= until:
+                    raise TimeoutError("ssh answer marker not reached")
+                if channel.recv_ready():
+                    data = (data + channel.recv(65536))[-262144:]
+                if channel.recv_stderr_ready():
+                    data = (data + channel.recv_stderr(65536))[-65536:]
+                if channel.exit_status_ready() and not channel.recv_ready() \
+                        and not channel.recv_stderr_ready():
+                    break
+                time.sleep(0.025)
+            client.close()
+            client = None
+            if expect.search(data):
+                return
+            # The guest answered, just not with the verified marker: a real
+            # FAIL, not a transport retry.
+            raise RuntimeError("ssh answer marker not matched")
+        except paramiko.AuthenticationException:
+            if client:
+                client.close()
+            raise RuntimeError("ssh authentication rejected") from None
+        except (OSError, EOFError, paramiko.SSHException):
+            if client:
+                client.close()
+            time.sleep(2)
+    raise TimeoutError("ssh marker not reached")
 
 
 def serial_payload(step, credentials=None):
@@ -245,6 +538,8 @@ def run(args):
                 or not re.fullmatch(r"[a-z][a-z0-9_-]{2,30}", credentials.get("username", ""))
                 or not re.fullmatch(r"[A-Za-z0-9_-]{24,128}", credentials.get("password", ""))):
             raise ValueError("invalid lab credential format")
+    forwards = forwarded_ports(args.lan_forwards)
+    validate_runtime_access(scenario["steps"], forwards, credentials)
     root = Path(args.emulator_root).resolve()
     source = Path(args.nand_dir).resolve()
     if not (root / "emulator.sh").is_file():
@@ -448,6 +743,12 @@ def run(args):
                     while time.monotonic() < until:
                         ensure_running()
                         time.sleep(0.25)
+                elif action == "telnet":
+                    run_telnet_step(step, forwards, credentials, deadline,
+                                    ensure_running)
+                elif action == "ssh":
+                    run_ssh_step(step, credentials, forwards, deadline,
+                                 ensure_running)
                 rows.append({"action": action, "outcome": "PASS",
                              "elapsed_seconds": round(time.monotonic() - start, 2)})
             except Exception as error:
