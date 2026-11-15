@@ -176,7 +176,7 @@
     },
     {
       "Package": "libncursesw",
-      "Version": "6.6.20260801-4",
+      "Version": "6.6.20260801-4a",
       "Depends": "libc, libssp, librt, libpthread, terminfo",
       "Provides": "libncursesw-any",
       "License": "MIT",
@@ -185,16 +185,16 @@
       "CPE-ID": "cpe:/a:gnu:ncurses",
       "Architecture": "aarch64-3.10",
       "Installed-Size": "634880",
-      "Filename": "libncursesw_6.6.20260801-4_aarch64-3.10.ipk",
-      "Size": "256586",
-      "SHA256sum": "b9539f5fac8b264749441b5c67c546be0c715dd6ee8475b8b8ab8243a9a840d8",
+      "Filename": "libncursesw_6.6.20260801-4a_aarch64-3.10.ipk",
+      "Size": "256583",
+      "SHA256sum": "70ec630192de88a081db1cc61979d1cb1bf3ddaa99d4c1e2b927eff0cbf0333f",
       "Description": "Terminal handling library (Unicode)",
       "feed": "entware",
-      "url": "https://bin.entware.net/aarch64-k3.10/libncursesw_6.6.20260801-4_aarch64-3.10.ipk"
+      "url": "https://bin.entware.net/aarch64-k3.10/libncursesw_6.6.20260801-4a_aarch64-3.10.ipk"
     },
     {
       "Package": "terminfo",
-      "Version": "6.6.20260801-4",
+      "Version": "6.6.20260801-4a",
       "Depends": "libc, libssp, librt, libpthread",
       "Provides": "terminfo-any",
       "License": "MIT",
@@ -203,12 +203,12 @@
       "CPE-ID": "cpe:/a:gnu:ncurses",
       "Architecture": "aarch64-3.10",
       "Installed-Size": "61440",
-      "Filename": "terminfo_6.6.20260801-4_aarch64-3.10.ipk",
-      "Size": "9977",
-      "SHA256sum": "bbcb7e8cbac748c9f45fbff26cf1b3a724e4264a517e5f1c347d2812212413ef",
+      "Filename": "terminfo_6.6.20260801-4a_aarch64-3.10.ipk",
+      "Size": "9976",
+      "SHA256sum": "e56e632319a58d4f63b5f47f91d46d0703ae69b9854d634a23fff9c3511ed3ee",
       "Description": "Terminal Info Database (ncurses)",
       "feed": "entware",
-      "url": "https://bin.entware.net/aarch64-k3.10/terminfo_6.6.20260801-4_aarch64-3.10.ipk"
+      "url": "https://bin.entware.net/aarch64-k3.10/terminfo_6.6.20260801-4a_aarch64-3.10.ipk"
     },
     {
       "Package": "libmagic",

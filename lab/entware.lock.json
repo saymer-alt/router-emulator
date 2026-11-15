@@ -207,15 +207,15 @@
     },
     {
       "Package": "terminfo",
-      "Version": "6.6.20260801-4",
+      "Version": "6.6.20260801-4a",
       "Architecture": "aarch64-3.10",
-      "Filename": "terminfo_6.6.20260801-4_aarch64-3.10.ipk",
-      "Size": "9977",
-      "SHA256sum": "bbcb7e8cbac748c9f45fbff26cf1b3a724e4264a517e5f1c347d2812212413ef",
+      "Filename": "terminfo_6.6.20260801-4a_aarch64-3.10.ipk",
+      "Size": "9976",
+      "SHA256sum": "e56e632319a58d4f63b5f47f91d46d0703ae69b9854d634a23fff9c3511ed3ee",
       "Depends": "libc, libssp, librt, libpthread",
       "Description": "Terminal Info Database (ncurses)",
       "feed": "entware",
-      "url": "https://bin.entware.net/aarch64-k3.10/terminfo_6.6.20260801-4_aarch64-3.10.ipk"
+      "url": "https://bin.entware.net/aarch64-k3.10/terminfo_6.6.20260801-4a_aarch64-3.10.ipk"
     },
     {
       "Package": "dropbear",
