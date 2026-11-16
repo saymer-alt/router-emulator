@@ -35,18 +35,24 @@ SCENARIO = (Path(__file__).resolve().parents[2] / "lab" / "scenarios"
             / "ported-mt7621-telemt.json")
 MIRROR_HOST = "192.168.1.100"
 
-# Frozen experimental artifacts: entware-go Draft PR #44, Actions run
-# 43742529964 (artifacts present, never rebuilt, never published to latest).
-CORE_IPK_SHA = "b8dfbb83380d8f4353151b0de43d8c34ceb2369aea45cb6ddaf3b3089a798e5d"
+# Experimental artifacts for the getrandom-fallback verification cycle.
+# Core = NEW separately named rebuild telemt 3.5.17-2fb1 (entware-go Draft
+# PR #50, Actions run 43948987955: getrandom ENOSYS-only /dev/urandom fallback
+# forks + entropy gate). Panel Lite stays the FROZEN PR #44 artifact of run
+# 43742529964 (pure-Go binary; nothing changed, never rebuilt). The original
+# frozen Core pin b8dfbb83… / ELF 3efa4a53… (3.5.17-1) is NOT touched and
+# remains authoritative for PR #93's pin-controlled tests.
+CORE_IPK_SHA = "2c8a84fb93535303eeb4bb8a0a5057370f4e625b1cdf0e102f04e33e28c85d8d"
 PANEL_IPK_SHA = "0236dfb076b14b129a6392de49f287838a11aebe7681e092084d4ce87e771e68"
 # ELF payloads as shipped inside the pinned IPKs (verified in-guest too).
-CORE_ELF_SHA = "3efa4a53c1d50bf1b7a0ed6ca7de98201faf0fa2e27eaaf5f1cd589a6bf26063"
+CORE_ELF_SHA = "d4ba43815883dd1ce9aa57349602598127781e8966d51dab97616dbdb35b216f"
 PANEL_ELF_SHA = "380cb5112b58538eafec9ae9fab27fb22c994fd36ce3130c541c5e11b29a40c8"
-CORE_IPK_NAME = "telemt_3.5.17-1_mipsel-3.4.ipk"
+CORE_IPK_NAME = "telemt_3.5.17-2fb1_mipsel-3.4.ipk"
 PANEL_IPK_NAME = "telemt-panel-lite_1.0.0.rc.4-1_mipsel-3.4.ipk"
+CORE_VERSION = "3.5.17-2fb1"
 PINS = ((CORE_IPK_NAME, CORE_IPK_SHA), (PANEL_IPK_NAME, PANEL_IPK_SHA))
 CONTROL = {
-    "core": {"Package": "telemt", "Version": "3.5.17-1",
+    "core": {"Package": "telemt", "Version": CORE_VERSION,
              "Architecture": "mipsel-3.4"},
     "panel": {"Package": "telemt-panel-lite", "Version": "1.0.0~rc.4-1",
               "Architecture": "mipsel-3.4"},

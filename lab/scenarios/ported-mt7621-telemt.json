@@ -236,14 +236,14 @@
     {
       "action": "ssh",
       "port": 8022,
-      "send": "/opt/bin/busybox wget -qO /opt/lab/telemt.ipk http://192.168.1.100/entware/telemt_3.5.17-1_mipsel-3.4.ipk && /opt/bin/busybox wget -qO /opt/lab/telemt-panel.ipk http://192.168.1.100/entware/telemt-panel-lite_1.0.0.rc.4-1_mipsel-3.4.ipk && printf '%s  %s\\n' 'b8dfbb83380d8f4353151b0de43d8c34ceb2369aea45cb6ddaf3b3089a798e5d' telemt.ipk '0236dfb076b14b129a6392de49f287838a11aebe7681e092084d4ce87e771e68' telemt-panel.ipk > /opt/lab/expected.sha && cd /opt/lab && /opt/bin/busybox sha256sum -c expected.sha >/dev/null && printf 'IPKS_%s\\n' DELIVERED",
+      "send": "/opt/bin/busybox wget -qO /opt/lab/telemt.ipk http://192.168.1.100/entware/telemt_3.5.17-2fb1_mipsel-3.4.ipk && /opt/bin/busybox wget -qO /opt/lab/telemt-panel.ipk http://192.168.1.100/entware/telemt-panel-lite_1.0.0.rc.4-1_mipsel-3.4.ipk && printf '%s  %s\\n' '2c8a84fb93535303eeb4bb8a0a5057370f4e625b1cdf0e102f04e33e28c85d8d' telemt.ipk '0236dfb076b14b129a6392de49f287838a11aebe7681e092084d4ce87e771e68' telemt-panel.ipk > /opt/lab/expected.sha && cd /opt/lab && /opt/bin/busybox sha256sum -c expected.sha >/dev/null && printf 'IPKS_%s\\n' DELIVERED",
       "expect": "IPKS_DELIVERED",
       "timeout_sec": 300
     },
     {
       "action": "ssh",
       "port": 8022,
-      "send": "/opt/bin/opkg install /opt/lab/telemt.ipk >/opt/lab/opkg-core.log 2>&1 && /opt/bin/opkg status telemt | /opt/bin/busybox grep -q 'Version: 3.5.17-1' && printf 'OPKG_%s\\n' CORE_OK",
+      "send": "/opt/bin/opkg install /opt/lab/telemt.ipk >/opt/lab/opkg-core.log 2>&1 && /opt/bin/opkg status telemt | /opt/bin/busybox grep -q 'Version: 3.5.17-2fb1' && printf 'OPKG_%s\\n' CORE_OK",
       "expect": "OPKG_CORE_OK",
       "timeout_sec": 300
     },
@@ -257,7 +257,7 @@
     {
       "action": "ssh",
       "port": 8022,
-      "send": "printf '%s  %s\\n' '3efa4a53c1d50bf1b7a0ed6ca7de98201faf0fa2e27eaaf5f1cd589a6bf26063' /opt/bin/telemt '380cb5112b58538eafec9ae9fab27fb22c994fd36ce3130c541c5e11b29a40c8' /opt/bin/telemt-panel > /opt/lab/elf.sha && cd / && /opt/bin/busybox sha256sum -c /opt/lab/elf.sha >/dev/null && test -x /opt/bin/telemt && test -x /opt/bin/telemt-panel && printf 'BINARIES_%s\\n' PINNED",
+      "send": "printf '%s  %s\\n' 'd4ba43815883dd1ce9aa57349602598127781e8966d51dab97616dbdb35b216f' /opt/bin/telemt '380cb5112b58538eafec9ae9fab27fb22c994fd36ce3130c541c5e11b29a40c8' /opt/bin/telemt-panel > /opt/lab/elf.sha && cd / && /opt/bin/busybox sha256sum -c /opt/lab/elf.sha >/dev/null && test -x /opt/bin/telemt && test -x /opt/bin/telemt-panel && printf 'BINARIES_%s\\n' PINNED",
       "expect": "BINARIES_PINNED",
       "timeout_sec": 90
     },
@@ -280,6 +280,13 @@
       "port": 8022,
       "send": "HOME=/opt/lab TMPDIR=/opt/lab /opt/bin/telemt run /opt/lab/broken-telemt.toml >/opt/lab/toml.out 2>/opt/lab/toml.err; rc=$?; [ \"$rc\" = 1 ] && /opt/bin/busybox grep -q 'unclosed table' /opt/lab/toml.err && ! /opt/bin/busybox grep -qi 'panicked' /opt/lab/toml.err && printf 'TOML_%s\\n' REJECTED || exit 1",
       "expect": "TOML_REJECTED",
+      "timeout_sec": 120
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "cd /opt/lab && /opt/bin/busybox wget -qO /opt/lab/probe-entware http://192.168.1.100/entware/probe-entware && chmod 755 /opt/lab/probe-entware && /opt/lab/probe-entware > /opt/lab/probe.out 2>&1; /opt/bin/busybox grep -q 'PROBE_LIBC_GETRANDOM_RET_-1_ERRNO_89' /opt/lab/probe.out && /opt/bin/busybox grep -q 'PROBE_RAW_SYSCALL_RET_-1_ERRNO_89' /opt/lab/probe.out && /opt/bin/busybox grep -q 'PROBE_URANDOM_READ_OK' /opt/lab/probe.out && /opt/bin/busybox grep -q 'PROBE_DEVRANDOM_POLLIN_READY' /opt/lab/probe.out && /opt/bin/busybox cat /opt/lab/probe.out && /opt/bin/busybox cat /opt/lab/probe.out > /dev/console 2>/dev/null && printf 'PROBE_KERNEL_%s\\n' FACT_OK",
+      "expect": "PROBE_KERNEL_FACT_OK",
       "timeout_sec": 120
     },
     {
@@ -468,7 +475,7 @@
     {
       "action": "ssh",
       "port": 8022,
-      "send": "/opt/bin/opkg status telemt | /opt/bin/busybox grep -q 'Version: 3.5.17-1' && /opt/bin/opkg status telemt-panel-lite | /opt/bin/busybox grep -q 'Version: 1.0.0~rc.4-1' && test -r /opt/etc/telemt-lab.toml && test -x /opt/etc/init.d/S99telemtlab && test -r /opt/var/run/telemt-lab.gen && printf 'PERSISTED_%s\\n' FILES",
+      "send": "/opt/bin/opkg status telemt | /opt/bin/busybox grep -q 'Version: 3.5.17-2fb1' && /opt/bin/opkg status telemt-panel-lite | /opt/bin/busybox grep -q 'Version: 1.0.0~rc.4-1' && test -r /opt/etc/telemt-lab.toml && test -x /opt/etc/init.d/S99telemtlab && test -r /opt/var/run/telemt-lab.gen && printf 'PERSISTED_%s\\n' FILES",
       "expect": "PERSISTED_FILES",
       "timeout_sec": 90
     },

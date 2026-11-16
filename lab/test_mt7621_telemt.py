@@ -77,8 +77,10 @@ def make_elf(fp_abi=3, machine=8, dynamic=True, interp=b"/opt/lib/ld.so.1",
     return blob
 
 
-def make_ipk(binary, control_text=b"Package: telemt\nVersion: 3.5.17-1\n"
-             b"Architecture: mipsel-3.4\n", payload_path="./opt/bin/telemt"):
+def make_ipk(binary, control_text=None, payload_path="./opt/bin/telemt"):
+    if control_text is None:
+        control_text = (f"Package: telemt\nVersion: {tl.CORE_VERSION}\n"
+                        "Architecture: mipsel-3.4\n").encode()
     outer = gzip_tar([
         ("./debian-binary", b"2.0\n"),
         ("./control.tar.gz", gzip_tar([("./control", control_text)])),
@@ -144,9 +146,10 @@ class AuditorNegativeTests(unittest.TestCase):
         elf = make_elf()
         blob = gzip_tar([
             ("./debian-binary", b"2.0\n"),
-            ("./control.tar.gz", gzip_tar([("./control", b"Package: telemt\n"
-                                            b"Version: 3.5.17-1\n"
-                                            b"Architecture: mipsel-3.4\n")])),
+            ("./control.tar.gz", gzip_tar([(
+                "./control",
+                (f"Package: telemt\nVersion: {tl.CORE_VERSION}\n"
+                 "Architecture: mipsel-3.4\n").encode())])),
             ("./data.tar.gz", gzip_tar([("./opt/bin/telemt", elf),
                                         ("./opt/etc/extra.conf", b"x")])),
         ])
@@ -157,9 +160,10 @@ class AuditorNegativeTests(unittest.TestCase):
         elf = make_elf()
         blob = gzip_tar([
             ("./debian-binary", b"2.0\n"),
-            ("./control.tar.gz", gzip_tar([("./control", b"Package: telemt\n"
-                                            b"Version: 3.5.17-1\n"
-                                            b"Architecture: mipsel-3.4\n")])),
+            ("./control.tar.gz", gzip_tar([(
+                "./control",
+                (f"Package: telemt\nVersion: {tl.CORE_VERSION}\n"
+                 "Architecture: mipsel-3.4\n").encode())])),
             ("./data.tar.gz", gzip_tar([("../escape", elf)])),
         ])
         with self.assertRaises(tl.AuditError):
@@ -259,7 +263,7 @@ class CommittedScenarioContractTests(unittest.TestCase):
     def test_baseline_is_verbatim_and_chain_is_complete(self):
         baseline, stage = self.inputs()
         self.assertEqual(len(baseline["steps"]), 33)
-        self.assertEqual(len(stage["steps"]), 73)
+        self.assertEqual(len(stage["steps"]), 74)
         self.assertEqual(stage["steps"][:33], baseline["steps"][:33])
 
     def test_seed_step_carries_all_four_fixture_payloads(self):
@@ -284,8 +288,8 @@ class CommittedScenarioContractTests(unittest.TestCase):
     def test_delivery_pins_both_frozen_artifacts_in_guest(self):
         _, stage = self.inputs()
         send = stage["steps"][35]["send"]
-        self.assertIn("http://192.168.1.100/entware/telemt_3.5.17-1_mipsel-3.4.ipk",
-                      send)
+        self.assertIn(
+            f"http://192.168.1.100/entware/{tl.CORE_IPK_NAME}", send)
         self.assertIn("http://192.168.1.100/entware/"
                       "telemt-panel-lite_1.0.0.rc.4-1_mipsel-3.4.ipk", send)
         self.assertIn(tl.CORE_IPK_SHA, send)
@@ -304,7 +308,7 @@ class CommittedScenarioContractTests(unittest.TestCase):
         core = stage["steps"][36]["send"]
         panel = stage["steps"][37]["send"]
         self.assertIn("/opt/bin/opkg install /opt/lab/telemt.ipk", core)
-        self.assertIn("Version: 3.5.17-1", core)
+        self.assertIn(f"Version: {tl.CORE_VERSION}", core)
         self.assertIn("/opt/bin/opkg install /opt/lab/telemt-panel.ipk", panel)
         self.assertIn("Version: 1.0.0~rc.4-1", panel)
         pinned = stage["steps"][38]["send"]
@@ -331,12 +335,33 @@ class CommittedScenarioContractTests(unittest.TestCase):
         self.assertIn("grep -q 'unclosed table'", toml)
         self.assertIn("grep -qi 'panicked'", toml)
 
+    def test_kernel_fact_probe_precedes_the_foreground_diagnostic(self):
+        # The smallest legitimate softfloat executable re-proves the platform
+        # root cause ON the real guest kernel before the fixed binary starts:
+        # getrandom(2) must fail with ENOSYS (os error 89) on BOTH the libc
+        # and the raw o32 syscall paths, while /dev/urandom works and the
+        # upstream /dev/random POLLIN readiness barrier reports ready.
+        _, stage = self.inputs()
+        probe = stage["steps"][42]
+        self.assertEqual(probe["expect"], "PROBE_KERNEL_FACT_OK")
+        self.assertIn("wget -qO /opt/lab/probe-entware "
+                      "http://192.168.1.100/entware/probe-entware", probe["send"])
+        self.assertIn("PROBE_LIBC_GETRANDOM_RET_-1_ERRNO_89", probe["send"])
+        self.assertIn("PROBE_RAW_SYSCALL_RET_-1_ERRNO_89", probe["send"])
+        self.assertIn("PROBE_URANDOM_READ_OK", probe["send"])
+        self.assertIn("PROBE_DEVRANDOM_POLLIN_READY", probe["send"])
+        # preserved on the UART before the disposable image is torn down
+        self.assertIn("cat /opt/lab/probe.out > /dev/console", probe["send"])
+        # echo-unsafe marker: the expect cannot match the sent text
+        self.assertNotIn("PROBE_KERNEL_FACT_OK", probe["send"])
+        self.assertIn("printf 'PROBE_KERNEL_%s\\n' FACT_OK", probe["send"])
+
     def test_foreground_diagnostic_precedes_the_daemon_start(self):
         _, stage = self.inputs()
-        diag = stage["steps"][42]
-        started = stage["steps"][43]
+        diag = stage["steps"][43]
+        started = stage["steps"][44]
         self.assertEqual(diag["expect"], "DIAG_CAPTURED")
-        self.assertLess(42, next(i for i, s in enumerate(stage["steps"])
+        self.assertLess(43, next(i for i, s in enumerate(stage["steps"])
                                  if s.get("expect") == "TELEMT_STARTED"))
         # Foreground mode keeps stdio attached, so the tracing output AND the
         # final error text are captured while the pidfile is still written.
@@ -359,9 +384,9 @@ class CommittedScenarioContractTests(unittest.TestCase):
 
     def test_daemon_log_is_collected_before_the_pid_liveness_check(self):
         _, stage = self.inputs()
-        started = stage["steps"][43]
-        emit = stage["steps"][44]
-        alive = stage["steps"][45]
+        started = stage["steps"][44]
+        emit = stage["steps"][45]
+        alive = stage["steps"][46]
         self.assertEqual(started["expect"], "TELEMT_STARTED")
         self.assertEqual(emit["expect"], "LOG_(EMITTED|ABSENT)")
         self.assertEqual(alive["expect"], "DAEMON_PROC_ALIVE")
@@ -382,7 +407,7 @@ class CommittedScenarioContractTests(unittest.TestCase):
 
     def test_proc_scan_cannot_match_its_own_command_line(self):
         _, stage = self.inputs()
-        scan = stage["steps"][68]["send"]
+        scan = stage["steps"][69]["send"]
         # The concatenation-built needle cannot appear contiguously in the
         # scanner's own command text (guest runs each SSH send via sh -c).
         self.assertIn('"/opt/etc/telemt-lab.""toml"', scan)
@@ -391,7 +416,7 @@ class CommittedScenarioContractTests(unittest.TestCase):
 
     def test_identity_proofs_use_proc_exe_not_pidfile_echoes(self):
         _, stage = self.inputs()
-        for index in (47, 67):
+        for index in (48, 68):
             send = stage["steps"][index]["send"]
             self.assertIn("readlink /proc/$pid/exe", send)
             self.assertIn("/proc/$pid/cmdline", send)
@@ -467,7 +492,7 @@ class TelemtGateContractTests(unittest.TestCase):
     def test_chain_failure_is_fail(self):
         _, s = self.inputs()
         gate = mg.derive_telemt_gate(
-            s, self.report(s, failed=47))["MIPSEL_TELEMT"]
+            s, self.report(s, failed=48))["MIPSEL_TELEMT"]
         self.assertEqual(gate["status"], "FAIL")
         self.assertEqual(gate["reason"], "telemt_chain_step_failed")
 
