@@ -82,24 +82,39 @@ def classify_failure(code, output):
     return "INSTALLER_EXIT_NONZERO"
 
 
-def write_public(path, kas_ref, phase, reason, exit_code=None, component_gap=None):
+def guarded_refusal_proven(exit_code, category, component_gap, package_list, no_ownership):
+    """Actual exit 1, exactly ext-utils missing, no owned KAS packages/state."""
+    if exit_code != 1 or category != "KEENETICOS_COMPONENTS_MISSING":
+        return False
+    if component_gap != ["ext-utils"] or not no_ownership:
+        return False
+    return not any(re.search(r"^" + re.escape(p) + r" - ", package_list, re.M)
+                   for p in ("mihomo", "magitrickle"))
+
+
+def write_public(path, kas_ref, phase, reason, exit_code=None, component_gap=None,
+                 guard_verified=False, guarded_refusal_expected=False):
     """No guest output, passwords, paths, script bodies, or arbitrary diagnostics."""
     record = {"schema": "mt7621-kas-smoke-v1", "kas_ref": kas_ref,
               "phase": phase, "reason": reason, "kas_installed": phase == "PASS",
               "exit_code": exit_code if isinstance(exit_code, int) else None,
               "component_inventory_seen": component_gap is not None,
-              "missing_component_ids": component_gap if component_gap is not None else []}
+              "missing_component_ids": component_gap if component_gap is not None else [],
+              "test_expectation": ("guarded_refusal" if guarded_refusal_expected
+                                   else "full_install"),
+              "guard_contract_verified": guard_verified}
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(record, sort_keys=True, indent=2) + "\n",
                     encoding="utf-8")
 
 
-def guest_probe(credentials, workspace, deadline, source, kas_ref, public):
+def guest_probe(credentials, workspace, deadline, source, kas_ref, public, guarded_refusal_expected=False):
     """Trusted run.py post-scenario hook; VM remains alive for the whole probe."""
     from lab.guest import Guest  # lazy: unit tests do not require Paramiko
     guest = Guest(credentials, workspace, deadline=deadline)
     phase, reason, exit_code = "NOT_TESTED", "GUEST_NOT_REACHED", None
     component_gap = None
+    guard_verified = False
     try:
         guest.connect(120)
         phase, reason = "BLOCKED", "ENTWARE_PREFLIGHT_UNAVAILABLE"
@@ -144,7 +159,21 @@ def guest_probe(credentials, workspace, deadline, source, kas_ref, public):
         if category != "INSTALLER_COMPLETED":
             reason = category
             print("KAS MIPSEL INSTALL: " + category, flush=True)
+            if guarded_refusal_expected:
+                package_list = guest.command("/opt/bin/opkg list-installed", timeout=45)
+                no_owner = (guest.command("test ! -e /opt/etc/keenetic-auto-setup/ownership.v1 && "
+                                          "printf '%s\\n' LAB_GUARD_UNTOUCHED",
+                                          timeout=30).strip() == "LAB_GUARD_UNTOUCHED")
+                guard_verified = guarded_refusal_proven(
+                    exit_code, category, component_gap, package_list, no_owner)
+                if guard_verified:
+                    print("KAS GUARDED REFUSAL: PASS (KAS not installed, no managed state)",
+                          flush=True)
+                    return
             raise RuntimeError("guest KAS install not accepted: " + category)
+        if guarded_refusal_expected:
+            reason = "UNEXPECTED_INSTALLER_SUCCESS_IN_GUARD_TEST"
+            raise RuntimeError("guard expected but KAS installer succeeded")
         installed = guest.command("/opt/bin/opkg list-installed", timeout=45)
         if not all(name + " - " in installed for name in ("mihomo", "magitrickle")):
             reason = "INSTALLED_PACKAGES_MISSING"
@@ -157,7 +186,8 @@ def guest_probe(credentials, workspace, deadline, source, kas_ref, public):
     finally:
         guest.close()
         write_public(public, kas_ref, phase, reason, exit_code,
-                     component_gap=component_gap)
+                     component_gap=component_gap, guard_verified=guard_verified,
+                     guarded_refusal_expected=guarded_refusal_expected)
 
 
 def main():
@@ -169,6 +199,8 @@ def main():
     ap.add_argument("--kas-dir", required=True, help="immutable pinned public KAS checkout")
     ap.add_argument("--kas-ref", required=True)
     ap.add_argument("--max-seconds", type=int, default=2400)
+    ap.add_argument("--expect-guarded-refusal", action="store_true",
+                    help="negative test ONLY: exact ext-utils refusal, no KAS packages/state")
     args = ap.parse_args()
     if not PIN.fullmatch(args.kas_ref):
         ap.error("--kas-ref must be full 40-character SHA")
@@ -194,7 +226,8 @@ def main():
             archive_image=None, mirror_port=port,
             credentials_file=args.credentials_file,
             after_scenario=lambda **ctx: guest_probe(args.credentials_file,
-                workspace, ctx["deadline"], source, args.kas_ref, public)))
+                workspace, ctx["deadline"], source, args.kas_ref, public,
+                guarded_refusal_expected=args.expect_guarded_refusal)))
 
 
 if __name__ == "__main__":

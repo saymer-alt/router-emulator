@@ -1,6 +1,6 @@
 # Real KeeneticOS MT7621/MIPSel on ephemeral GitHub Ubuntu runners.
 # Public evaluation files are checksum-pinned. No physical routers or private dumps.
-name: MT7621 - pinned KAS installer smoke on real guest
+name: MT7621 - KAS guarded-refusal contract on Ported guest
 
 on:
   pull_request:
@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   real-guest:
-    name: Real MT7621 KAS installer
+    name: Real MT7621 KAS ext-utils guarded refusal
     runs-on: ubuntu-24.04
     timeout-minutes: 75
     env:
@@ -125,7 +125,7 @@ jobs:
             --workspace "$RUNNER_TEMP/mt7621-workspace" \
             --credentials-file "$RUNNER_TEMP/mt7621-credentials.json" \
             --kas-dir "$GITHUB_WORKSPACE/kas-source" --kas-ref "$KAS_REF" \
-            --max-seconds 2300
+            --max-seconds 2300 --expect-guarded-refusal
 
       - name: Report only safe action counts (no UART)
         if: always()
@@ -147,6 +147,8 @@ jobs:
                   if stage.is_file():
                       result = json.loads(stage.read_text())
                       out.write(f"### KAS installer: {result['phase']} ({result['reason']})\n")
+                      out.write("### Guarded refusal verified: %s; KAS installed: %s\n" %
+                          (result['guard_contract_verified'],result['kas_installed']))
               else:
                   out.write("### MT7621 guest not reached: host-side preparation failed\n")
           PY

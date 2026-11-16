@@ -4,7 +4,8 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from lab.mt7621.kas_smoke import classify_failure, write_public, missing_required_components
+from lab.mt7621.kas_smoke import (classify_failure, write_public,
+    missing_required_components, guarded_refusal_proven)
 
 
 class Mt7621KASGuestContracts(unittest.TestCase):
@@ -31,7 +32,8 @@ class Mt7621KASGuestContracts(unittest.TestCase):
             rec = json.loads(p.read_text())
             self.assertEqual(set(rec), {"schema", "kas_ref", "phase", "reason", "kas_installed",
                                         "exit_code", "component_inventory_seen",
-                                        "missing_component_ids"})
+                                        "missing_component_ids", "test_expectation",
+                                        "guard_contract_verified"})
             self.assertFalse(rec["kas_installed"])
             self.assertEqual(rec["kas_ref"], ref)
 
@@ -51,6 +53,23 @@ class Mt7621KASGuestContracts(unittest.TestCase):
 
     def test_missing_inventory_is_unknown_not_all_missing(self):
         self.assertIsNone(missing_required_components("release: 5.01.C.8.0-2"))
+
+
+    def test_only_real_ext_utils_refusal_passes_guard(self):
+        package_list = "entware-release - 2026\\nbash - 5.2\\n"
+        self.assertTrue(guarded_refusal_proven(
+            1, "KEENETICOS_COMPONENTS_MISSING", ["ext-utils"], package_list, True))
+        self.assertFalse(guarded_refusal_proven(
+            0, "KEENETICOS_COMPONENTS_MISSING", ["ext-utils"], package_list, True))
+        self.assertFalse(guarded_refusal_proven(
+            1, "KEENETICOS_COMPONENTS_MISSING", ["ext", "ext-utils"], package_list, True))
+        self.assertFalse(guarded_refusal_proven(
+            1, "IPK_UNAVAILABLE", ["ext-utils"], package_list, True))
+        self.assertFalse(guarded_refusal_proven(
+            1, "KEENETICOS_COMPONENTS_MISSING", ["ext-utils"],
+            package_list + "mihomo - 1.0\\n", True))
+        self.assertFalse(guarded_refusal_proven(
+            1, "KEENETICOS_COMPONENTS_MISSING", ["ext-utils"], package_list, False))
 
     def test_no_markdown_banner_is_success(self):
         self.assertNotEqual(classify_failure(0, "=== Keenetic Auto Setup ==="),
