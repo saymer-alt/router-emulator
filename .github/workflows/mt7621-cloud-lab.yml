@@ -48,7 +48,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends p7zip-full e2fsprogs openssl \
+          sudo apt-get install -y --no-install-recommends p7zip-full socat e2fsprogs openssl \
             python3 python3-paramiko build-essential ninja-build meson pkg-config \
             libglib2.0-dev libpixman-1-dev zlib1g-dev libslirp-dev libfdt-dev python3-venv
           python3 -m unittest discover -s lab -p 'test*.py' -q
