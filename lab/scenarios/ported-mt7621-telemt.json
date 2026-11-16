@@ -285,7 +285,7 @@
     {
       "action": "ssh",
       "port": 8022,
-      "send": "cd /opt/lab && /opt/bin/busybox wget -qO /opt/lab/probe-entware http://192.168.1.100/entware/probe-entware && chmod 755 /opt/lab/probe-entware && /opt/lab/probe-entware > /opt/lab/probe.out 2>&1; /opt/bin/busybox cat /opt/lab/probe.out; /opt/bin/busybox cat /opt/lab/probe.out > /dev/console 2>/dev/null; /opt/bin/busybox grep -q 'PROBE_LIBC_GETRANDOM_RET_-1_ERRNO_89' /opt/lab/probe.out && /opt/bin/busybox grep -q 'PROBE_RAW_SYSCALL_RET_-1_ERRNO_89' /opt/lab/probe.out && /opt/bin/busybox grep -q 'PROBE_URANDOM_READ_OK' /opt/lab/probe.out && /opt/bin/busybox grep -q 'PROBE_DEVRANDOM_POLLIN_READY' /opt/lab/probe.out && printf 'PROBE_KERNEL_%s\\n' FACT_OK",
+      "send": "cd /opt/lab && /opt/bin/busybox wget -qO /opt/lab/probe-entware http://192.168.1.100/entware/probe-entware && chmod 755 /opt/lab/probe-entware && /opt/lab/probe-entware > /opt/lab/probe.out 2>&1; /opt/bin/busybox cat /opt/lab/probe.out; /opt/bin/busybox cat /opt/lab/probe.out > /dev/console 2>/dev/null; /opt/bin/busybox grep -q 'PROBE_GLIBC_SYMBOL_RET_-1_ERRNO_89' /opt/lab/probe.out && /opt/bin/busybox grep -q 'PROBE_LIBC_GETRANDOM_RET_32_ERRNO_0' /opt/lab/probe.out && /opt/bin/busybox grep -q 'PROBE_RAW_SYSCALL_RET_32_ERRNO_0' /opt/lab/probe.out && /opt/bin/busybox grep -q 'PROBE_URANDOM_READ_OK' /opt/lab/probe.out && /opt/bin/busybox grep -q 'PROBE_DEVRANDOM_POLLIN_READY' /opt/lab/probe.out && printf 'PROBE_KERNEL_%s\\n' FACT_OK",
       "expect": "PROBE_KERNEL_FACT_OK",
       "timeout_sec": 120
     },

@@ -336,21 +336,29 @@ class CommittedScenarioContractTests(unittest.TestCase):
         self.assertIn("grep -qi 'panicked'", toml)
 
     def test_kernel_fact_probe_precedes_the_foreground_diagnostic(self):
-        # The smallest legitimate softfloat executable re-proves the platform
-        # root cause ON the real guest kernel before the fixed binary starts:
-        # getrandom(2) must fail with ENOSYS (os error 89) on BOTH the libc
-        # and the raw o32 syscall paths, while /dev/urandom works and the
-        # upstream /dev/random POLLIN readiness barrier reports ready.
+        # The smallest legitimate softfloat executable proves the CORRECTED
+        # platform model on the real guest kernel before the fixed binary
+        # starts: the guest KERNEL supports getrandom(2) (syscall 4353 works
+        # via both the generic libc wrapper and raw o32 asm), but Entware's
+        # glibc 2.27 getrandom() SYMBOL is an ENOSYS(89) stub — exactly what
+        # rand 0.10.2 hits — while /dev/urandom reads fine and the upstream
+        # /dev/random POLLIN readiness barrier reports ready. The fallback
+        # fork's dlsym probe therefore lands on the stub and takes the
+        # reviewed /dev/urandom path.
         _, stage = self.inputs()
         probe = stage["steps"][42]
         self.assertEqual(probe["expect"], "PROBE_KERNEL_FACT_OK")
         self.assertIn("wget -qO /opt/lab/probe-entware "
                       "http://192.168.1.100/entware/probe-entware", probe["send"])
-        self.assertIn("PROBE_LIBC_GETRANDOM_RET_-1_ERRNO_89", probe["send"])
-        self.assertIn("PROBE_RAW_SYSCALL_RET_-1_ERRNO_89", probe["send"])
+        self.assertIn("PROBE_GLIBC_SYMBOL_RET_-1_ERRNO_89", probe["send"])
+        self.assertIn("PROBE_LIBC_GETRANDOM_RET_32_ERRNO_0", probe["send"])
+        self.assertIn("PROBE_RAW_SYSCALL_RET_32_ERRNO_0", probe["send"])
         self.assertIn("PROBE_URANDOM_READ_OK", probe["send"])
         self.assertIn("PROBE_DEVRANDOM_POLLIN_READY", probe["send"])
-        # preserved on the UART before the disposable image is torn down
+        # evidence-first: the probe output is emitted BEFORE the assertions,
+        # to SSH stdout AND the UART, so a failing assertion cannot hide it
+        self.assertLess(probe["send"].index("cat /opt/lab/probe.out;"),
+                        probe["send"].index("grep -q"))
         self.assertIn("cat /opt/lab/probe.out > /dev/console", probe["send"])
         # echo-unsafe marker: the expect cannot match the sent text
         self.assertNotIn("PROBE_KERNEL_FACT_OK", probe["send"])
