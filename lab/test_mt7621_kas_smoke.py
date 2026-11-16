@@ -56,7 +56,7 @@ class Mt7621KASGuestContracts(unittest.TestCase):
 
 
     def test_only_real_ext_utils_refusal_passes_guard(self):
-        package_list = "entware-release - 2026\\nbash - 5.2\\n"
+        package_list = "entware-release - 2026\nbash - 5.2\n"
         self.assertTrue(guarded_refusal_proven(
             1, "KEENETICOS_COMPONENTS_MISSING", ["ext-utils"], package_list, True))
         self.assertFalse(guarded_refusal_proven(
@@ -67,7 +67,7 @@ class Mt7621KASGuestContracts(unittest.TestCase):
             1, "IPK_UNAVAILABLE", ["ext-utils"], package_list, True))
         self.assertFalse(guarded_refusal_proven(
             1, "KEENETICOS_COMPONENTS_MISSING", ["ext-utils"],
-            package_list + "mihomo - 1.0\\n", True))
+            package_list + "mihomo - 1.0\n", True))
         self.assertFalse(guarded_refusal_proven(
             1, "KEENETICOS_COMPONENTS_MISSING", ["ext-utils"], package_list, False))
 
