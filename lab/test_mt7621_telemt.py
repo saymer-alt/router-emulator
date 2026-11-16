@@ -266,6 +266,16 @@ class CommittedScenarioContractTests(unittest.TestCase):
         self.assertEqual(len(stage["steps"]), 74)
         self.assertEqual(stage["steps"][:33], baseline["steps"][:33])
 
+    def test_no_embedded_nul_bytes_in_any_send(self):
+        # A literal NUL inside a send (e.g. tr '\0' written as a real byte)
+        # truncates the SSH exec string at the guest shell and surfaces as
+        # ash exit 2 "unterminated quoted string". busybox tr understands the
+        # textual two-character escape, so sends must only ever carry that.
+        _, stage = self.inputs()
+        for i, step in enumerate(stage["steps"]):
+            self.assertNotIn("\x00", step.get("send", ""),
+                             f"step {i} carries an embedded NUL byte")
+
     def test_seed_step_carries_all_four_fixture_payloads(self):
         _, stage = self.inputs()
         seed = stage["steps"][34]["send"]

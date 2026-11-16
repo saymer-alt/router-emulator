@@ -327,7 +327,7 @@
     {
       "action": "ssh",
       "port": 8022,
-      "send": "pid=$(/opt/bin/busybox cat /opt/var/run/telemt-lab.pid); cmd=$(/opt/bin/busybox tr '\u0000' ' ' < /proc/$pid/cmdline 2>/dev/null); exe=$(/opt/bin/busybox readlink /proc/$pid/exe 2>/dev/null); case \"$cmd\" in *telemt*) [ \"$exe\" = /opt/bin/telemt ] && printf 'PID_%s\\n' 'ALIVE' || exit 1;; *) exit 1;; esac",
+      "send": "pid=$(/opt/bin/busybox cat /opt/var/run/telemt-lab.pid); cmd=$(/opt/bin/busybox tr '\\0' ' ' < /proc/$pid/cmdline 2>/dev/null); exe=$(/opt/bin/busybox readlink /proc/$pid/exe 2>/dev/null); case \"$cmd\" in *telemt*) [ \"$exe\" = /opt/bin/telemt ] && printf 'PID_%s\\n' 'ALIVE' || exit 1;; *) exit 1;; esac",
       "expect": "PID_ALIVE",
       "timeout_sec": 90
     },
@@ -461,7 +461,7 @@
     {
       "action": "ssh",
       "port": 8022,
-      "send": "pid=$(/opt/bin/busybox cat /opt/var/run/telemt-lab.pid); cmd=$(/opt/bin/busybox tr '\u0000' ' ' < /proc/$pid/cmdline 2>/dev/null); exe=$(/opt/bin/busybox readlink /proc/$pid/exe 2>/dev/null); case \"$cmd\" in *telemt*) [ \"$exe\" = /opt/bin/telemt ] && printf 'AUTOSTART_PID_%s\\n' 'ALIVE' || exit 1;; *) exit 1;; esac",
+      "send": "pid=$(/opt/bin/busybox cat /opt/var/run/telemt-lab.pid); cmd=$(/opt/bin/busybox tr '\\0' ' ' < /proc/$pid/cmdline 2>/dev/null); exe=$(/opt/bin/busybox readlink /proc/$pid/exe 2>/dev/null); case \"$cmd\" in *telemt*) [ \"$exe\" = /opt/bin/telemt ] && printf 'AUTOSTART_PID_%s\\n' 'ALIVE' || exit 1;; *) exit 1;; esac",
       "expect": "AUTOSTART_PID_ALIVE",
       "timeout_sec": 90
     },
