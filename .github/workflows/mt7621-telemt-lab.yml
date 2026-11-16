@@ -34,14 +34,20 @@ jobs:
     name: Acquire pinned experimental IPKs (requires TELEMT_IPK_TOKEN)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    if: ${{ secrets.TELEMT_IPK_TOKEN != '' }}
-    env:
-      GH_TOKEN: ${{ secrets.TELEMT_IPK_TOKEN }}
+    outputs:
+      acquired: ${{ steps.gate.outputs.acquired }}
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - name: Gate on the pinned-artifact token
+        id: gate
+        if: ${{ secrets.TELEMT_IPK_TOKEN != '' }}
+        run: echo "acquired=true" >> "$GITHUB_OUTPUT"
       - name: Download the two frozen artifacts and verify every pin
+        if: steps.gate.outputs.acquired == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.TELEMT_IPK_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
@@ -57,16 +63,31 @@ jobs:
           # Fails closed on any SHA-256/control/ELF/ABI deviation.
           python3 -m lab.mt7621.telemt_lab --audit-ipks --ipk-dir "$dir"
       - name: Publish pinned IPK artifact for the guest job
+        if: steps.gate.outputs.acquired == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: telemt-ipk-pinned
           path: ${{ runner.temp }}/telemt-ipk/*.ipk
           if-no-files-found: error
           retention-days: 1
+      - name: Explain the intentional skip (no token)
+        if: steps.gate.outputs.acquired != 'true'
+        shell: bash
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          ### TeleMT cloud guest stage intentionally NOT attempted
+          The repository secret `TELEMT_IPK_TOKEN` (actions:read on
+          saymer-alt/entware-go) is not configured, so the two frozen
+          experimental IPKs of entware-go run 43742529964 cannot be
+          downloaded and pinned-verified on the runner.  They are never
+          rebuilt and never approximated; the guest stage activates as soon
+          as the token exists.
+          EOF
 
   real-guest-telemt:
     name: Real MT7621 guest (telemt)
     needs: acquire-ipks
+    if: needs.acquire-ipks.outputs.acquired == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 75
     steps:
