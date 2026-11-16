@@ -1,0 +1,94 @@
+Full UART scan of the single clean 47-step persistence guest run (Issue #81 / PR #84, 2026-11-15)
+==================================================================================================
+
+Run provenance
+--------------
+- Scenario: lab/scenarios/ported-mt7621-entware-persistence.json (47 steps)
+- Tested source SHA: 4f831934a3939531ae12bc9e0387a9e4b295636f (PR #84 HEAD, CI 4/4 green)
+- Driver:   lab/mt7621/entware_e2e.py run() path (fresh NAND copy + freshly built ext4
+            image and pinned 25-package mipselsf mirror from lab/entware-mipselsf.lock.json)
+- Result:   PASS 47/47, 797.19 s, failure=None (report.json, same folder)
+- UART:     4542 lines, 3 full boot cycles ("Starting kernel" at lines 31, 1791, 3189)
+- 4 VPE per boot: "Brought up 4 CPUs" at lines 96, 1856, 3254 (boot 3 also ran 4 VPE)
+
+Crash-pattern scan over the ENTIRE UART log (not only the scenario result)
+--------------------------------------------------------------------------
+grep -i "SIGSEGV|Segmentation fault|do_page_fault|Oops|Kernel panic|kernel BUG"
+  -> 0 hits.  Even the benign "mtdoops_proc.ko" module-name false positives seen in
+  earlier stand runs are absent from this log (the module load lines were not
+  printed in these boots), so there are no kernel-fault-looking lines at all.
+
+grep -i "critical error|wget: |busybox.*error|segmentation" -> 0 hits.
+grep "wget" (any output line) -> 0 hits: the optional TZ GET is omitted for mipsel,
+so no BusyBox wget runs the timeout path that previously SIGSEGV'd during the
+doinstall window (Issue #82).
+
+Scenario rejection patterns (steps 13-15: "Critical error:", "Please use
+ext2/ext3/ext4", do_page_fault()/Segmentation fault/SIGSEGV) never fired.
+
+Separation of the two reset events (the acceptance core)
+--------------------------------------------------------
+- Event 1, NATIVE reboot: the only "reboot: Restarting system" line in the whole
+  log is at console line 1759 (init: SIGKILL -> requesting system reboot ->
+  Machine restart), between boot 1 and boot 2.  Boot 2 then re-attached Entware
+  from saved config: "disk is set to: KASOPT:/" + "configured init script:
+  /opt/etc/init.d/rc.unslung" + "system ready, core startup time is 111 seconds".
+- Event 2, QEMU monitor reset: scenario step 37 is action "reset"; lab/run.py
+  records the console EOF offset BEFORE sending "system_reset" via the QEMU
+  monitor, then sends it.  Boot 3 (console line 3189) follows the breed
+  "Booting image from flash bank 0" block with NO init-shutdown lines and NO
+  "reboot: Restarting system" line anywhere between boot 2 and boot 3.  Boot 3
+  re-attached Entware from saved config the same way ("KASOPT:/" + rc.unslung +
+  "system ready, core startup time is 110 seconds").
+- The native reboot and the QEMU reset are therefore two separate, individually
+  observable events in the guest log, exactly as the task requires.
+
+Persistence chain outcomes (report.json, all PASS)
+--------------------------------------------------
+- step 22: write "PERSIST_OK" to /opt/etc/.lab-persist + busybox sync before the
+  native reboot (read back PERSIST_OK in the same step)
+- step 23: native "system reboot" via telnet; step 24: "reboot: Restarting system"
+- steps 31-35 (after the native reboot): /proc/mounts "/opt ext4",
+  opkg print-architecture "mipsel-3.4_kn 200", bash --version
+  "mipsel-openwrt-linux-gnu", /opt/.lab-marker -> MARK42,
+  /opt/etc/.lab-persist -> PERSIST_OK
+- step 36: busybox sync -> SYNC_COMPLETE immediately before the hard reset
+- step 37: QEMU monitor system_reset (runner-side; no console echo)
+- steps 38-42: third boot to "system ready" (4 VPE, dropbear forwards)
+- steps 43-47 (after the QEMU reset): /proc/mounts "/opt ext4",
+  opkg print-architecture "mipsel-3.4_kn 200", bash --version
+  "mipsel-openwrt-linux-gnu", /opt/etc/.lab-persist -> PERSIST_OK (unchanged),
+  /opt/.lab-marker -> MARK42 (unchanged)
+- All 47 steps PASS; run.py verified exit status 0 and the echo-safe marker on
+  every SSH probe (no guest output is stored in the report).
+
+MIPSEL_PERSISTENCE derivation
+-----------------------------
+python3 lab/mt7621/mt7621_gates.py --persistence-scenario
+lab/scenarios/ported-mt7621-entware-persistence.json --persistence-report
+<real report.json> derives:
+  MIPSEL_PERSISTENCE = PASS
+  (native_reboot_then_qemu_reset_opt_config_persisted)
+The gate evaluator requires >=3 "system ready" waits, exactly one native reboot
+wait, exactly one reset action, one persistence write, two persistence reads, one
+sync, >=2 mounts/arch/elf checks, >=2 marker reads, strictly increasing ordering
+(write -> native reboot -> boot 2 -> read -> sync -> reset -> boot 3 -> checks),
+and report outcome PASS.  No manual gate override was used.
+
+rc.unslung autostart: explicitly NOT_TESTED
+-------------------------------------------
+The log shows ndm confirming "configured init script: /opt/etc/init.d/rc.unslung"
+once per boot (lines 1391, 2944, 4342).  That is the SETTING being applied by the
+system, not a measurement of a service actually started by rc.unslung: no scenario
+step observes a live Entware process after boot 2 or boot 3 (no service liveness
+probe exists in the 47 steps; bash/opkg checks prove package and data persistence,
+not autostart).  Per the task, actual rc.unslung service autostart remains
+NOT_TESTED; a future cycle would need a persistent init script writing a boot
+marker (or a live service probe) right after "system ready" to measure it.
+
+Sanitization
+------------
+report.json contains only step actions/outcomes/timings and the scenario name
+(no credentials, no host paths, no addresses).  junit.xml contains only action
+names and durations.  The full console log stays outside the repository; the
+excerpt file keeps only the segments shown there.

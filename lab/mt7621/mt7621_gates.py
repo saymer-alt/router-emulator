@@ -509,6 +509,69 @@ def derive_service_restart_gate(scenario, report):
     return {"MIPSEL_SERVICE_RESTART": _gate("FAIL", "service_restart_chain_step_failed")}
 
 
+def derive_persistence_gate(scenario, report):
+    """Stage C: same /opt/etc value survives native reboot AND QEMU system_reset.
+
+    This is not derivable from the old 32-step Entware bootstrap report.
+    SSH output is checked by run.py for exit=0 plus echo-safe answer.
+    """
+    checked = _checked_prefix(scenario, report)
+    if checked is None:
+        return {"MIPSEL_PERSISTENCE": _gate("FAIL", "report_scenario_mismatch")}
+    steps, rows, first_fail = checked
+
+    def indices(action, predicate):
+        return [i for i, s in enumerate(steps)
+                if s.get("action") == action and predicate(s)]
+
+    ready = indices("wait_serial", lambda s: s.get("pattern") == "system ready")
+    reboot = indices("wait_serial", lambda s: "reboot: Restarting system" in s.get("pattern", ""))
+    hard_reset = indices("reset", lambda s: True)
+    write = indices("ssh", lambda s:
+                    " > /opt/etc/.lab-persist" in s.get("send", "")
+                    and "busybox sync" in s.get("send", "")
+                    and s.get("expect") == "PERSIST_OK")
+    reads = indices("ssh", lambda s:
+                    s.get("send", "").endswith("cat /opt/etc/.lab-persist")
+                    and " > /opt/etc/.lab-persist" not in s.get("send", "")
+                    and s.get("expect") == "PERSIST_OK")
+    sync = indices("ssh", lambda s:
+                   "busybox sync" in s.get("send", "")
+                   and s.get("expect") == "SYNC_COMPLETE")
+    mounts = indices("ssh", lambda s:
+                     "/proc/mounts" in s.get("send", "")
+                     and "/opt ext4" in s.get("expect", ""))
+    arch = indices("ssh", lambda s:
+                   "opkg print-architecture" in s.get("send", "")
+                   and "mipsel-3.4_kn 200" in s.get("expect", "").replace("\\", ""))
+    elf = indices("ssh", lambda s:
+                  s.get("send") == "/opt/bin/bash --version"
+                  and "mipsel-openwrt-linux-gnu" in s.get("expect", ""))
+    old_marker = indices("ssh", lambda s:
+                         s.get("send") == "/opt/bin/busybox cat /opt/.lab-marker"
+                         and s.get("expect") == "MARK42")
+    if not (len(ready) >= 3 and len(reboot) == 1 and len(hard_reset) == 1
+            and len(write) == 1 and len(reads) == 2 and len(sync) == 1
+            and len(mounts) >= 2 and len(arch) >= 3 and len(elf) >= 3
+            and len(old_marker) >= 2):
+        return {"MIPSEL_PERSISTENCE": _gate("NOT_TESTED", "scenario_lacks_persistence_chain")}
+    # Never accept a scenario where the persistence 'proof' was read
+    # before the reboot, or if the hard reset occurred before native boot.
+    ordered = (ready[0], write[0], reboot[0], ready[1], reads[0],
+               sync[0], hard_reset[0], ready[2], mounts[-1], arch[-1],
+               elf[-1], reads[1], old_marker[-1])
+    if any(a >= b for a, b in zip(ordered, ordered[1:])):
+        return {"MIPSEL_PERSISTENCE": _gate("NOT_TESTED", "persistence_chain_not_ordered")}
+    if first_fail is None:
+        return {"MIPSEL_PERSISTENCE": _gate(
+            "PASS" if report.get("outcome") == "PASS" else "FAIL",
+            "native_reboot_then_qemu_reset_opt_config_persisted"
+            if report.get("outcome") == "PASS" else "report_outcome_mismatch")}
+    if first_fail <= write[0]:
+        return {"MIPSEL_PERSISTENCE": _gate("NOT_TESTED", "prerequisite_failed")}
+    return {"MIPSEL_PERSISTENCE": _gate("FAIL", "persistence_chain_step_failed")}
+
+
 def apply_labels(gates, statuses, reasons=None):
     """Apply controller labels; PASS is refused for native gates."""
     reasons = reasons or {}
@@ -527,7 +590,8 @@ def evaluate(openwrt_scenario, openwrt_report, statuses=(), reasons=None,
              ported_scenario=None, ported_report=None,
              cli_scenario=None, cli_report=None,
              entware_scenario=None, entware_report=None,
-             service_scenario=None, service_report=None):
+             service_scenario=None, service_report=None,
+             persistence_scenario=None, persistence_report=None):
     gates = {name: _gate("NOT_TESTED", "unattempted") for name in GATES}
     gates.update(derive_openwrt_gates(openwrt_scenario, openwrt_report))
     if ported_scenario is not None and ported_report is not None:
@@ -538,6 +602,8 @@ def evaluate(openwrt_scenario, openwrt_report, statuses=(), reasons=None,
         gates.update(derive_entware_gates(entware_scenario, entware_report))
     if service_scenario is not None and service_report is not None:
         gates.update(derive_service_restart_gate(service_scenario, service_report))
+    if persistence_scenario is not None and persistence_report is not None:
+        gates.update(derive_persistence_gate(persistence_scenario, persistence_report))
     apply_labels(gates, statuses, reasons)
     return gates
 
@@ -599,6 +665,10 @@ def main():
                     help="committed Entware disposable-service Stage C scenario")
     ap.add_argument("--service-report",
                     help="report.json of the independent service-restart scenario")
+    ap.add_argument("--persistence-scenario",
+                    help="committed Entware native-reboot and QEMU-reset Stage C scenario")
+    ap.add_argument("--persistence-report",
+                    help="report.json of the independent Stage C persistence scenario")
     ap.add_argument("--set", action="append", nargs=2, metavar=("GATE", "STATUS"),
                     default=[],
                     help="explicit gate status; PASS refused for native gates")
@@ -632,12 +702,19 @@ def main():
                 Path(args.service_scenario).read_text(encoding="utf-8"))
             service_report = json.loads(
                 Path(args.service_report).read_text(encoding="utf-8"))
+        persistence_scenario = persistence_report = None
+        if args.persistence_scenario and args.persistence_report:
+            persistence_scenario = json.loads(
+                Path(args.persistence_scenario).read_text(encoding="utf-8"))
+            persistence_report = json.loads(
+                Path(args.persistence_report).read_text(encoding="utf-8"))
         reasons = {name: why for name, why in args.reason}
         gates = evaluate(scenario, report, args.set, reasons,
                          ported_scenario, ported_report,
                          cli_scenario, cli_report,
                          entware_scenario, entware_report,
-                         service_scenario, service_report)
+                         service_scenario, service_report,
+                         persistence_scenario, persistence_report)
     except ValueError as error:
         ap.error(str(error))
     report_dir = Path(args.report_dir)

@@ -29,10 +29,12 @@ a Ported NAND assembler and gate aggregation for the MT7621 preset family.
 | PORTED_NDMC_READY | PASS | `lab/scenarios/ported-mt7621-cli.json`: the ndm CLI over the loopback telnet forward answers (prompt greeting + verified `show version` release answer) |
 | MIPSEL_ENTWARE_READY | PASS | `lab/scenarios/ported-mt7621-entware.json` via `lab/mt7621/entware_e2e.py`: full 32-step chain PASS (2026-11-15 diag4) — installer completion, real opkg answers, native `bash --version` (`mipsel-openwrt-linux-gnu`), `DOINSTALL_ABSENT`, `MARK42`, native `system reboot`, post-reboot `/opt ext4` + opkg + bash + marker; derived by `derive_entware_gates` from the report against the committed scenario; re-confirmed 33/33 by the SIGSEGV-free tz-skip cycle (see below) |
 | MIPSEL_SERVICE_RESTART | PASS | `lab/scenarios/ported-mt7621-entware-service-restart.json` via `lab/mt7621/entware_e2e.py`: 40-step chain PASS (2026-11-15, see the service cycle below) — start/status generation 1 with recorded PID, saved pidfile, real restart, status generation 2, on-guest proof of different PID + `kill -0` liveness + counter 2 (`RESTART_VERIFIED`), then stop and cleanup (`LAB_CLEANED`); derived by `derive_service_restart_gate` |
-| MIPSEL_PERSISTENCE | NOT_TESTED | separate scripted scope (Issue #76 §6, Draft PR #84); the service-restart cycle explicitly does **not** prove post-boot `rc.unslung` autostart |
+| MIPSEL_PERSISTENCE | PASS | `lab/scenarios/ported-mt7621-entware-persistence.json` via `lab/mt7621/entware_e2e.py`: 47-step guest cycle PASS (2026-11-15, tested source SHA `4f831934`) — non-secret `/opt/etc/.lab-persist` written + `sync` before the native `system reboot`, re-read after it (`PERSIST_OK`, `/opt ext4`, opkg, native bash, `MARK42`), `sync` again, **QEMU monitor `system_reset`**, third boot with 4 VPE to `system ready`, and both `/opt/etc/.lab-persist` and `/opt/.lab-marker` unchanged after the reset; the native reboot and the QEMU reset are separate events in the guest log (only one `reboot: Restarting system` line, boot 3 follows the monitor reset without any init-shutdown lines); derived by `derive_persistence_gate` (`native_reboot_then_qemu_reset_opt_config_persisted`); evidence: `lab/mt7621/evidence/ported-mt7621-entware-persistence-20261115/` |
 
-Totals: **18 PASS / 1 NOT_TESTED** of 19 gates (aggregate outcome BLOCKED while any
-gate is not PASS).  Hardware acceptance (physical MT7621AT, full 4-VPE
+Totals: **19 PASS / 0 NOT_TESTED** of 19 gates when the two independent
+Stage C guest reports and all other required evidence are supplied to
+the aggregator (aggregate outcome PASS). Omitting any native evidence
+still leaves that gate NOT_TESTED and the aggregate BLOCKED.  Hardware acceptance (physical MT7621AT, full 4-VPE
 profile) is a separate acceptance criterion and is not covered by
 virtual evidence.  Native gates (`MT7621_OPENWRT_BOOT`, `MT7621_REBOOT`,
 `PORTED_KERNEL_BOOT`, `PORTED_KERNEL_SMP_4VPE`, `PORTED_USERSPACE_READY`,
@@ -345,10 +347,43 @@ Sanitized evidence:
 
 Honest scope: this cycle validates `MIPSEL_SERVICE_RESTART` only.  It
 does **not** independently prove post-boot `rc.unslung` autostart
-(`MIPSEL_PERSISTENCE`, Draft PR #84, stays separate and NOT_TESTED), the
+(`MIPSEL_PERSISTENCE` separately proved by the 47-step PR #84 guest cycle), the
 probe service itself is not installed across the reboot (start happens
 post-boot, stop happens before the run ends), and the restart was of the
 probe service only — Dropbear itself was never restarted.
+
+### The Stage C persistence guest cycle (2026-11-15, Issue #81 / PR #84): native reboot + QEMU reset
+
+After the validated MIPSel-only optional TZ GET skip (merged PR #83),
+the Stage C persistence scenario is `lab/scenarios/ported-mt7621-entware-persistence.json`
+(**47 steps**). One isolated guest cycle on 2026-11-15 (tested source SHA
+`4f831934`, CI 4/4 green) ran it to **PASS 47/47, 797.19 s**: a non-secret
+`PERSIST_OK` file under `/opt/etc` written + `sync`ed before the native
+`system reboot`, re-read after that reboot together with `/opt ext4`, native
+`opkg` and native `bash`, then `sync`, a **distinct** QEMU monitor
+`system_reset` (runner action `reset`; console EOF is marked before the
+monitor command), a third boot with 4 VPE to `system ready`, and both
+`/opt/etc/.lab-persist` and `/opt/.lab-marker` unchanged after the reset.
+The two reset events are separate in the guest log: exactly one
+`reboot: Restarting system` line (between boots 1 and 2), and boot 3 follows
+the monitor reset with no init-shutdown lines at all. The full UART scan
+found zero crash-pattern hits (no SIGSEGV/do_page_fault/oops/panic and no
+`mtdoops_proc` false positives in this log, 0 wget/busybox errors).
+`MIPSEL_PERSISTENCE` is derived `PASS` (`native_reboot_then_qemu_reset_opt_config_persisted`)
+by `derive_persistence_gate` from the real report — no manual gate override.
+
+Sanitized evidence: `lab/mt7621/evidence/ported-mt7621-entware-persistence-20261115/`.
+
+Honest scope: **actual `rc.unslung` service autostart is still NOT_TESTED.**
+The log shows ndm applying the setting once per boot (`configured init
+script: /opt/etc/init.d/rc.unslung` ×3), but no 47-step probe observes a
+live Entware service after boot 2 or boot 3 — the bash/opkg checks prove
+package and data persistence, not autostart. Issue #81 needs a separate
+cycle with a persistent init script writing a boot marker (or a live
+service probe) right after `system ready` to measure it directly.
+Keep NAND, firmware, root credentials and the full UART private. Do not
+substitute standard GitHub CI (which tests scenario contracts but does
+not execute this private guest) for Stage C acceptance.
 
 ## Gate aggregation
 
@@ -362,10 +397,12 @@ python3 lab/mt7621/mt7621_gates.py --report-dir work/reports/mt7621-gates \
   --cli-report work/reports/ported-mt7621-cli/report.json \
   --service-scenario lab/scenarios/ported-mt7621-entware-service-restart.json \
   --service-report work/reports/ported-mt7621-service/report.json \
+  --persistence-scenario lab/scenarios/ported-mt7621-entware-persistence.json \
+  --persistence-report work/reports/ported-mt7621-persistence/report.json \
   --set MT7621_QEMU_BUILD PASS --reason MT7621_QEMU_BUILD qemu_mipsel_built_from_pinned_source \
   --set PORTED_IMAGE_VALIDATION PASS --reason PORTED_IMAGE_VALIDATION pinned_sha256_and_header_validated \
-  --set MIPSEL_ENTWARE_READY NOT_TESTED --reason MIPSEL_ENTWARE_READY entware_is_next_cycle_after_ndms \
-  --set MIPSEL_PERSISTENCE NOT_TESTED --reason MIPSEL_PERSISTENCE config_persistence_not_scripted \
+  --entware-scenario lab/scenarios/ported-mt7621-entware-tz-skip.json \
+  --entware-report work/reports/ported-mt7621-tz-skip/report.json \
   --set NEGATIVE_IMAGE_REJECT PASS --reason NEGATIVE_IMAGE_REJECT unit_tests_refuse_bad_inputs \
   --set HOST_ISOLATION PASS --reason HOST_ISOLATION offline_wan_loopback_lan_only \
   --set CLEANUP PASS --reason CLEANUP disposable_workspace_removed_after_run

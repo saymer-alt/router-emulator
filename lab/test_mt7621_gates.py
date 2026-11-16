@@ -848,6 +848,126 @@ class ServiceRestartStageCContractTests(unittest.TestCase):
         self.assertEqual(gate["status"], "FAIL")
 
 
+class PersistenceStageCContractTests(unittest.TestCase):
+    """The real guest report is independently stored as evidence; test is a contract."""
+
+    @staticmethod
+    def inputs():
+        import json
+        from pathlib import Path
+        from lab import run as runner
+        folder = Path(__file__).resolve().parents[1] / "lab" / "scenarios"
+        original = runner.load_scenario(str(folder / "ported-mt7621-entware-tz-skip.json"))
+        stage = runner.load_scenario(str(folder / "ported-mt7621-entware-persistence.json"))
+        return original, stage
+
+    @staticmethod
+    def report(steps, name, fail=None):
+        rows = [row(s["action"]) for s in steps]
+        if fail is not None:
+            rows = rows[:fail + 1]
+            rows[-1]["outcome"] = "FAIL"
+        return {"scenario": name, "outcome": "FAIL" if fail is not None else "PASS",
+                "steps": rows}
+
+    def test_committed_stage_c_is_bootstrap_plus_independent_reset(self):
+        original, stage = self.inputs()
+        base, steps = original["steps"], stage["steps"]
+        self.assertEqual(len(base), 33)
+        self.assertEqual(len(steps), 47)
+        self.assertEqual(steps[:21], base[:21])
+        self.assertEqual(steps[22:34], base[21:33])
+        self.assertEqual(sum(s["action"] == "reset" for s in steps), 1)
+        self.assertEqual(steps[-1]["expect"], "MARK42")
+        self.assertEqual(steps[-2]["expect"], "PERSIST_OK")
+
+    def test_real_full_report_can_derive_persistence(self):
+        _, stage = self.inputs()
+        r = self.report(stage["steps"], stage["name"])
+        self.assertEqual(mg.derive_persistence_gate(stage, r)["MIPSEL_PERSISTENCE"]["status"], "PASS")
+
+    def test_original_33_step_report_cannot_fake_stage_c(self):
+        original, _ = self.inputs()
+        r = self.report(original["steps"], original["name"])
+        self.assertEqual(mg.derive_persistence_gate(original, r)["MIPSEL_PERSISTENCE"]["status"], "NOT_TESTED")
+
+    def test_wrong_report_name_fails_closed(self):
+        _, stage = self.inputs()
+        r = self.report(stage["steps"], "wrong")
+        self.assertEqual(mg.derive_persistence_gate(stage, r)["MIPSEL_PERSISTENCE"]["status"], "FAIL")
+
+    def test_missing_native_reboot_read_stays_not_tested(self):
+        import copy
+        _, stage = self.inputs()
+        altered = copy.deepcopy(stage)
+        steps = altered["steps"]
+        matches = [i for i, s in enumerate(steps) if s.get("action") == "ssh"
+                   and s.get("send", "").endswith("cat /opt/etc/.lab-persist")
+                   and " > /opt/etc/.lab-persist" not in s.get("send", "")]
+        self.assertEqual(len(matches), 2)
+        del steps[matches[0]]
+        r = self.report(steps, altered["name"])
+        self.assertEqual(mg.derive_persistence_gate(altered, r)["MIPSEL_PERSISTENCE"]["status"], "NOT_TESTED")
+
+    def test_failure_after_qemu_reset_fails(self):
+        _, stage = self.inputs()
+        r = self.report(stage["steps"], stage["name"], len(stage["steps"]) - 2)
+        self.assertEqual(mg.derive_persistence_gate(stage, r)["MIPSEL_PERSISTENCE"]["status"], "FAIL")
+
+    def test_report_bad_outcome_not_pass(self):
+        _, stage = self.inputs()
+        r = self.report(stage["steps"], stage["name"])
+        r["outcome"] = "BLOCKED"
+        self.assertEqual(mg.derive_persistence_gate(stage, r)["MIPSEL_PERSISTENCE"]["status"], "FAIL")
+
+    def test_unordered_reset_not_pass(self):
+        import copy
+        _, stage = self.inputs()
+        altered = copy.deepcopy(stage)
+        steps = altered["steps"]
+        reset_idx = next(i for i, s in enumerate(steps) if s["action"] == "reset")
+        rst = steps.pop(reset_idx)
+        steps.insert(5, rst)
+        r = self.report(steps, altered["name"])
+        gate = mg.derive_persistence_gate(altered, r)["MIPSEL_PERSISTENCE"]
+        self.assertEqual(gate["status"], "NOT_TESTED")
+
+
+class CombinedStageCGatesTests(unittest.TestCase):
+    """Combining independently verified reports must not drop either gate."""
+
+    @staticmethod
+    def payload(filename):
+        import json
+        from pathlib import Path
+        folder = Path(__file__).resolve().parents[1] / "lab" / "scenarios"
+        candidate = json.loads((folder / filename).read_text(encoding="utf-8"))
+        result = {"scenario": candidate["name"], "outcome": "PASS",
+                  "steps": [row(step["action"]) for step in candidate["steps"]]}
+        return candidate, result
+
+    def test_two_reports_can_pass_independently_in_same_aggregator(self):
+        svc, svc_report = self.payload("ported-mt7621-entware-service-restart.json")
+        per, per_report = self.payload("ported-mt7621-entware-persistence.json")
+        openwrt = scenario(steps=BOOT_STEPS)
+        boot_report = {"scenario": openwrt["name"], "outcome": "PASS",
+                       "steps": [row(x["action"]) for x in openwrt["steps"]]}
+        both = mg.evaluate(openwrt, boot_report,
+                           service_scenario=svc, service_report=svc_report,
+                           persistence_scenario=per, persistence_report=per_report)
+        self.assertEqual(len(both), 19)
+        self.assertEqual(both["MIPSEL_SERVICE_RESTART"]["status"], "PASS")
+        self.assertEqual(both["MIPSEL_PERSISTENCE"]["status"], "PASS")
+        only_service = mg.evaluate(openwrt, boot_report, service_scenario=svc,
+                                   service_report=svc_report)
+        self.assertEqual(only_service["MIPSEL_SERVICE_RESTART"]["status"], "PASS")
+        self.assertEqual(only_service["MIPSEL_PERSISTENCE"]["status"], "NOT_TESTED")
+        only_persist = mg.evaluate(openwrt, boot_report, persistence_scenario=per,
+                                   persistence_report=per_report)
+        self.assertEqual(only_persist["MIPSEL_PERSISTENCE"]["status"], "PASS")
+        self.assertEqual(only_persist["MIPSEL_SERVICE_RESTART"]["status"], "NOT_TESTED")
+
+
 if __name__ == "__main__":
     unittest.main()
 

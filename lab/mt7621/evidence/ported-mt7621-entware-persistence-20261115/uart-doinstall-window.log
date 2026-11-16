@@ -1,0 +1,90 @@
+Bounded UART excerpt: single clean 47-step persistence guest run (Issue #81 / PR #84, 2026-11-15)
+==================================================================================================
+
+Provenance
+----------
+- Scenario: lab/scenarios/ported-mt7621-entware-persistence.json (47 steps)
+- Tested source SHA: 4f831934a3939531ae12bc9e0387a9e4b295636f (PR #84 HEAD, CI 4/4 green)
+- Driver:   lab/mt7621/entware_e2e.py run() path (fresh NAND copy, freshly built ext4
+            image, pinned 25-package mipselsf mirror per lab/entware-mipselsf.lock.json)
+- Result:   PASS 47/47, 797.19 s, failure=None (report.json, same folder)
+- UART:     private console log, 4542 lines, 3 full boot cycles
+            ("Starting kernel" at console lines 31, 1791, 3189)
+- The full UART log stays outside the repository; below are the only excerpted
+  segments (console line numbers from that private log).
+
+Segment 1 - boot 1: doinstall window, TZ skip markers, install completion
+-------------------------------------------------------------------------
+1284: [I] Jan  1 03:02:37 npkg: inflating "mips-installer.tar.gz".
+1285: [I] Jan  1 03:02:39 ndm: Opkg::Manager: /tmp/mnt/11111111-2222-4333-8444-555555555555 initialized.
+1286: [I] Jan  1 03:02:39 ndm: Opkg::Manager: missing initrc "/opt/etc/initrc": no such file or directory, trying default one (/opt/etc/init.d/).
+1287: [I] Jan  1 03:02:40 ndm: Opkg::Manager: /opt/etc/init.d/doinstall: [1/5] Starting "Entware" deployment...
+1384: lab-tz-begin
+1385: lab-tz-skipped
+1386: lab-tz-end
+1387: lab-dropbear-begin
+1388: [I] Jan  1 03:04:21 dropbear[1949]: Running in background
+1389: [5/5] "Entware" installed!
+1390: lab-post-begin
+1391: [I] Jan  1 03:04:23 ndm: Opkg::Manager: configured init script: "/opt/etc/init.d/rc.unslung".
+1392: [I] Jan  1 03:04:23 ndm: Core::System::StartupConfig: saving (http/rci).
+
+(Consecutive lab-tz-begin / lab-tz-skipped / lab-tz-end lines: the optional TZ RCI GET
+is omitted for mipsel, no busybox wget timeout SIGSEGV. dropbear starts inside the
+window; "configured init script" + "saving (http/rci)" close the doinstall window.)
+
+Segment 2 - boot 1 -> boot 2: NATIVE "system reboot" boundary (event 1)
+----------------------------------------------------------------------
+1756: init: 2097 process exited.
+1757: init: SIGKILL sent to all processes.
+1758: init: requesting system reboot...
+1759: reboot: Restarting system
+1760: Machine restart ...
+1762: Boot and Recovery Environment for Embedded Devices
+1791: Starting kernel at 0x813e3e44...
+1793: Linux kernel started.
+
+Segment 3 - boot 2: Entware re-attached from saved config after the native reboot
+---------------------------------------------------------------------------------
+2943: [I] Jan  1 03:04:48 ndm: Opkg::Manager: disk is set to: KASOPT:/.
+2944: [I] Jan  1 03:04:48 ndm: Opkg::Manager: configured init script: "/opt/etc/init.d/rc.unslung".
+2948: [I] Jan  1 03:04:48 ndm: Core::Server: system ready, core startup time is 111 seconds.
+
+(After this boot the SSH probes re-confirmed: /proc/mounts shows "/opt ext4",
+opkg print-architecture -> "mipsel-3.4_kn 200", bash --version ->
+"mipsel-openwrt-linux-gnu", /opt/.lab-marker -> MARK42, /opt/etc/.lab-persist -> PERSIST_OK,
+then "busybox sync" -> SYNC_COMPLETE before the hard reset.  SSH output never reaches
+the UART; those outcomes are evidenced by report.json steps 31-36.)
+
+Segment 4 - boot 2 -> boot 3: QEMU monitor "system_reset" boundary (event 2)
+----------------------------------------------------------------------------
+3180: Booting image from flash bank 0 at 0x180000 ...
+3181:     Image Name:   KN-1913
+3186: Uncompressing LZMA ... done.
+3189: Starting kernel at 0x813e3e44...
+3191: Linux kernel started.
+3192: Linux version 4.9-ndm-5 (t.me/project_athens)
+
+(Scenario step 37 is the runner action "reset": run.py records the console EOF offset
+BEFORE sending "system_reset" via the QEMU monitor, then sends it.  Boot 3 is the
+post-reset cold start: NO init-shutdown lines and NO "reboot: Restarting system" line
+appear between the boot 2 segment and this boot 3 segment - the only native reboot
+line in the entire log is at console line 1759, i.e. the two events are separate.)
+
+Segment 5 - boot 3: Entware re-attached from saved config after the QEMU reset
+------------------------------------------------------------------------------
+4341: [I] Jan  1 03:04:46 ndm: Opkg::Manager: disk is set to: KASOPT:/.
+4342: [I] Jan  1 03:04:46 ndm: Opkg::Manager: configured init script: "/opt/etc/init.d/rc.unslung".
+4346: [I] Jan  1 03:04:46 ndm: Core::Server: system ready, core startup time is 110 seconds.
+
+(After this boot the final SSH probes re-confirmed "/opt ext4", opkg, bash,
+/opt/etc/.lab-persist -> PERSIST_OK and /opt/.lab-marker -> MARK42 - steps 43-47.)
+
+Sanitization notes
+------------------
+- The dropbear child-connection line (quoting the guest-side forwarded address) is
+  deliberately excluded from this excerpt.
+- No credentials, no host paths, no firmware/NAND content: this file contains only
+  console lines already produced by the guest plus provenance.
+- Guest wall-clock shows "Jan 1 03:0x" (no RTC in the emulated board), as in all
+  prior cycles on this stand.
