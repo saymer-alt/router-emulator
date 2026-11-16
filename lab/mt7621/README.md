@@ -458,26 +458,39 @@ configuration.  Steps 0-32 of `lab/scenarios/ported-mt7621-telemt.json`
 are the committed tz-skip clean-Entware baseline verbatim (33/33), so every
 cycle re-proves the whole Entware foundation first.
 
-Two real guest cycles ran (2026-11-16).  Both PASS through step 42:
-clean baseline, host SHA verification of both IPKs (guest originally verified
-only Panel due to checksum-file redirection, corrected in the committed
-scenario but awaiting guest re-run), native
-`opkg install` of telemt 3.5.17-1 and telemt-panel-lite 1.0.0~rc.4-1
-(with `opkg status` version checks), guest ELF SHA of Panel only
-(Core ELF host-verified, guest dual-ELF proof requires rerun), `healthcheck --mode=lab-probe-invalid` -> EXIT 2 with
-the exact upstream text, the malformed-TOML `run` -> EXIT 1 + "unclosed
-table" with no panic, and `telemt start ... && printf TELEMT_STARTED`
-exiting 0.  Cycle 2 then FAILS at step 44 (`DAEMON_PROC_ALIVE`): the
-pidfile's pid has no live `/proc/<pid>/cmdline` within ~2 s of a
-successful daemon start — the Core child dies at/near startup and the
-API never comes up (cycle 1's 45 s of bounded healthcheck failures agree).
-The child's log file lives on the disposable guest-side USB image the
-runner destroys after each run, so the exact crash line is not
-recoverable; with both allowed guest cycles spent, the stage is recorded
-as **BLOCKED** with the ranked hypotheses and the exact instrumented
-next-run recipe (synthetic proxy-secret + `--log-file /dev/console` +
-log-emission step ordering) in
-`lab/mt7621/evidence/ported-mt7621-telemt-20261116/telemt-blocked-diagnosis.md`.
+Three real guest cycles ran (2026-11-16).  Cycles 1-2 (first round) and
+cycle 3 (the instrumented diagnostic round) all PASS through the opkg/CLI
+stages: clean baseline, in-guest dual SHA verification of both IPKs and
+both installed ELFs against the full pins (the round-2 two-printf manifest
+erratum is fixed — ONE printf builds each checksum file, so the guest now
+really verifies BOTH artifacts), native `opkg install` of telemt 3.5.17-1
+and telemt-panel-lite 1.0.0~rc.4-1 with `opkg status` version checks,
+`healthcheck --mode=lab-probe-invalid` -> EXIT 2 with the exact upstream
+text, and the malformed-TOML `run` -> EXIT 1 + "unclosed table" with no
+panic, and `telemt start ...` exiting 0.
+
+Cycle 3 then FAILS at `DAEMON_PROC_ALIVE` — but this time the exact crash
+was captured first: the new FOREGROUND diagnostic step (commit c53237e)
+runs `telemt start --foreground` with stdio attached and dumps the capture
+to the UART before the real daemon start.  The child dies because
+**rand 0.10.2's ThreadRng cannot initialize — the Ported KeeneticOS kernel
+(`Linux version 4.9-ndm-5`) does not expose getrandom(2) (ENOSYS, os error
+89)**, while its `/dev/urandom` driver works ("random: crng init done").
+Both a tokio worker and the main thread panic at
+`rand-0.10.2/src/rngs/thread.rs:163` ~1.5 s after daemonize; stderr goes to
+/dev/null in daemon mode, so the tracing file log ends at the
+"Runtime generation channel closed before API bootstrap" warning and both
+previous cycles' BLOCKED was log-less.  The qemu-user ENOSYS panic
+documented below is the same failure class (there qemu-user does not
+emulate the MIPS getrandom syscall; here the guest kernel itself lacks it).
+The stage stays **BLOCKED**: the fix requires an upstream rand
+getrandom-ENOSYS fallback or a getrandom-capable kernel — neither is
+in scope for pinned IPKs and a pinned firmware; an LD_PRELOAD getrandom
+shim was considered and rejected as a C-ABI fake that would misrepresent
+the platform result.  Full evidence and analysis:
+`lab/mt7621/evidence/ported-mt7621-telemt-20261116/telemt-blocked-diagnosis.md`
+(report-diagnostic.json + junit-diagnostic.xml: 46 rows, 45 PASS, 1 FAIL,
+598.6 s).
 
 MIPSEL_TELEMT (`derive_telemt_gate`) stays outside GATES/NATIVE_GATES —
 the 19 core gates are unchanged, `apply_labels` refuses any `--set` for
@@ -493,13 +506,19 @@ path panics at rand 0.10.2 ThreadRng init (`Function not implemented`,
 os error 89) right after the orchestrator's buffer-budget line — the
 RNG-seeding syscall is unavailable under qemu-user, so the full server
 path cannot be probed host-side (PR #45 never started the server, so this
-was previously invisible).
+was previously invisible).  The diagnostic guest cycle upgraded this from
+a qemu-user-only note to the real-platform root cause: the Ported 4.9-ndm-5
+kernel itself does not expose getrandom(2), so rand 0.10.2-based builds
+cannot start on KeeneticOS MT7621 at all.
 
 Honest scope: real native opkg installation of the experimental pinned
-IPKs on the Ported MT7621 guest is PROVEN; the Core daemon startup inside
-KeeneticOS Ported is BLOCKED pending one instrumented diagnostic run; the
-reboot/rc.unslung autostart stage of the same configuration is NOT_TESTED;
-Panel start/HTTP and the real Telegram upstream remain NOT_TESTED.
+IPKs on the Ported MT7621 guest is PROVEN (three cycles, dual in-guest SHA
+verification now included); the Core daemon startup inside KeeneticOS
+Ported is BLOCKED with a proven root cause (missing getrandom(2) on the
+4.9-ndm-5 kernel, rand 0.10.2 ThreadRng panic) that only an upstream or
+kernel-side fix can remove; the reboot/rc.unslung autostart stage of the
+same configuration is NOT_TESTED; Panel start/HTTP and the real Telegram
+upstream remain NOT_TESTED.
 
 ## Gate aggregation
 

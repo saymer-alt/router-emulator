@@ -1,13 +1,46 @@
-TeleMT MIPSel pinned-IPK guest lab (Issue #91 / Draft PR #93) - BLOCKED diagnosis
-==================================================================================
+TeleMT MIPSel pinned-IPK guest lab (Issue #91 / Draft PR #93) - ROOT CAUSE FOUND, Core BLOCKED
+==============================================================================================
+
+Status update (2026-11-16, diagnostic cycle 3)
+----------------------------------------------
+The assignment's follow-up round asked for the exact reason the daemon child
+dies right after a successful `telemt start`.  The instrumented diagnostic
+cycle (73-step scenario, commit c53237e) captured it.  The child dies because
+the pinned Core 3.5.17 binary cannot initialize its userspace RNG on the
+Ported KeeneticOS kernel:
+
+    thread 'tokio-rt-worker' (864) panicked at
+      /home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/
+      rand-0.10.2/src/rngs/thread.rs:163:17:
+    could not initialize ThreadRng: Function not implemented (os error 89)
+    ...
+    thread 'main' (860) panicked at ... rand-0.10.2/src/rngs/thread.rs:163:17:
+    could not initialize ThreadRng: Function not implemented (os error 89)
+    WARN telemt::api: Runtime generation channel closed before API bootstrap
+
+- os error 89 = ENOSYS: the guest kernel ("Linux version 4.9-ndm-5") does not
+  expose the getrandom(2) syscall.  Its random driver works fine
+  ("random: crng init done" is in the boot log), i.e. /dev/urandom serves
+  entropy, but the syscall rand 0.10.2's ThreadRng requires is not there.
+- The panic is invisible in daemon mode: stderr is redirected to /dev/null
+  by the double-fork, and the tracing file log ends at the channel-closed
+  warning.  It became visible only when the new FOREGROUND diagnostic step
+  ran `telemt start --foreground` with stdio attached.
+- This also retro-explains the qemu-user probe finding from the first round:
+  the same ENOSYS panic class, there caused by qemu-user 10.2.1 not
+  emulating the MIPS getrandom syscall; here the real guest kernel itself
+  lacks it.
+- The failure sequence is identical in all three cycles: `start` exits 0
+  (the parent forks and exits before the child reaches RNG init), the
+  daemonized child panics ~1.5 s later, the pidfile pid has no
+  /proc/<pid>/cmdline, and the API never comes up.
 
 Result line (the required field list)
 -------------------------------------
 - main SHA: 8feaa9cf3930c5c7dfc71e12e6bf24c801c39d57
-- dependent PR SHA: 82adea2 (Draft PR #93 head; all CI checks green there,
-  only the two intentional skips: the cloud guest stage awaiting
-  TELEMT_IPK_TOKEN and the standard release skip)
-- exact IPK SHA+ABI:
+- dependent PR SHA: c53237e (Draft PR #93 head at the diagnostic cycle;
+  unit suite 288 tests green locally and in CI)
+- exact IPK SHA+ABI (unchanged, frozen entware-go artifacts):
     Core  telemt_3.5.17-1_mipsel-3.4.ipk        IPK SHA-256 b8dfbb83380d8f4353151b0de43d8c34ceb2369aea45cb6ddaf3b3089a798e5d
                                                 ELF SHA-256 3efa4a53c1d50bf1b7a0ed6ca7de98201faf0fa2e27eaaf5f1cd589a6bf26063
                                                 ELF32 MIPS LE, dynamic, PT_MIPS_ABIFLAGS.fp_abi=3 (softfloat),
@@ -16,135 +49,74 @@ Result line (the required field list)
                                                 IPK SHA-256 0236dfb076b14b129a6392de49f287838a11aebe7681e092084d4ce87e771e68
                                                 ELF SHA-256 380cb5112b58538eafec9ae9fab27fb22c994fd36ce3130c541c5e11b29a40c8
                                                 ELF32 MIPS LE, static ET_EXEC pure-Go, fp_abi=3
-    Both are frozen CI artifacts of entware-go Draft PR #44, Actions run
-    43742529964 (artifacts verified present on 2026-11-16, never rebuilt).
-- host gates: PASS (STATIC_IPK_CONTRACT_PASS: fail-closed host auditor over
-  both artifacts, agreeing with entware-go's PR #44 preflight; synthetic
-  ELF/IPK negative tests; QEMU-user CLI contract probe; config-acceptance
-  probe "Mask: false" after the fixture change)
-- QEMU MT7621 Entware: PASS - the committed 33-step tz-skip baseline is
-  embedded verbatim as steps 0-32 of the 72-step scenario and passed inside
-  both real guest cycles (clean install, native reboot, boot-2 persistence
-  proofs, 4 VPE)
-- opkg: PASS - both artifact hashes and both ELF payloads passed
-  host-side SHA256 checks; the actual guest installed both IPKs using
-  native opkg and confirmed their package versions. **Evidence correction:**
-  the original two-printf shell commands redirected only the second (Panel)
-  printf into the .sha manifest, so the guest sha256sum -c checked only
-  Panel for the IPK and for the installed ELF. The Core hash was printed
-  but NOT checked in the guest. The guest proof for BOTH hashes is therefore
-  NOT_TESTED in these two cycles, despite the stage PASS markers. The
-  committed scenario has subsequently been fixed; re-execution is required.
-- Core CLI: PASS - the two PR #45 negative contracts on the real guest ELF:
-  healthcheck --mode=lab-probe-invalid -> EXIT 2 with the exact text
-  "Invalid --mode value 'lab-probe-invalid' (supported: liveness, ready)";
-  telemt run with the PR #45 malformed TOML -> EXIT 1 + "unclosed table",
-  no panic.  PASS in BOTH cycles.  NOTE: Core has no supported --version
-  (PR #45: it takes the server path); the ELF-execution proof uses the two
-  proven negative contracts instead.
-- Core process/socket: BLOCKED - see below
+- host gates: PASS (fail-closed IPK/ELF/ABI auditor re-run at cycle start;
+  both pinned artifacts verified again before the guest handoff)
+- QEMU MT7621 Entware: PASS - the committed 33-step tz-skip baseline passed
+  verbatim inside the diagnostic cycle as well (clean install, native
+  reboot, persistence proofs, 4 VPE)
+- opkg: PASS (third consecutive cycle) - loopback mirror delivery, in-guest
+  dual sha256sum -c against both full IPK pins (the two-printf manifest bug
+  found in round 2 is fixed: ONE printf builds expected.sha, so the guest
+  really verified BOTH artifacts this time), native opkg install of both
+  IPKs, opkg status shows telemt 3.5.17-1 and telemt-panel-lite
+  1.0.0~rc.4-1, in-guest dual ELF sha256sum -c against both ELF pins
+  (BINARIES_PINNED).  The round-2 erratum ("guest proof for both hashes NOT
+  TESTED") is now closed.
+- Core CLI: PASS - both PR #45 negative contracts reproduced on the real
+  guest ELF (healthcheck invalid mode EXIT 2 with the exact text; run with
+  malformed TOML EXIT 1 + "unclosed table", no panic)
+- Core process/socket: BLOCKED - root cause PROVEN, see above
 - Panel: opkg install + in-guest ELF pin PASS; `telemt-panel --version`
-  inside the guest NOT_TESTED (no dedicated scenario step in this round;
-  host-side qemu-user probe of the pinned ELF prints
+  inside the guest NOT_TESTED (host-side qemu-user probe prints
   "telemt-panel 1.0.0-rc.4 (lite: memory)" EXIT 0); Panel start/HTTP
-  NOT_TESTED (the Lite binary takes only -config and its config schema is
-  undiscovered research)
-- reboot / rc.unslung autostart: NOT_TESTED (the scenario stops at step 44,
-  before the native reboot; the sourcing-safe S99telemtlab wrapper, the
-  UART marker synchronization and the gate derivation are committed and
-  unit-tested, ready for the next attempt)
+  NOT_TESTED
+- reboot / rc.unslung autostart: NOT_TESTED - the chain cannot pass while
+  the Core child dies at RNG init; the scenario keeps the full reboot +
+  rc.unslung stage (sourcing-safe S99telemtlab wrapper, UART marker sync,
+  gate derivation) ready for an upstream-fixed binary
 - workflow and artifacts: .github/workflows/mt7621-telemt-lab.yml on
-  Draft PR #93 (acquire job pass/skip-documented; guest job activates as
-  soon as the TELEMT_IPK_TOKEN secret with actions:read on
-  saymer-alt/entware-go exists); the pinned artifact source is
-  https://github.com/saymer-alt/entware-go/actions/runs/43742529964
-  (artifact names telemt-core-mipsel-experimental / telemt-panel-lite-
-  mipsel-experimental).  The local guest evidence is this folder:
-  report.json + junit.xml of the diagnostic retry (sanitized: actions,
-  outcomes, timings only). A PASS marker from the original guest checksum
-  stage is NOT proof of two-file guest hashing (manifest fixed afterward).
+  Draft PR #93 (acquire job pass/skip-documented; the guest job activates
+  when the TELEMT_IPK_TOKEN secret exists).  Local guest evidence: this
+  folder's report-diagnostic.json + junit-diagnostic.xml (46 rows, 45 PASS,
+  1 FAIL = the DAEMON_PROC_ALIVE stage, 598.6 s, sanitized: actions,
+  outcomes, timings only).
 
-The BLOCKED stage in detail
----------------------------
-What both real guest cycles prove (report.json rows, all PASS):
-  steps 0-32  clean Entware baseline verbatim (incl. its native reboot)
-  33 APPLET_READY          busybox base64/readlink/wget/sha256sum present
-  34 TELEMT_FILES_READY    S99telemtlab + synthetic config + PR #45 broken
-                           TOML seeded over SSH (chmod 700/600)
-  35 IPKS_DELIVERED        both IPKs downloaded; original manifest only
-                           verified Panel SHA in guest (Core host-pinned).
-  36 OPKG_CORE_OK          native `opkg install /opt/lab/telemt.ipk`,
-                           `opkg status telemt` = Version: 3.5.17-1
-  37 OPKG_PANEL_OK         native `opkg install
-                           /opt/lab/telemt-panel.ipk`, opkg status
-                           = Version: 1.0.0~rc.4-1
-  38 BINARIES_PINNED       installed Panel ELF SHA verified in guest;
-                           Core ELF SHA verified on host only (see erratum).
-  39/40 CLI_REJECTED + text   healthcheck invalid mode EXIT 2, exact stderr
-  41 TOML_REJECTED         run with malformed TOML EXIT 1 + unclosed table,
-                           no panic
-  42 TELEMT_STARTED        `telemt start --log-file /opt/var/log/
-                           telemt-lab.log --pid-file /opt/var/run/
-                           telemt-lab.pid /opt/etc/telemt-lab.toml` exits 0
-  43 DAEMON_PROC_ALIVE     FAIL (cycle 2, ssh_exit_nonzero_1, 0.69 s):
-                           the pidfile's pid has NO live /proc/<pid>/cmdline
-                           within ~2 s of a successful daemon start
+Why the root cause cannot be fixed inside this task
+---------------------------------------------------
+1. The IPKs are frozen experimental artifacts (entware-go run 43742529964);
+   rebuilding them with a rand fix would break the SHA pins and is excluded
+   by the assignment.
+2. The firmware is a pinned Ported image; replacing the kernel to gain
+   getrandom(2) would change the platform under test.
+3. Upstream (telemt/telemt) would need either a getrandom(2)-ENOSYS
+   fallback (e.g. seed ThreadRng via /dev/urandom when the syscall returns
+   ENOSYS) or a kernel requirement note for KeeneticOS targets.  That is
+   outside this repository and this task.
+4. An LD_PRELOAD getrandom shim was considered and rejected: it would fake
+   a libc symbol to produce a green marker, which the task rules exclude
+   ("no C-ABI fakes"); a PASS claim under such a shim would misrepresent
+   the platform result.
 
-Cycle 1 additionally proved: the bounded liveness healthcheck (20 x 2 s)
-never observed a working API (45 s of failures) - consistent with the
-child dying at/near startup, which cycle 2 then pinned directly.
-
-Why the exact crash point is unknown: the daemon child redirects
-stdio to /dev/null and logs to /opt/var/log/telemt-lab.log (CLI docs);
-that file lived in the guest-side disposable USB image which the runner
-rmtree's after every run.  Both cycles' copies are destroyed; the UART
-contains no daemon output (it never reached a console-emitting stage).
-The task budget allows at most one full guest re-run after a proven
-fixture fix; both cycles are used, so guest testing STOPS here and this
-is the diagnostic handoff.
-
-Ranked root-cause hypotheses (upstream source, telemt/telemt @ main):
-  1. Proxy-secret acquisition.  general.proxy_secret_path defaults to the
-     relative "proxy-secret"; fetch_proxy_secret_with_upstream() tries
-     https://core.telegram.org/getProxySecret FIRST, then falls back to
-     the file.  With me2dc_fallback=true (default) a total failure is NOT
-     fatal ("falling back to direct mode"), so this alone should not kill
-     the child - but the offline download attempt and any ME startup
-     sequencing remain the prime suspect for a hang/abort interaction.
-     NEXT-RUN FIX: seed a synthetic 16-byte secret and set an absolute
-     proxy_secret_path (no real Telegram material involved).
-  2. quota_state durable publication ("Initial durable publication must
-     also succeed before startup can complete") - default path
-     "telemt.limit.json" resolves against the daemon's cwd, which is "/"
-     after daemonize (chdir("/") in the double-fork); root-writable, but
-     an fs-permission/atomic-replace quirk on / is possible.
-  3. tls_emulation cache init (tls_front_dir "tlsfront", relative -> "/")
-     with censorship defaults; mask is already disabled in the lab config.
-  4. A qemu-user-only gap (NOT a guest explanation, documented for
-     entware-go): under qemu-mipsel 10.2.1 the server path panics at
-     rand 0.10.2 ThreadRng init ("Function not implemented (os error 89)")
-     right after the "Direct relay buffer budget initialized" line - the
-     RNG seeding syscall is unavailable under qemu-user, so the full
-     server path cannot be probed host-side.  PR #45 never started the
-     server, so this was invisible until this task.
-
-Next-run recipe (one instrumented attempt, no code changes beyond fixtures
-and two step reorderings):
-  1. Add to the seeded fixture set: a synthetic proxy-secret file; config
-     gains proxy_secret_path = "/opt/etc/telemt-lab.secret".
-  2. Start the daemon with --log-file /dev/console so every startup line
-     lands in the private UART (the run keeps a private console log).
-  3. Order: TELEMT_STARTED -> LOG_EMIT (cat the log file AND rely on
-     /dev/console output) -> DAEMON_PROC_ALIVE -> HEALTH_LIVE; whichever
-     stage fails, the UART then names the exact failing component.
-  4. Optionally add a `telemt-panel --version` step (expect
-     "telemt-panel 1.0.0-rc.4 (lite: memory)") - the host-side probe
-     already shows the exact output.
+What the diagnostic cycle changed (c53237e)
+-------------------------------------------
+- fixtures: absolute proxy_secret_path + quota_state_path in the synthetic
+  config (no relative-path variance between foreground and daemon runs); a
+  32-byte synthetic proxy-secret (PROXY_SECRET_MIN_LEN) seeded with an
+  in-guest length guard;
+- scenario step 42 DIAG_CAPTURED: bounded FOREGROUND probe
+  (`telemt start --foreground`, kill -0 polling loop, TERM after 20 s - the
+  guest busybox 1.38 has no timeout applet) capturing tracing output AND
+  the final panic text to stdout + the private UART console BEFORE the real
+  daemon start;
+- log emission moved BEFORE the pid-liveness check (3 s settle), and both
+  failing branches (TELEMT_STARTED, DAEMON_PROC_ALIVE) dump the daemon log
+  to stdout and the UART before exiting nonzero.
 
 Sanitization
 ------------
-report.json and junit.xml contain only step actions/outcomes/timings and
-the scenario name (no credentials, no host paths, no addresses, no UART).
-The private console logs, the mirror cache and the disposable images stay
-outside the repository.  The synthetic secret is generated locally; no
-real Telegram keys, tokens or clients are involved anywhere.
+report-diagnostic.json and junit-diagnostic.xml contain only step actions,
+outcomes and timings plus the scenario name (no credentials, no host paths,
+no addresses, no UART dump).  The private console logs, the mirror cache and
+the disposable images stay outside the repository.  The synthetic secret is
+generated locally; no real Telegram keys, tokens or clients are involved
+anywhere.  Real Telegram upstream remains NOT_TESTED.
