@@ -1,0 +1,379 @@
+{
+ "scenario": "KeeneticOS MT7621 TeleMT MIPSel pinned IPK: Core getfb acceptance, Panel Lite RC4 HTTP lifecycle, Core-Panel loopback integration, native reboot and rc.unslung autostart of both services",
+ "outcome": "PASS",
+ "elapsed_seconds": 900.83,
+ "steps": [
+  {
+   "action": "wait_serial",
+   "outcome": "PASS"
+  },
+  {
+   "action": "wait_serial",
+   "outcome": "PASS"
+  },
+  {
+   "action": "wait_serial",
+   "outcome": "PASS"
+  },
+  {
+   "action": "wait_serial",
+   "outcome": "PASS"
+  },
+  {
+   "action": "wait_serial",
+   "outcome": "PASS"
+  },
+  {
+   "action": "wait_serial",
+   "outcome": "PASS"
+  },
+  {
+   "action": "sleep",
+   "outcome": "PASS"
+  },
+  {
+   "action": "telnet",
+   "outcome": "PASS"
+  },
+  {
+   "action": "telnet",
+   "outcome": "PASS"
+  },
+  {
+   "action": "telnet",
+   "outcome": "PASS"
+  },
+  {
+   "action": "telnet",
+   "outcome": "PASS"
+  },
+  {
+   "action": "wait_serial",
+   "outcome": "PASS"
+  },
+  {
+   "action": "wait_serial",
+   "outcome": "PASS"
+  },
+  {
+   "action": "wait_serial",
+   "outcome": "PASS"
+  },
+  {
+   "action": "wait_serial",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "telnet",
+   "outcome": "PASS"
+  },
+  {
+   "action": "wait_serial",
+   "outcome": "PASS"
+  },
+  {
+   "action": "wait_serial",
+   "outcome": "PASS"
+  },
+  {
+   "action": "wait_serial",
+   "outcome": "PASS"
+  },
+  {
+   "action": "wait_serial",
+   "outcome": "PASS"
+  },
+  {
+   "action": "wait_serial",
+   "outcome": "PASS"
+  },
+  {
+   "action": "wait_serial",
+   "outcome": "PASS"
+  },
+  {
+   "action": "telnet",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "telnet",
+   "outcome": "PASS"
+  },
+  {
+   "action": "wait_serial",
+   "outcome": "PASS"
+  },
+  {
+   "action": "wait_serial",
+   "outcome": "PASS"
+  },
+  {
+   "action": "wait_serial",
+   "outcome": "PASS"
+  },
+  {
+   "action": "wait_serial",
+   "outcome": "PASS"
+  },
+  {
+   "action": "wait_serial",
+   "outcome": "PASS"
+  },
+  {
+   "action": "wait_serial",
+   "outcome": "PASS"
+  },
+  {
+   "action": "wait_serial",
+   "outcome": "PASS"
+  },
+  {
+   "action": "wait_serial",
+   "outcome": "PASS"
+  },
+  {
+   "action": "wait_serial",
+   "outcome": "PASS"
+  },
+  {
+   "action": "telnet",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  }
+ ]
+}
