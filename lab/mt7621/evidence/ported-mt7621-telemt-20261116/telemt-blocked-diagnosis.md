@@ -26,12 +26,15 @@ Result line (the required field list)
   embedded verbatim as steps 0-32 of the 72-step scenario and passed inside
   both real guest cycles (clean install, native reboot, boot-2 persistence
   proofs, 4 VPE)
-- opkg: PASS - the two pinned IPKs were delivered over the loopback-only
-  mirror (192.168.1.100 guestfwd), SHA-verified IN THE GUEST against the
-  full pins, installed with the guest's own native opkg; opkg status shows
-  telemt 3.5.17-1 and telemt-panel-lite 1.0.0~rc.4-1; the installed
-  binaries' in-guest sha256sums match both ELF pins (BINARIES_PINNED).
-  PASS in BOTH cycles.
+- opkg: PASS - both artifact hashes and both ELF payloads passed
+  host-side SHA256 checks; the actual guest installed both IPKs using
+  native opkg and confirmed their package versions. **Evidence correction:**
+  the original two-printf shell commands redirected only the second (Panel)
+  printf into the .sha manifest, so the guest sha256sum -c checked only
+  Panel for the IPK and for the installed ELF. The Core hash was printed
+  but NOT checked in the guest. The guest proof for BOTH hashes is therefore
+  NOT_TESTED in these two cycles, despite the stage PASS markers. The
+  committed scenario has subsequently been fixed; re-execution is required.
 - Core CLI: PASS - the two PR #45 negative contracts on the real guest ELF:
   healthcheck --mode=lab-probe-invalid -> EXIT 2 with the exact text
   "Invalid --mode value 'lab-probe-invalid' (supported: liveness, ready)";
@@ -58,7 +61,8 @@ Result line (the required field list)
   (artifact names telemt-core-mipsel-experimental / telemt-panel-lite-
   mipsel-experimental).  The local guest evidence is this folder:
   report.json + junit.xml of the diagnostic retry (sanitized: actions,
-  outcomes, timings only).
+  outcomes, timings only). A PASS marker from the original guest checksum
+  stage is NOT proof of two-file guest hashing (manifest fixed afterward).
 
 The BLOCKED stage in detail
 ---------------------------
@@ -67,17 +71,15 @@ What both real guest cycles prove (report.json rows, all PASS):
   33 APPLET_READY          busybox base64/readlink/wget/sha256sum present
   34 TELEMT_FILES_READY    S99telemtlab + synthetic config + PR #45 broken
                            TOML seeded over SSH (chmod 700/600)
-  35 IPKS_DELIVERED        both IPKs wget'd from the loopback mirror and
-                           sha256sum -c verified IN THE GUEST against the
-                           full pins
+  35 IPKS_DELIVERED        both IPKs downloaded; original manifest only
+                           verified Panel SHA in guest (Core host-pinned).
   36 OPKG_CORE_OK          native `opkg install /opt/lab/telemt.ipk`,
                            `opkg status telemt` = Version: 3.5.17-1
   37 OPKG_PANEL_OK         native `opkg install
                            /opt/lab/telemt-panel.ipk`, opkg status
                            = Version: 1.0.0~rc.4-1
-  38 BINARIES_PINNED       in-guest sha256sum -c of the installed
-                           /opt/bin/telemt and /opt/bin/telemt-panel
-                           against both ELF pins
+  38 BINARIES_PINNED       installed Panel ELF SHA verified in guest;
+                           Core ELF SHA verified on host only (see erratum).
   39/40 CLI_REJECTED + text   healthcheck invalid mode EXIT 2, exact stderr
   41 TOML_REJECTED         run with malformed TOML EXIT 1 + unclosed table,
                            no panic

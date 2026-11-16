@@ -459,10 +459,12 @@ are the committed tz-skip clean-Entware baseline verbatim (33/33), so every
 cycle re-proves the whole Entware foundation first.
 
 Two real guest cycles ran (2026-11-16).  Both PASS through step 42:
-clean baseline, in-guest SHA verification of both IPKs, native
+clean baseline, host SHA verification of both IPKs (guest originally verified
+only Panel due to checksum-file redirection, corrected in the committed
+scenario but awaiting guest re-run), native
 `opkg install` of telemt 3.5.17-1 and telemt-panel-lite 1.0.0~rc.4-1
-(with `opkg status` version checks), in-guest ELF SHA pins for both
-installed binaries, `healthcheck --mode=lab-probe-invalid` -> EXIT 2 with
+(with `opkg status` version checks), guest ELF SHA of Panel only
+(Core ELF host-verified, guest dual-ELF proof requires rerun), `healthcheck --mode=lab-probe-invalid` -> EXIT 2 with
 the exact upstream text, the malformed-TOML `run` -> EXIT 1 + "unclosed
 table" with no panic, and `telemt start ... && printf TELEMT_STARTED`
 exiting 0.  Cycle 2 then FAILS at step 44 (`DAEMON_PROC_ALIVE`): the

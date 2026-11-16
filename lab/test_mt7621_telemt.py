@@ -270,6 +270,13 @@ class CommittedScenarioContractTests(unittest.TestCase):
         self.assertIn(tl.CORE_IPK_SHA, send)
         self.assertIn(tl.PANEL_IPK_SHA, send)
         self.assertIn("sha256sum -c expected.sha", send)
+        # These two pins must be emitted by ONE printf redirected to the
+        # manifest, not by two commands where only the second is redirected.
+        self.assertIn(
+            "printf '%s  %s\\n' '" + tl.CORE_IPK_SHA +
+            "' telemt.ipk '" + tl.PANEL_IPK_SHA +
+            "' telemt-panel.ipk > /opt/lab/expected.sha", send)
+        self.assertEqual(send.count("printf '%s  %s\\n'"), 1)
 
     def test_opkg_and_elf_pin_steps_are_native_and_pinned(self):
         _, stage = self.inputs()
@@ -282,6 +289,12 @@ class CommittedScenarioContractTests(unittest.TestCase):
         pinned = stage["steps"][38]["send"]
         self.assertIn(tl.CORE_ELF_SHA, pinned)
         self.assertIn(tl.PANEL_ELF_SHA, pinned)
+        self.assertIn(
+            "printf '%s  %s\\n' '" + tl.CORE_ELF_SHA +
+            "' /opt/bin/telemt '" + tl.PANEL_ELF_SHA +
+            "' /opt/bin/telemt-panel > /opt/lab/elf.sha", pinned)
+        self.assertEqual(pinned.count("printf '%s  %s\\n'"), 1)
+        self.assertIn("sha256sum -c /opt/lab/elf.sha", pinned)
 
     def test_negative_cli_probes_check_exit_codes_and_exact_text(self):
         _, stage = self.inputs()
