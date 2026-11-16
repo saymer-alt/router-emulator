@@ -24,3 +24,8 @@ whitelist = ["127.0.0.1/32"]
 
 [access.users]
 lab = "00000000000000000000000000000000"
+
+[censorship]
+# The isolated lab guest has no WAN: masking would relay unrecognized
+# connections to the default public mask host, so it is disabled here.
+mask = false

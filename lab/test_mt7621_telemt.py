@@ -243,7 +243,7 @@ class CommittedScenarioContractTests(unittest.TestCase):
     def test_baseline_is_verbatim_and_chain_is_complete(self):
         baseline, stage = self.inputs()
         self.assertEqual(len(baseline["steps"]), 33)
-        self.assertEqual(len(stage["steps"]), 70)
+        self.assertEqual(len(stage["steps"]), 72)
         self.assertEqual(stage["steps"][:33], baseline["steps"][:33])
 
     def test_seed_step_carries_all_three_fixture_payloads(self):
@@ -297,9 +297,21 @@ class CommittedScenarioContractTests(unittest.TestCase):
         self.assertIn("grep -q 'unclosed table'", toml)
         self.assertIn("grep -qi 'panicked'", toml)
 
+    def test_daemon_liveness_and_log_emit_steps_precede_the_health_probe(self):
+        _, stage = self.inputs()
+        alive = stage["steps"][43]["send"]
+        self.assertIn("cat /opt/var/run/telemt-lab.pid", alive)
+        self.assertIn("[ -r /proc/$pid/cmdline ]", alive)
+        self.assertEqual(stage["steps"][43]["expect"], "DAEMON_PROC_ALIVE")
+        emit = stage["steps"][44]["send"]
+        # The daemon log goes to the private UART for post-mortem diagnosis;
+        # the step passes whether or not the log exists.
+        self.assertIn("cat /opt/var/log/telemt-lab.log > /dev/console", emit)
+        self.assertEqual(stage["steps"][44]["expect"], "LOG_(EMITTED|ABSENT)")
+
     def test_proc_scan_cannot_match_its_own_command_line(self):
         _, stage = self.inputs()
-        scan = stage["steps"][65]["send"]
+        scan = stage["steps"][67]["send"]
         # The concatenation-built needle cannot appear contiguously in the
         # scanner's own command text (guest runs each SSH send via sh -c).
         self.assertIn('"/opt/etc/telemt-lab.""toml"', scan)
@@ -308,7 +320,7 @@ class CommittedScenarioContractTests(unittest.TestCase):
 
     def test_identity_proofs_use_proc_exe_not_pidfile_echoes(self):
         _, stage = self.inputs()
-        for index in (44, 64):
+        for index in (46, 66):
             send = stage["steps"][index]["send"]
             self.assertIn("readlink /proc/$pid/exe", send)
             self.assertIn("/proc/$pid/cmdline", send)
@@ -384,7 +396,7 @@ class TelemtGateContractTests(unittest.TestCase):
     def test_chain_failure_is_fail(self):
         _, s = self.inputs()
         gate = mg.derive_telemt_gate(
-            s, self.report(s, failed=45))["MIPSEL_TELEMT"]
+            s, self.report(s, failed=47))["MIPSEL_TELEMT"]
         self.assertEqual(gate["status"], "FAIL")
         self.assertEqual(gate["reason"], "telemt_chain_step_failed")
 

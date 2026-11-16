@@ -693,6 +693,7 @@ def derive_telemt_gate(scenario, report):
     cli = positions("CLI_REJECTED", "healthcheck")
     toml = positions("TOML_REJECTED", "broken-telemt.toml")
     started = positions("TELEMT_STARTED", "telemt start")
+    daemon_alive = positions("DAEMON_PROC_ALIVE", "/proc/$pid/cmdline")
     health1 = positions("HEALTH_LIVE", "healthcheck --mode liveness")
     pid1 = positions("PID_ALIVE", "/proc/$pid/exe")
     sockets = positions("SOCKETS_LISTENING", "/proc/net/tcp")
@@ -729,6 +730,7 @@ def derive_telemt_gate(scenario, report):
     if not (len(applet) == 1 and len(seed) == 1 and len(delivered) == 1
             and len(core) == 1 and len(panel) == 1 and len(pinned) == 1
             and len(cli) == 1 and len(toml) == 1 and len(started) == 1
+            and len(daemon_alive) == 1
             and len(health1) == 1 and len(pid1) == 1 and len(sockets) == 1
             and len(stable) == 1 and len(stopped) == 1 and len(down) == 1
             and len(restart) == 1 and len(restart_health) == 1 and len(off) == 1
@@ -741,11 +743,11 @@ def derive_telemt_gate(scenario, report):
     # pre-reboot off state, the second native reboot, the UART autostart
     # marker, then the boot-3 proofs — a stale or reordered chain is not PASS.
     ordered = (ready[0], initrc[0], applet[0], seed[0], delivered[0], core[0],
-               panel[0], pinned[0], cli[0], toml[0], started[0], health1[0],
-               pid1[0], sockets[0], stable[0], stopped[0], down[0], restart[0],
-               restart_health[0], off[0], reboot[1], initrc[1], ready[2],
-               echo2[0], mounts[1], autohealth[0], autopid[0], single[0],
-               persisted[0], gen2[0], pids[0], sync[0])
+               panel[0], pinned[0], cli[0], toml[0], started[0], daemon_alive[0],
+               health1[0], pid1[0], sockets[0], stable[0], stopped[0], down[0],
+               restart[0], restart_health[0], off[0], reboot[1], initrc[1],
+               ready[2], echo2[0], mounts[1], autohealth[0], autopid[0],
+               single[0], persisted[0], gen2[0], pids[0], sync[0])
     if any(a >= b for a, b in zip(ordered, ordered[1:])):
         return {"MIPSEL_TELEMT": _gate("NOT_TESTED", "telemt_chain_not_ordered")}
     if first_fail is None:
