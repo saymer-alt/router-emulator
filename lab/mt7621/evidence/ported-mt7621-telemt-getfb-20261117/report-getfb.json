@@ -1,0 +1,303 @@
+{
+ "scenario": "KeeneticOS MT7621 TeleMT MIPSel pinned IPK opkg install, local Core run, native reboot and rc.unslung autostart",
+ "outcome": "PASS",
+ "elapsed_seconds": 825.84,
+ "steps": [
+  {
+   "action": "wait_serial",
+   "outcome": "PASS"
+  },
+  {
+   "action": "wait_serial",
+   "outcome": "PASS"
+  },
+  {
+   "action": "wait_serial",
+   "outcome": "PASS"
+  },
+  {
+   "action": "wait_serial",
+   "outcome": "PASS"
+  },
+  {
+   "action": "wait_serial",
+   "outcome": "PASS"
+  },
+  {
+   "action": "wait_serial",
+   "outcome": "PASS"
+  },
+  {
+   "action": "sleep",
+   "outcome": "PASS"
+  },
+  {
+   "action": "telnet",
+   "outcome": "PASS"
+  },
+  {
+   "action": "telnet",
+   "outcome": "PASS"
+  },
+  {
+   "action": "telnet",
+   "outcome": "PASS"
+  },
+  {
+   "action": "telnet",
+   "outcome": "PASS"
+  },
+  {
+   "action": "wait_serial",
+   "outcome": "PASS"
+  },
+  {
+   "action": "wait_serial",
+   "outcome": "PASS"
+  },
+  {
+   "action": "wait_serial",
+   "outcome": "PASS"
+  },
+  {
+   "action": "wait_serial",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "telnet",
+   "outcome": "PASS"
+  },
+  {
+   "action": "wait_serial",
+   "outcome": "PASS"
+  },
+  {
+   "action": "wait_serial",
+   "outcome": "PASS"
+  },
+  {
+   "action": "wait_serial",
+   "outcome": "PASS"
+  },
+  {
+   "action": "wait_serial",
+   "outcome": "PASS"
+  },
+  {
+   "action": "wait_serial",
+   "outcome": "PASS"
+  },
+  {
+   "action": "wait_serial",
+   "outcome": "PASS"
+  },
+  {
+   "action": "telnet",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "telnet",
+   "outcome": "PASS"
+  },
+  {
+   "action": "wait_serial",
+   "outcome": "PASS"
+  },
+  {
+   "action": "wait_serial",
+   "outcome": "PASS"
+  },
+  {
+   "action": "wait_serial",
+   "outcome": "PASS"
+  },
+  {
+   "action": "wait_serial",
+   "outcome": "PASS"
+  },
+  {
+   "action": "wait_serial",
+   "outcome": "PASS"
+  },
+  {
+   "action": "wait_serial",
+   "outcome": "PASS"
+  },
+  {
+   "action": "wait_serial",
+   "outcome": "PASS"
+  },
+  {
+   "action": "wait_serial",
+   "outcome": "PASS"
+  },
+  {
+   "action": "telnet",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  },
+  {
+   "action": "ssh",
+   "outcome": "PASS"
+  }
+ ]
+}

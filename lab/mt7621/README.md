@@ -520,6 +520,38 @@ kernel-side fix can remove; the reboot/rc.unslung autostart stage of the
 same configuration is NOT_TESTED; Panel start/HTTP and the real Telegram
 upstream remain NOT_TESTED.
 
+### TeleMT getrandom-fallback cycle (2026-11-17, Issue #49 / PR #95): Core daemon VERIFIED — 74/74 PASS
+
+The getfb research branch supersedes the round-2 conclusion above: the
+in-guest kernel-fact probe proved the Ported `4.9-ndm-5` kernel **does**
+implement getrandom(2) (o32 syscall 4353 returns 32 bytes via the generic
+libc `syscall()` wrapper AND raw `asm("syscall")`), while **Entware's glibc
+2.27 `getrandom()` symbol is an ENOSYS stub** (built against kernel-3.4-era
+headers) — and that symbol is exactly what `rand 0.10.2` → getrandom 0.4.3 →
+`libc::getrandom` reaches.  The fix (entware-go Draft PR #50): three
+checksum-verified getrandom forks (0.4.3/0.3.4/0.2.17) whose backends
+dlsym-probe `getrandom`, land on the glibc stub's ENOSYS, and take upstream's
+reviewed `/dev/urandom` fallback (POLLIN readiness barrier, EINTR/partial
+handling, fail-closed) — routed ONLY for Linux/MIPS/gnu, fallback on ENOSYS
+only.  The new experimental Core IPK `telemt_3.5.17-2fb1_mipsel-3.4.ipk`
+(`2c8a84fb…`, ELF `d4ba4381…`, softfloat `/opt/lib/ld.so.1`, GLIBC ≤ 2.25)
+passed the full real-guest cycle on the separate branch/pins (Draft PR #95,
+issue #49 task 5): 74/74 PASS in 825.84 s — baseline 33/33, dual in-guest
+SHA of both IPKs and ELFs, native opkg, CLI contracts, kernel-fact probe,
+foreground diagnostic (fixed binary alive through the bounded window),
+daemon start, `DAEMON_PROC_ALIVE`, loopback `HEALTH_LIVE`
+(API `127.0.0.1:9091`, mtproxy `127.0.0.1:3443`), `/proc/$pid/exe` identity,
+listening sockets, 10 s stability, SIGTERM stop, restart, native reboot and
+rc.unslung autostart (`telemtlab-start gen=2` on the UART with full
+health/pid/single-instance/persisted-version proofs).  Evidence:
+`lab/mt7621/evidence/ported-mt7621-telemt-getfb-20261117/getfb-verification.md`.
+Second upstream finding (documented, not patched): `telemt stop` needs
+`pidfd_open(2)` (kernel ≥ 5.3) in `signal_pid_file()`, so it can never
+deliver SIGTERM on the 4.9 guest — the lab stop stage and the lab init
+fixture use the identical SIGTERM via plain `kill(2)` and verify the
+graceful tokio shutdown.  Telegram upstream and Panel HTTP remain
+NOT_TESTED; nothing merged, nothing released.
+
 ## Gate aggregation
 
 ```bash
