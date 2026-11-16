@@ -34,6 +34,8 @@ jobs:
     name: Acquire pinned experimental IPKs (requires TELEMT_IPK_TOKEN)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    env:
+      TELEMT_TOKEN: ${{ secrets.TELEMT_IPK_TOKEN }}
     outputs:
       acquired: ${{ steps.gate.outputs.acquired }}
     steps:
@@ -42,7 +44,7 @@ jobs:
           persist-credentials: false
       - name: Gate on the pinned-artifact token
         id: gate
-        if: ${{ secrets.TELEMT_IPK_TOKEN != '' }}
+        if: env.TELEMT_TOKEN != ''
         run: echo "acquired=true" >> "$GITHUB_OUTPUT"
       - name: Download the two frozen artifacts and verify every pin
         if: steps.gate.outputs.acquired == 'true'
