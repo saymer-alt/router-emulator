@@ -92,6 +92,7 @@ jobs:
           python3 lab/run.py --emulator-root . \
             --scenario lab/scenarios/ported-mt7621-52-ext-utils.json \
             --preset xiaomi-mi-router-3g-breed \
+            --lan-forwards "8080:80;8023:23" \
             --nand-dir "$RUNNER_TEMP/ported52-nand" \
             --output-dir "$RUNNER_TEMP/ported52-report" --max-seconds 1800
       - name: Report sanitized count only
