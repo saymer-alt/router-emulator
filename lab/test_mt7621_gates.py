@@ -968,6 +968,215 @@ class CombinedStageCGatesTests(unittest.TestCase):
         self.assertEqual(only_persist["MIPSEL_SERVICE_RESTART"]["status"], "NOT_TESTED")
 
 
+class AutostartStageCContractTests(unittest.TestCase):
+    """No guest execution here: tests validate proof requirements only.
+
+    The autostart gate accepts a report only when the committed scenario
+    proves the pinned rc.unslung started the probe in two separate post-reboot
+    boots (native reboot, then a distinct QEMU monitor reset): a boot
+    generation of exactly 1 then exactly 2, a live sleep-3600 worker identified
+    via /proc/<pid>/cmdline in each boot (a stale pidfile cannot fake it), no
+    worker before the native reboot, and the probe file still executable.
+    """
+
+    @staticmethod
+    def inputs():
+        from pathlib import Path
+        from lab import run as runner
+        folder = Path(__file__).resolve().parents[1] / "lab" / "scenarios"
+        baseline = runner.load_scenario(
+            str(folder / "ported-mt7621-entware-tz-skip.json"))
+        stage = runner.load_scenario(
+            str(folder / "ported-mt7621-entware-autostart.json"))
+        return baseline, stage
+
+    @staticmethod
+    def report(data, failed=None, outcome=None):
+        rows = [row(s["action"]) for s in data["steps"]]
+        if failed is not None:
+            rows = rows[:failed + 1]
+            rows[-1]["outcome"] = "FAIL"
+        return {"scenario": data["name"],
+                "outcome": outcome or ("FAIL" if failed is not None else "PASS"),
+                "steps": rows}
+
+    def test_committed_probe_fixture_matches_seeded_encoded_probe(self):
+        import base64
+        from pathlib import Path
+        baseline, stage = self.inputs()
+        self.assertEqual(len(baseline["steps"]), 33)
+        self.assertEqual(len(stage["steps"]), 59)
+        # Boot 1 up to the persistence marker is the committed baseline;
+        # the native reboot of the baseline then triggers the autostart.
+        self.assertEqual(stage["steps"][:21], baseline["steps"][:21])
+        self.assertEqual(stage["steps"][24]["send"][0], "admin")
+        seed = stage["steps"][22]["send"]
+        self.assertTrue(seed.startswith("printf '%s' '"))
+        encoded = seed.split("'", 4)[3]
+        decoded = base64.b64decode(encoded, validate=True)
+        fixture = (Path(__file__).resolve().parents[1] / "lab" / "mt7621"
+                   / "fixtures" / "S99labboot").read_bytes()
+        self.assertEqual(decoded, fixture.replace(b"\r\n", b"\n"))
+        # rc.unslung (opt-ndmsv2 1.0-17) sources every executable S* script
+        # in one shell: the probe must not change shell options or exit,
+        # and must never touch real firmware services.
+        self.assertNotIn(b"set -e", fixture)
+        self.assertNotIn(b"S51dropbear", fixture)
+        self.assertIn(b'labboot_main "$@"', fixture)
+        self.assertIn(b"sleep 3600", fixture)
+        self.assertIn(b"labboot.gen", fixture)
+        self.assertIn(b"/proc/$1/cmdline", fixture)
+        self.assertNotIn(b"exit ", fixture)
+
+    def test_proc_scans_cannot_match_their_own_command_line(self):
+        _, s = self.inputs()
+        scans = [x for x in s["steps"]
+                 if "for p in /proc/[0-9]*" in x.get("send", "")]
+        self.assertEqual(len(scans), 3)
+        for step in scans:
+            # The guest runs every SSH command inline: a scanner whose own
+            # command text contains the contiguous worker literal would
+            # match its own /proc/<pid>/cmdline and report a phantom
+            # worker — the exact first-run divergence (ssh_exit_nonzero_1
+            # at the pre-reboot negative step).
+            self.assertNotIn("sleep 3600", step["send"])
+        # The identity probes read one specific /proc/<pid>/cmdline file
+        # (never their own), so they still match the real worker text.
+        identities = [x for x in s["steps"]
+                      if "/proc/$pid/cmdline" in x.get("send", "")]
+        self.assertEqual(len(identities), 2)
+        for step in identities:
+            self.assertIn("*sleep*3600*", step["send"])
+
+    def test_missing_uart_execution_marker_is_not_tested(self):
+        import copy
+        _, s = self.inputs()
+        changed = copy.deepcopy(s)
+        changed["steps"] = [x for x in changed["steps"]
+                            if not str(x.get("pattern", "")).startswith(
+                                "labboot-autostart gen=")]
+        gate = mg.derive_autostart_gate(changed, self.report(changed))
+        self.assertEqual(gate["MIPSEL_AUTOSTART"]["status"], "NOT_TESTED")
+        self.assertEqual(gate["MIPSEL_AUTOSTART"]["reason"],
+                         "scenario_lacks_autostart_chain")
+
+    def test_complete_guest_report_may_pass(self):
+        _, s = self.inputs()
+        gate = mg.derive_autostart_gate(s, self.report(s))["MIPSEL_AUTOSTART"]
+        self.assertEqual(gate["status"], "PASS")
+        self.assertEqual(gate["reason"],
+                         "native_reboot_then_qemu_reset_service_autostarted")
+
+    def test_wrong_report_name_fails_closed(self):
+        _, s = self.inputs()
+        report = self.report(s)
+        report["scenario"] = "wrong"
+        gate = mg.derive_autostart_gate(s, report)["MIPSEL_AUTOSTART"]
+        self.assertEqual(gate["status"], "FAIL")
+
+    def test_missing_worker_identity_is_not_tested(self):
+        import copy
+        _, s = self.inputs()
+        changed = copy.deepcopy(s)
+        changed["steps"] = [x for x in changed["steps"]
+                            if x.get("expect") != "WORKER_LIVE"]
+        gate = mg.derive_autostart_gate(changed, self.report(changed))
+        self.assertEqual(gate["MIPSEL_AUTOSTART"]["status"], "NOT_TESTED")
+        self.assertEqual(gate["MIPSEL_AUTOSTART"]["reason"],
+                         "scenario_lacks_autostart_chain")
+
+    def test_unchanged_generation_cannot_pass(self):
+        import copy
+        _, s = self.inputs()
+        changed = copy.deepcopy(s)
+        for step in changed["steps"]:
+            if step.get("expect") == "GEN_TWO":
+                step["expect"] = "GEN_ONE"
+        gate = mg.derive_autostart_gate(changed, self.report(changed))
+        self.assertEqual(gate["MIPSEL_AUTOSTART"]["status"], "NOT_TESTED")
+
+    def test_missing_qemu_reset_is_not_tested(self):
+        import copy
+        _, s = self.inputs()
+        changed = copy.deepcopy(s)
+        changed["steps"] = [x for x in changed["steps"]
+                            if x.get("action") != "reset"]
+        gate = mg.derive_autostart_gate(changed, self.report(changed))
+        self.assertEqual(gate["MIPSEL_AUTOSTART"]["status"], "NOT_TESTED")
+
+    def test_missing_preboot_worker_check_is_not_tested(self):
+        import copy
+        _, s = self.inputs()
+        changed = copy.deepcopy(s)
+        changed["steps"] = [x for x in changed["steps"]
+                            if x.get("expect") != "LABBOOT_OFF"]
+        gate = mg.derive_autostart_gate(changed, self.report(changed))
+        self.assertEqual(gate["MIPSEL_AUTOSTART"]["status"], "NOT_TESTED")
+
+    def test_reordered_boot_proofs_are_not_tested(self):
+        import copy
+        _, s = self.inputs()
+        changed = copy.deepcopy(s)
+        steps = changed["steps"]
+        # Swap the boot-2 and boot-3 status proofs: the generation-2 answer
+        # would then be accepted before any QEMU reset happened.
+        steps[39], steps[54] = steps[54], steps[39]
+        gate = mg.derive_autostart_gate(changed, self.report(changed))
+        self.assertEqual(gate["MIPSEL_AUTOSTART"]["status"], "NOT_TESTED")
+        self.assertEqual(gate["MIPSEL_AUTOSTART"]["reason"],
+                         "autostart_chain_not_ordered")
+
+    def test_failure_during_boot2_status_is_fail(self):
+        _, s = self.inputs()
+        gate = mg.derive_autostart_gate(
+            s, self.report(s, failed=39))["MIPSEL_AUTOSTART"]
+        self.assertEqual(gate["status"], "FAIL")
+
+    def test_failure_during_boot3_identity_is_fail(self):
+        _, s = self.inputs()
+        gate = mg.derive_autostart_gate(
+            s, self.report(s, failed=56))["MIPSEL_AUTOSTART"]
+        self.assertEqual(gate["status"], "FAIL")
+
+    def test_prior_boot_failure_is_not_tested(self):
+        _, s = self.inputs()
+        gate = mg.derive_autostart_gate(
+            s, self.report(s, failed=10))["MIPSEL_AUTOSTART"]
+        self.assertEqual(gate["status"], "NOT_TESTED")
+
+    def test_all_pass_rows_with_nonpass_report_is_fail(self):
+        _, s = self.inputs()
+        gate = mg.derive_autostart_gate(
+            s, self.report(s, outcome="BLOCKED"))["MIPSEL_AUTOSTART"]
+        self.assertEqual(gate["status"], "FAIL")
+
+    def test_autostart_gate_stays_outside_the_19_core_gates(self):
+        self.assertNotIn("MIPSEL_AUTOSTART", mg.GATES)
+        self.assertNotIn("MIPSEL_AUTOSTART", mg.NATIVE_GATES)
+        # Not in GATES: apply_labels refuses any controller label for it,
+        # so a PASS can only come from a validated scenario report.
+        with self.assertRaises(ValueError):
+            mg.apply_labels({g: mg._gate("NOT_TESTED", "unattempted")
+                             for g in mg.GATES},
+                            [("MIPSEL_AUTOSTART", "PASS")])
+
+    def test_autostart_report_adds_a_gate_without_changing_the_19(self):
+        _, s = self.inputs()
+        openwrt = scenario(steps=BOOT_STEPS)
+        boot_report = {"scenario": openwrt["name"], "outcome": "PASS",
+                       "steps": [row(x["action"]) for x in openwrt["steps"]]}
+        without = mg.evaluate(openwrt, boot_report)
+        self.assertEqual(len(without), 19)
+        self.assertNotIn("MIPSEL_AUTOSTART", without)
+        gates = mg.evaluate(openwrt, boot_report,
+                            autostart_scenario=s,
+                            autostart_report=self.report(s))
+        self.assertEqual(len(gates), 20)
+        self.assertEqual(gates["MIPSEL_AUTOSTART"]["status"], "PASS")
+        self.assertEqual(gates["MIPSEL_AUTOSTART"]["reason"],
+                         "native_reboot_then_qemu_reset_service_autostarted")
+
+
 if __name__ == "__main__":
     unittest.main()
 

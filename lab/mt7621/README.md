@@ -30,10 +30,14 @@ a Ported NAND assembler and gate aggregation for the MT7621 preset family.
 | MIPSEL_ENTWARE_READY | PASS | `lab/scenarios/ported-mt7621-entware.json` via `lab/mt7621/entware_e2e.py`: full 32-step chain PASS (2026-11-15 diag4) — installer completion, real opkg answers, native `bash --version` (`mipsel-openwrt-linux-gnu`), `DOINSTALL_ABSENT`, `MARK42`, native `system reboot`, post-reboot `/opt ext4` + opkg + bash + marker; derived by `derive_entware_gates` from the report against the committed scenario; re-confirmed 33/33 by the SIGSEGV-free tz-skip cycle (see below) |
 | MIPSEL_SERVICE_RESTART | PASS | `lab/scenarios/ported-mt7621-entware-service-restart.json` via `lab/mt7621/entware_e2e.py`: 40-step chain PASS (2026-11-15, see the service cycle below) — start/status generation 1 with recorded PID, saved pidfile, real restart, status generation 2, on-guest proof of different PID + `kill -0` liveness + counter 2 (`RESTART_VERIFIED`), then stop and cleanup (`LAB_CLEANED`); derived by `derive_service_restart_gate` |
 | MIPSEL_PERSISTENCE | PASS | `lab/scenarios/ported-mt7621-entware-persistence.json` via `lab/mt7621/entware_e2e.py`: 47-step guest cycle PASS (2026-11-15, tested source SHA `4f831934`) — non-secret `/opt/etc/.lab-persist` written + `sync` before the native `system reboot`, re-read after it (`PERSIST_OK`, `/opt ext4`, opkg, native bash, `MARK42`), `sync` again, **QEMU monitor `system_reset`**, third boot with 4 VPE to `system ready`, and both `/opt/etc/.lab-persist` and `/opt/.lab-marker` unchanged after the reset; the native reboot and the QEMU reset are separate events in the guest log (only one `reboot: Restarting system` line, boot 3 follows the monitor reset without any init-shutdown lines); derived by `derive_persistence_gate` (`native_reboot_then_qemu_reset_opt_config_persisted`); evidence: `lab/mt7621/evidence/ported-mt7621-entware-persistence-20261115/` |
+| MIPSEL_AUTOSTART (additional gate, **outside the 19-gate count**) | PASS | `lab/scenarios/ported-mt7621-entware-autostart.json` via `lab/mt7621/entware_e2e.py`: 59-step guest cycle PASS (2026-11-16, tested source SHA `abf9f25`, see the autostart cycle below) — the real `rc.unslung` execution measured as a live process on both a native reboot and a separate QEMU `system_reset`; derived by `derive_autostart_gate` (`native_reboot_then_qemu_reset_service_autostarted`); evidence: `lab/mt7621/evidence/ported-mt7621-entware-autostart-20261116/` |
 
 Totals: **19 PASS / 0 NOT_TESTED** of 19 gates when the two independent
 Stage C guest reports and all other required evidence are supplied to
-the aggregator (aggregate outcome PASS). Omitting any native evidence
+the aggregator (aggregate outcome PASS). `MIPSEL_AUTOSTART` is a separate
+additional gate: it is deliberately outside `GATES`/`NATIVE_GATES`, only
+appears when its own scenario/report pair is supplied, cannot be labelled
+by `--set` at all, and does not change the 19-gate count. Omitting any native evidence
 still leaves that gate NOT_TESTED and the aggregate BLOCKED.  Hardware acceptance (physical MT7621AT, full 4-VPE
 profile) is a separate acceptance criterion and is not covered by
 virtual evidence.  Native gates (`MT7621_OPENWRT_BOOT`, `MT7621_REBOOT`,
@@ -385,6 +389,64 @@ Keep NAND, firmware, root credentials and the full UART private. Do not
 substitute standard GitHub CI (which tests scenario contracts but does
 not execute this private guest) for Stage C acceptance.
 
+### The Stage C autostart guest cycle (2026-11-16, Issue #81 / PR #86): real rc.unslung execution, generation 1 then 2
+
+This closes the remaining Stage C item: PR #85 proved a manually started
+service, PR #84 proved config persistence — neither proved that KeeneticOS
+**executes** the configured Entware init script at boot.  The pinned
+`rc.unslung` was first read verbatim from the committed lock package
+(`opt-ndmsv2_1.0-17_mipsel-3.4_kn.ipk`): it takes `{start|stop|...}`, then
+runs `find /opt/etc/init.d/ -perm -u+x -name 'S*' | sort` and **sources**
+every match in one shell (`. $i $ACTION $CALLER`) — so a boot probe must
+wrap all logic in functions and must not use `set -e/-u` or `exit`.  The
+disposable `lab/mt7621/fixtures/S99labboot` probe starts a `sleep 3600`
+worker, records `/opt/var/run/labboot.pid`, increments a persistent
+`/opt/var/run/labboot.gen` boot-generation marker, echoes
+`labboot-autostart gen=…` to `/dev/console`, and identifies any
+pre-recorded PID via `/proc/<pid>/cmdline` (stale-pidfile/PID-reuse safe).
+
+`lab/scenarios/ported-mt7621-entware-autostart.json` (**59 steps** = the
+tz-skip baseline through `MARK42`, then the autostart chain): the probe is
+seeded on boot 1 with no manual start, a negative step proves no
+pidfile/generation file/worker exists yet (`LABBOOT_OFF`), the baseline
+native `system reboot` is the autostart trigger, each post-reboot boot
+first waits for the probe's **UART execution marker**
+(`labboot-autostart gen=1` / `gen=2`) and only then proves `/opt ext4`,
+`LABBOOT gen=N pid=…`, the generation file exactly 1 then exactly 2, a
+live worker via `/proc/<pid>/cmdline`, exactly one worker, and records
+both PID numerals (`PIDS old new` — never asserted: PID reuse across
+reboots is legal).  One isolated guest cycle on 2026-11-16 (tested source
+SHA `abf9f25`, CI green on that SHA) ran it to **PASS 59/59, 744.57 s**:
+boot 2 console line 3139 `labboot-autostart gen=1 pid=701`, boot 3 console
+line 4551 `labboot-autostart gen=2 pid=702`; ndm mounts the USB disk to
+`/opt` ~26-29 s **after** `system ready` and runs `rc.unslung` right after
+the mount (the marker waits make that asynchronous flow deterministic).
+The two reset events are separate in the guest log (only one
+`reboot: Restarting system` line at 1777; boot 3 follows the monitor reset
+with no init-shutdown lines).  Full UART scan: 6 crash-regex hits, all the
+benign `mtdoops_proc` module-name false positives, no true faults;
+0 wget/critical hits.  `MIPSEL_AUTOSTART` is derived `PASS`
+(`native_reboot_then_qemu_reset_service_autostarted`) by
+`derive_autostart_gate` from the real report — the gate is deliberately
+outside the 19-gate `GATES` tuple (the count is unchanged) and
+`apply_labels` refuses any `--set` for it, so a PASS can only come from a
+validated scenario report.
+
+Two earlier cycles on the same stand are part of the record, both
+precisely diagnosed host-side and fixed with one targeted change each:
+the scanner self-match (an inline SSH command looping over `/proc/[0-9]*`
+with `*sleep*3600*` matched its own command line — fixed by a
+concatenation-built needle and a regression test), and the proof race
+(the SSH probes ran ~1-2 s after the disk mount, ahead of the
+asynchronous `rc.unslung` — fixed by the UART marker waits).
+
+Sanitized evidence: `lab/mt7621/evidence/ported-mt7621-entware-autostart-20261116/`.
+
+Honest scope: this proves the rc.unslung autostart mechanism for a
+disposable probe service in the emulator (one boot-triggered live process
+per boot, generation-tracked).  It does not cover other Entware init
+scripts, service supervision/restart policies, or physical hardware.
+
 ## Gate aggregation
 
 ```bash
@@ -399,6 +461,8 @@ python3 lab/mt7621/mt7621_gates.py --report-dir work/reports/mt7621-gates \
   --service-report work/reports/ported-mt7621-service/report.json \
   --persistence-scenario lab/scenarios/ported-mt7621-entware-persistence.json \
   --persistence-report work/reports/ported-mt7621-persistence/report.json \
+  --autostart-scenario lab/scenarios/ported-mt7621-entware-autostart.json \
+  --autostart-report work/reports/ported-mt7621-autostart/report.json \
   --set MT7621_QEMU_BUILD PASS --reason MT7621_QEMU_BUILD qemu_mipsel_built_from_pinned_source \
   --set PORTED_IMAGE_VALIDATION PASS --reason PORTED_IMAGE_VALIDATION pinned_sha256_and_header_validated \
   --entware-scenario lab/scenarios/ported-mt7621-entware-tz-skip.json \
