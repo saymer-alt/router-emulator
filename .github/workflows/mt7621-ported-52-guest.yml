@@ -1,0 +1,127 @@
+# Separate, pinned real QEMU candidate test: does NOT change 5.1.8 baseline.
+name: MT7621 Ported 5.2 candidate guest ext-utils
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/mt7621-ported-52-guest.yml'
+      - 'lab/scenarios/ported-mt7621-52-ext-utils.json'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: mt7621-52-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  candidate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    name: Actual 5.2 Beta 3 boot and ext-utils inventory
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install lab deps and run host contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends p7zip-full socat e2fsprogs openssl \
+            python3 python3-paramiko build-essential ninja-build meson pkg-config \
+            libglib2.0-dev libpixman-1-dev zlib1g-dev libslirp-dev libfdt-dev python3-venv
+          python3 -m unittest discover -s lab -p 'test*.py' -q
+      - name: Cache patched MIPSel QEMU
+        id: qemu-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ runner.temp }}/mt7621-qemu/qemu-system-mipsel
+            ${{ runner.temp }}/mt7621-qemu/qemu-mipsel.sha256
+          key: mipsel-ubuntu24-v10.1.0-${{ hashFiles('qemu-patches/*.patch', 'lab/mt7621/build_qemu_mipsel.sh') }}
+      - name: Build QEMU if uncached
+        if: steps.qemu-cache.outputs.cache-hit != 'true'
+        run: bash lab/mt7621/build_qemu_mipsel.sh "$RUNNER_TEMP/mt7621-qemu"
+      - name: Verify QEMU executable
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256sum -c "$RUNNER_TEMP/mt7621-qemu/qemu-mipsel.sha256"
+          echo "QEMU_BIN=$RUNNER_TEMP/mt7621-qemu/qemu-system-mipsel" >> "$GITHUB_ENV"
+      - name: Download publicly published, immutable candidate and NAND components
+        shell: bash
+        run: |
+          set -euo pipefail
+          src="$RUNNER_TEMP/ported52"
+          mkdir -p "$src"
+          curl -fL --retry 3 --connect-timeout 15 --max-time 300 \
+            -o "$src/breed.bin" 'https://breed.hackpascal.net/breed-mt7621-xiaomi-r3g.bin'
+          echo "05ebb31fd889b148022346179346d91c60a1b4518bdc4d8b9717a62aec638bed  $src/breed.bin" | sha256sum -c -
+          curl -fL --retry 3 --connect-timeout 15 --max-time 300 \
+            -o "$src/ported52.bin" 'https://osvault.project-athens.com/osvault/Xiaomi%20R3G/Xiaomi-R3G_5.2_Beta_3.bin'
+          echo "9899315c34276cda2f27d7e6530c0de3063cdca08d40dc1bd7aa4081a5ae2adb  $src/ported52.bin" | sha256sum -c -
+          curl -fL --retry 3 --connect-timeout 15 --max-time 300 \
+            -o "$src/Xiaomi-R3G.7z" 'https://osvault.project-athens.com/files/firmware/Xiaomi-R3G.7z'
+          echo "397e07a20c6a02911e8fd3be756d23c8  $src/Xiaomi-R3G.7z" | md5sum -c -
+          7z x -y -o"$src/unpacked" "$src/Xiaomi-R3G.7z" >/dev/null
+          python3 -m lab.mt7621.ci_assets --unpacked "$src/unpacked" --out "$src/verified"
+          rm -rf "$src/unpacked"
+      - name: Assemble independent, disposable 5.2 NAND
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - "$RUNNER_TEMP" <<'PY'
+          import pathlib,sys
+          from lab.mt7621 import prepare_ported_mir3g as p
+          root=pathlib.Path(sys.argv[1]); d=root/"ported52"
+          old=p.EXPECTED["firmware"]
+          assert old[0]=="05958b9786621ee014bb72551f6458d0672c93370cbce9aec3573c6bba038cb2"
+          candidate=( "9899315c34276cda2f27d7e6530c0de3063cdca08d40dc1bd7aa4081a5ae2adb", 26607676)
+          # Pinned alternate firmware is accepted ONLY in this throwaway process.
+          # stock.assemble still validates SHA256, length and uImage KN header.
+          p.EXPECTED["firmware"]=candidate
+          try:
+              p.assemble(d/"breed.bin",d/"ported52.bin",
+                         d/"verified/uconfig.bin",d/"verified/ustate.bin",
+                         d/"verified/eeprom.bin",root/"ported52-nand")
+          finally:
+              p.EXPECTED["firmware"]=old
+          PY
+      - name: Real Ported 5.2 QEMU boot and ext-utils check
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 lab/run.py --emulator-root . \
+            --scenario lab/scenarios/ported-mt7621-52-ext-utils.json \
+            --preset xiaomi-mi-router-3g-breed \
+            --nand-dir "$RUNNER_TEMP/ported52-nand" \
+            --output-dir "$RUNNER_TEMP/ported52-report" --max-seconds 1800
+      - name: Report sanitized count only
+        if: always()
+        shell: bash
+        run: |
+          python3 - "$RUNNER_TEMP/ported52-report/report.json" "$GITHUB_STEP_SUMMARY" <<'PY'
+          import json,pathlib,sys
+          p=pathlib.Path(sys.argv[1])
+          with open(sys.argv[2],"a",encoding="utf8") as f:
+              if not p.is_file():
+                  f.write("### Ported 5.2 QEMU: BLOCKED before guest report\n")
+              else:
+                  data=json.loads(p.read_text())
+                  n=sum(x.get("outcome")=="PASS" for x in data["steps"])
+                  f.write("### Ported 5.2 ext-utils: %s (%d/%d steps)\n"%(data["outcome"],n,len(data["steps"])))
+                  f.write("A missing component is a genuine candidate FAIL, not KAS success.\n")
+          PY
+      - name: Publish sanitized report only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mt7621-52-ext-utils-report
+          path: |
+            ${{ runner.temp }}/ported52-report/report.json
+            ${{ runner.temp }}/ported52-report/junit.xml
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Remove candidate firmware NAND and console
+        if: always()
+        run: |
+          rm -rf "$RUNNER_TEMP/ported52" "$RUNNER_TEMP/ported52-nand" "$RUNNER_TEMP/ported52-report"
+          echo "Neither firmware nor NAND nor UART was uploaded."
