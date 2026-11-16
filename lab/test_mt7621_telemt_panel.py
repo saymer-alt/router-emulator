@@ -142,7 +142,7 @@ class PanelStageEvidenceTests(unittest.TestCase):
     def test_badcfg_output_is_captured_before_the_assertion(self):
         send = self.inputs()[P_BADCFG]["send"]
         self.assertLess(send.index("cat /opt/lab/panel-bad.out"),
-                        send.index("grep -qi 'unknown config keys'"))
+                        send.index("grep -qi 'unknown configuration fields'"))
         self.assertIn("/dev/console", send)
 
     def test_health_body_is_captured_before_the_assertions(self):

@@ -391,7 +391,7 @@
       "action": "ssh",
       "port": 8022,
       "timeout_sec": 90,
-      "send": "/opt/bin/busybox cp /opt/etc/telemt-panel/config.toml /opt/lab/panel-bad.toml && printf 'lab_unknown_key = 1\\n' >> /opt/lab/panel-bad.toml && /opt/bin/telemt-panel -config /opt/lab/panel-bad.toml > /opt/lab/panel-bad.out 2>&1; rc=$?; /opt/bin/busybox cat /opt/lab/panel-bad.out; /opt/bin/busybox cat /opt/lab/panel-bad.out > /dev/console 2>/dev/null; [ \"$rc\" != 0 ] && /opt/bin/busybox grep -qi 'unknown config keys' /opt/lab/panel-bad.out && printf 'PANEL_%s\\n' BADCFG_REJECTED",
+      "send": "/opt/bin/busybox cp /opt/etc/telemt-panel/config.toml /opt/lab/panel-bad.toml && printf 'lab_unknown_key = 1\\n' >> /opt/lab/panel-bad.toml && /opt/bin/telemt-panel -config /opt/lab/panel-bad.toml > /opt/lab/panel-bad.out 2>&1; rc=$?; /opt/bin/busybox cat /opt/lab/panel-bad.out; /opt/bin/busybox cat /opt/lab/panel-bad.out > /dev/console 2>/dev/null; [ \"$rc\" != 0 ] && /opt/bin/busybox grep -qi 'unknown configuration fields' /opt/lab/panel-bad.out && printf 'PANEL_%s\\n' BADCFG_REJECTED",
       "expect": "PANEL_BADCFG_REJECTED"
     },
     {
