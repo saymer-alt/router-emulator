@@ -1,0 +1,46 @@
+# Read-only candidate fingerprint discovery. Does not assemble NAND or run firmware.
+name: MT7621 Ported 5.2 candidate - vendor digest audit
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/mt7621-ported-52-audit.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  candidate:
+    name: Vendor-pinned 5.2 Beta 3 fingerprint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Verify official project archive MD5, uImage and publish candidate SHA256
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p "$RUNNER_TEMP/ported52"
+          trap 'rm -rf "$RUNNER_TEMP/ported52"' EXIT
+          file="$RUNNER_TEMP/ported52/Xiaomi-R3G_5.2_Beta_3.bin"
+          curl --fail --location --retry 3 --connect-timeout 15 --max-time 300 \
+            'https://osvault.project-athens.com/osvault/Xiaomi%20R3G/Xiaomi-R3G_5.2_Beta_3.bin' \
+            --output "$file"
+          # Hash from https://osvault.project-athens.com/osvault/Xiaomi%20R3G/md5sum
+          printf '%s  %s\n' a4b1d8fe656ac1309519636e4cbb902f "$file" | md5sum --check --status
+          python3 - "$file" "$GITHUB_STEP_SUMMARY" <<'PY'
+          import hashlib, pathlib, struct, sys
+          p=pathlib.Path(sys.argv[1])
+          with p.open('rb') as fh:
+              header=fh.read(34)
+          if header[:4] != bytes.fromhex("27051956") or header[32:34] != b"KN":
+              raise SystemExit("Not a supported Ported KN uImage; refusing candidate")
+          digest=hashlib.file_digest(p.open("rb"), "sha256").hexdigest()
+          with open(sys.argv[2], "a", encoding="utf8") as f:
+              f.write("### Public 5.2 Beta 3 candidate (read-only fingerprint)\n")
+              f.write("SHA256: `"+digest+"`\n")
+              f.write("Length: `"+str(p.stat().st_size)+"` bytes\n")
+              f.write("Vendor MD5: verified; uImage + KN header: verified\n")
+              f.write("No flash/NAND/firmware artifacts stored.\n")
+          print("Verified vendor MD5 and KN/uImage header")
+          print("Candidate SHA256:",digest)
+          print("Candidate size:",p.stat().st_size)
+          PY
