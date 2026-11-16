@@ -75,11 +75,12 @@ def guest_probe(credentials, workspace, deadline, source, kas_ref, public):
         print("KAS MIPSEL PREFLIGHT: native Entware and ndmc reachable", flush=True)
         phase, reason = "BLOCKED", "PINNED_SOURCE_DELIVERY_FAILED"
         guest.command("mkdir -p /opt/lab; chmod 700 /opt/lab", timeout=30)
-        # SFTP is bound to the same loopback-only SSH and ephemeral credentials.
-        with guest.client.open_sftp() as sftp:
-            with sftp.file("/opt/lab/install.sh", "wb") as remote:
-                remote.write(source)
-            sftp.chmod("/opt/lab/install.sh", 0o600)
+        # Entware Dropbear does not necessarily ship an SFTP subsystem.
+        # Reuse the proven Paramiko SSH-stdin upload contract from the ARM64 lab:
+        # authenticated loopback exec + private stdin + native checksum.
+        guest.command("umask 077; cat > /opt/lab/install.sh; "
+                      "chmod 600 /opt/lab/install.sh",
+                      timeout=90, input_data=source)
         expected = hashlib.sha256(source).hexdigest()
         observed = guest.command("/opt/bin/busybox sha256sum /opt/lab/install.sh",
                                  timeout=30).split()[0]
