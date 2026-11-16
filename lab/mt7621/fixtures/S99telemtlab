@@ -1,0 +1,86 @@
+#!/bin/sh
+# Disposable MT7621 Entware-only autostart wrapper for the synthetic TeleMT
+# Core configuration, never installed on real routers.
+# The pinned rc.unslung (opt-ndmsv2 1.0-17) SOURCES every executable S*
+# script in /opt/etc/init.d inside one shell: this wrapper must not alter
+# shell options or terminate the sourcing shell, so all logic stays inside
+# functions and every branch returns instead of exiting.
+pidfile=/opt/var/run/telemt-lab.pid
+genfile=/opt/var/run/telemt-lab.gen
+conf=/opt/etc/telemt-lab.toml
+bin=/opt/bin/telemt
+log=/opt/var/log/telemt-lab.log
+
+telemtlab_worker_alive() {
+    [ -n "$1" ] && [ -r "/proc/$1/cmdline" ] || return 1
+    /opt/bin/busybox readlink "/proc/$1/exe" 2>/dev/null \
+        | /opt/bin/busybox grep -q '^/opt/bin/telemt$'
+}
+
+telemtlab_wait_pid() {
+    n=0
+    while [ "$n" -lt 10 ]; do
+        if [ -r "$pidfile" ]; then
+            p=$(/opt/bin/busybox cat "$pidfile" 2>/dev/null)
+            if [ -n "$p" ]; then return 0; fi
+        fi
+        /opt/bin/busybox sleep 1
+        n=$((n+1))
+    done
+    return 1
+}
+
+telemtlab_start() {
+    /opt/bin/busybox mkdir -p /opt/var/run /opt/var/log
+    if [ -r "$pidfile" ]; then
+        old=$(/opt/bin/busybox cat "$pidfile" 2>/dev/null)
+        if telemtlab_worker_alive "$old"; then
+            return 0   # genuine worker from the current boot: idempotent no-op
+        fi
+    fi
+    gen=0
+    if [ -r "$genfile" ]; then
+        gen=$(/opt/bin/busybox cat "$genfile" 2>/dev/null)
+    fi
+    case "$gen" in ''|*[!0-9]*) gen=0 ;; esac
+    gen=$((gen+1))
+    printf '%s\n' "$gen" > "$genfile"
+    HOME=/opt/lab TMPDIR=/opt/lab "$bin" start --log-file "$log" \
+        --pid-file "$pidfile" "$conf" >/dev/null 2>&1
+    if telemtlab_wait_pid; then
+        p=$(/opt/bin/busybox cat "$pidfile" 2>/dev/null)
+        /opt/bin/busybox echo "telemtlab-start gen=$gen pid=$p" \
+            > /dev/console 2>/dev/null
+        printf 'telemtlab-start gen=%s pid=%s\n' "$gen" "$p"
+        return 0
+    fi
+    /opt/bin/busybox echo "telemtlab-start gen=$gen pid=none" \
+        > /dev/console 2>/dev/null
+    printf 'telemtlab-start gen=%s pid=none\n' "$gen"
+    return 1
+}
+
+telemtlab_stop() {
+    if [ -r "$pidfile" ]; then
+        HOME=/opt/lab TMPDIR=/opt/lab "$bin" stop --pid-file "$pidfile" \
+            >/dev/null 2>&1
+    fi
+    /opt/bin/busybox rm -f "$pidfile"
+    return 0
+}
+
+telemtlab_restart() {
+    telemtlab_stop
+    telemtlab_start
+}
+
+telemtlab_main() {
+    case "$1" in
+    start) telemtlab_start ;;
+    stop) telemtlab_stop ;;
+    restart) telemtlab_restart ;;
+    *) return 2 ;;
+    esac
+}
+
+telemtlab_main "$@"

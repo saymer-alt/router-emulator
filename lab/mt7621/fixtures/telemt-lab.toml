@@ -1,0 +1,26 @@
+# TeleMT lab synthetic configuration (Issue #91, disposable guest only):
+# loopback-only binds, synthetic all-zero user secret, classic relay mode
+# without middle-proxy upstream connections, API enabled for liveness probes.
+# No real Telegram credentials, no production endpoints.
+[general]
+use_middle_proxy = false
+log_level = "normal"
+
+[general.modes]
+classic = true
+secure = true
+tls = false
+
+[server]
+port = 3443
+
+[[server.listeners]]
+ip = "127.0.0.1"
+
+[server.api]
+enabled = true
+listen = "127.0.0.1:9091"
+whitelist = ["127.0.0.1/32"]
+
+[access.users]
+lab = "00000000000000000000000000000000"

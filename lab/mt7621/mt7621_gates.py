@@ -660,6 +660,104 @@ def derive_autostart_gate(scenario, report):
     return {"MIPSEL_AUTOSTART": _gate("FAIL", "autostart_chain_step_failed")}
 
 
+def derive_telemt_gate(scenario, report):
+    """Independent guest evidence: the pinned experimental TeleMT MIPSel IPKs
+    install through the guest's own native opkg and the Core binary actually
+    runs locally (loopback-only, synthetic config), survives stop/restart,
+    and is started by the real rc.unslung after a native reboot.
+
+    Deliberately outside GATES: the 19 core gates stay unchanged; this gate
+    only appears when its own scenario/report pair is supplied.  Because the
+    name is not in GATES, apply_labels() refuses any --set for it, so a PASS
+    can only ever come from a validated scenario report.
+    """
+    checked = _checked_prefix(scenario, report)
+    if checked is None:
+        return {"MIPSEL_TELEMT": _gate("FAIL", "report_scenario_mismatch")}
+    steps, rows, first_fail = checked
+
+    def positions(expect, needle):
+        return [i for i, s in enumerate(steps)
+                if s.get("action") == "ssh"
+                and s.get("expect") == expect
+                and needle in s.get("send", "")]
+
+    # The two frozen IPKs are delivered over the loopback mirror, verified
+    # in-guest against the full SHA-256 pins, then installed by native opkg.
+    applet = positions("APPLET_READY", "base64")
+    seed = positions("TELEMT_FILES_READY", "S99telemtlab")
+    delivered = positions("IPKS_DELIVERED", "busybox wget")
+    core = positions("OPKG_CORE_OK", "opkg install")
+    panel = positions("OPKG_PANEL_OK", "opkg install")
+    pinned = positions("BINARIES_PINNED", "sha256sum -c")
+    cli = positions("CLI_REJECTED", "healthcheck")
+    toml = positions("TOML_REJECTED", "broken-telemt.toml")
+    started = positions("TELEMT_STARTED", "telemt start")
+    health1 = positions("HEALTH_LIVE", "healthcheck --mode liveness")
+    pid1 = positions("PID_ALIVE", "/proc/$pid/exe")
+    sockets = positions("SOCKETS_LISTENING", "/proc/net/tcp")
+    stable = positions("STABLE_AFTER_10S", "sleep 10")
+    stopped = positions("TELEMT_STOPPED", "telemt stop")
+    down = positions("HEALTH_DOWN_AFTER_STOP", "healthcheck --mode liveness")
+    restart = positions("telemtlab-start gen=1 pid=[0-9]+", "S99telemtlab start")
+    restart_health = positions("RESTART_HEALTH_OK", "healthcheck --mode liveness")
+    off = positions("TELEMT_OFF_PREBOOT", "S99telemtlab stop")
+    autohealth = positions("AUTOSTART_HEALTH_OK", "healthcheck --mode liveness")
+    autopid = positions("AUTOSTART_PID_ALIVE", "/proc/$pid/exe")
+    single = positions("AUTOSTART_SINGLE", "for p in /proc/[0-9]*")
+    persisted = positions("PERSISTED_FILES", "opkg status telemt")
+    gen2 = positions("GEN_TWO", "telemt-lab.gen")
+    pids = positions("PIDS [0-9]+ [0-9]+", "telemt-lab.pid1")
+    sync = positions("SYNC_COMPLETE", "busybox sync")
+    echo2 = [i for i, s in enumerate(steps)
+             if s.get("action") == "wait_serial"
+             and s.get("pattern") == "telemtlab-start gen=2 pid=[0-9]+"]
+    reboot = [i for i, s in enumerate(steps)
+              if s.get("action") == "wait_serial"
+              and s.get("pattern") == "reboot: Restarting system"]
+    ready = [i for i, s in enumerate(steps)
+             if s.get("action") == "wait_serial" and s.get("pattern") == "system ready"]
+    initrc = [i for i, s in enumerate(steps)
+              if s.get("action") == "wait_serial"
+              and s.get("pattern") == "configured init script"]
+    mounts = [i for i, s in enumerate(steps)
+              if s.get("action") == "ssh" and s.get("expect") == "/opt ext4"]
+    # The wrapper echoes its start generation to /dev/console when rc.unslung
+    # actually sources it after the native reboot; the scenario synchronizes
+    # the SSH proofs on that UART execution marker (ndm runs rc.unslung
+    # asynchronously ~30-50 s after "system ready", once the disk mounted).
+    if not (len(applet) == 1 and len(seed) == 1 and len(delivered) == 1
+            and len(core) == 1 and len(panel) == 1 and len(pinned) == 1
+            and len(cli) == 1 and len(toml) == 1 and len(started) == 1
+            and len(health1) == 1 and len(pid1) == 1 and len(sockets) == 1
+            and len(stable) == 1 and len(stopped) == 1 and len(down) == 1
+            and len(restart) == 1 and len(restart_health) == 1 and len(off) == 1
+            and len(autohealth) == 1 and len(autopid) == 1 and len(single) == 1
+            and len(persisted) == 1 and len(gen2) == 1 and len(pids) == 1
+            and len(sync) == 1 and len(echo2) == 1 and len(reboot) == 2
+            and len(ready) >= 3 and len(initrc) >= 2 and len(mounts) == 2):
+        return {"MIPSEL_TELEMT": _gate("NOT_TESTED", "scenario_lacks_telemt_chain")}
+    # Boot order: baseline boot+reboot, opkg/CLI/local-run chain, stop/restart,
+    # pre-reboot off state, the second native reboot, the UART autostart
+    # marker, then the boot-3 proofs — a stale or reordered chain is not PASS.
+    ordered = (ready[0], initrc[0], applet[0], seed[0], delivered[0], core[0],
+               panel[0], pinned[0], cli[0], toml[0], started[0], health1[0],
+               pid1[0], sockets[0], stable[0], stopped[0], down[0], restart[0],
+               restart_health[0], off[0], reboot[1], initrc[1], ready[2],
+               echo2[0], mounts[1], autohealth[0], autopid[0], single[0],
+               persisted[0], gen2[0], pids[0], sync[0])
+    if any(a >= b for a, b in zip(ordered, ordered[1:])):
+        return {"MIPSEL_TELEMT": _gate("NOT_TESTED", "telemt_chain_not_ordered")}
+    if first_fail is None:
+        return {"MIPSEL_TELEMT": _gate(
+            "PASS" if report.get("outcome") == "PASS" else "FAIL",
+            "opkg_install_native_reboot_then_rc_unslung_autostart"
+            if report.get("outcome") == "PASS" else "report_outcome_mismatch")}
+    if first_fail <= seed[0]:
+        return {"MIPSEL_TELEMT": _gate("NOT_TESTED", "prerequisite_failed")}
+    return {"MIPSEL_TELEMT": _gate("FAIL", "telemt_chain_step_failed")}
+
+
 def apply_labels(gates, statuses, reasons=None):
     """Apply controller labels; PASS is refused for native gates."""
     reasons = reasons or {}
@@ -680,7 +778,8 @@ def evaluate(openwrt_scenario, openwrt_report, statuses=(), reasons=None,
              entware_scenario=None, entware_report=None,
              service_scenario=None, service_report=None,
              persistence_scenario=None, persistence_report=None,
-             autostart_scenario=None, autostart_report=None):
+             autostart_scenario=None, autostart_report=None,
+             telemt_scenario=None, telemt_report=None):
     gates = {name: _gate("NOT_TESTED", "unattempted") for name in GATES}
     gates.update(derive_openwrt_gates(openwrt_scenario, openwrt_report))
     if ported_scenario is not None and ported_report is not None:
@@ -695,6 +794,8 @@ def evaluate(openwrt_scenario, openwrt_report, statuses=(), reasons=None,
         gates.update(derive_persistence_gate(persistence_scenario, persistence_report))
     if autostart_scenario is not None and autostart_report is not None:
         gates.update(derive_autostart_gate(autostart_scenario, autostart_report))
+    if telemt_scenario is not None and telemt_report is not None:
+        gates.update(derive_telemt_gate(telemt_scenario, telemt_report))
     apply_labels(gates, statuses, reasons)
     return gates
 
@@ -764,6 +865,10 @@ def main():
                     help="committed Entware rc.unslung autostart Stage C scenario")
     ap.add_argument("--autostart-report",
                     help="report.json of the independent rc.unslung autostart scenario")
+    ap.add_argument("--telemt-scenario",
+                    help="committed TeleMT MIPSel pinned-IPK opkg/autostart scenario")
+    ap.add_argument("--telemt-report",
+                    help="report.json of the independent TeleMT MIPSel scenario")
     ap.add_argument("--set", action="append", nargs=2, metavar=("GATE", "STATUS"),
                     default=[],
                     help="explicit gate status; PASS refused for native gates")
@@ -809,6 +914,12 @@ def main():
                 Path(args.autostart_scenario).read_text(encoding="utf-8"))
             autostart_report = json.loads(
                 Path(args.autostart_report).read_text(encoding="utf-8"))
+        telemt_scenario = telemt_report = None
+        if args.telemt_scenario and args.telemt_report:
+            telemt_scenario = json.loads(
+                Path(args.telemt_scenario).read_text(encoding="utf-8"))
+            telemt_report = json.loads(
+                Path(args.telemt_report).read_text(encoding="utf-8"))
         reasons = {name: why for name, why in args.reason}
         gates = evaluate(scenario, report, args.set, reasons,
                          ported_scenario, ported_report,
@@ -816,7 +927,8 @@ def main():
                          entware_scenario, entware_report,
                          service_scenario, service_report,
                          persistence_scenario, persistence_report,
-                         autostart_scenario, autostart_report)
+                         autostart_scenario, autostart_report,
+                         telemt_scenario, telemt_report)
     except ValueError as error:
         ap.error(str(error))
     report_dir = Path(args.report_dir)
