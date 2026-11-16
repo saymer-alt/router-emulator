@@ -447,6 +447,58 @@ disposable probe service in the emulator (one boot-triggered live process
 per boot, generation-tracked).  It does not cover other Entware init
 scripts, service supervision/restart policies, or physical hardware.
 
+### The TeleMT MIPSel pinned-IPK guest cycle (2026-11-16, Issue #91 / PR #93): opkg install PASS, Core local run BLOCKED
+
+`lab/mt7621/telemt_lab.py` delivers the two frozen experimental TeleMT IPKs
+of entware-go Draft PR #44 (Actions run 43742529964, SHA-pinned, never
+rebuilt) through the loopback-only mirror, installs them with the guest's
+own native opkg, runs the PR #45 negative CLI contracts on the real guest
+ELF, then starts Core as a loopback-only daemon with a synthetic
+configuration.  Steps 0-32 of `lab/scenarios/ported-mt7621-telemt.json`
+are the committed tz-skip clean-Entware baseline verbatim (33/33), so every
+cycle re-proves the whole Entware foundation first.
+
+Two real guest cycles ran (2026-11-16).  Both PASS through step 42:
+clean baseline, in-guest SHA verification of both IPKs, native
+`opkg install` of telemt 3.5.17-1 and telemt-panel-lite 1.0.0~rc.4-1
+(with `opkg status` version checks), in-guest ELF SHA pins for both
+installed binaries, `healthcheck --mode=lab-probe-invalid` -> EXIT 2 with
+the exact upstream text, the malformed-TOML `run` -> EXIT 1 + "unclosed
+table" with no panic, and `telemt start ... && printf TELEMT_STARTED`
+exiting 0.  Cycle 2 then FAILS at step 44 (`DAEMON_PROC_ALIVE`): the
+pidfile's pid has no live `/proc/<pid>/cmdline` within ~2 s of a
+successful daemon start — the Core child dies at/near startup and the
+API never comes up (cycle 1's 45 s of bounded healthcheck failures agree).
+The child's log file lives on the disposable guest-side USB image the
+runner destroys after each run, so the exact crash line is not
+recoverable; with both allowed guest cycles spent, the stage is recorded
+as **BLOCKED** with the ranked hypotheses and the exact instrumented
+next-run recipe (synthetic proxy-secret + `--log-file /dev/console` +
+log-emission step ordering) in
+`lab/mt7621/evidence/ported-mt7621-telemt-20261116/telemt-blocked-diagnosis.md`.
+
+MIPSEL_TELEMT (`derive_telemt_gate`) stays outside GATES/NATIVE_GATES —
+the 19 core gates are unchanged, `apply_labels` refuses any `--set` for
+it, and it can only report from a validated scenario report (currently
+FAIL/NOT_TESTED paths, never an invented PASS).  The cloud guest stage
+(`mt7621-telemt-lab.yml`) activates as soon as the repository secret
+`TELEMT_IPK_TOKEN` (actions:read on saymer-alt/entware-go) exists; the
+acquisition job fails closed on any pin deviation and the guest job is
+intentionally skipped without the token — no rebuild, no approximation.
+
+Also documented for entware-go: under qemu-mipsel 10.2.1 the Core server
+path panics at rand 0.10.2 ThreadRng init (`Function not implemented`,
+os error 89) right after the orchestrator's buffer-budget line — the
+RNG-seeding syscall is unavailable under qemu-user, so the full server
+path cannot be probed host-side (PR #45 never started the server, so this
+was previously invisible).
+
+Honest scope: real native opkg installation of the experimental pinned
+IPKs on the Ported MT7621 guest is PROVEN; the Core daemon startup inside
+KeeneticOS Ported is BLOCKED pending one instrumented diagnostic run; the
+reboot/rc.unslung autostart stage of the same configuration is NOT_TESTED;
+Panel start/HTTP and the real Telegram upstream remain NOT_TESTED.
+
 ## Gate aggregation
 
 ```bash
