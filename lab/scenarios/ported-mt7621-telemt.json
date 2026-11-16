@@ -334,7 +334,7 @@
     {
       "action": "ssh",
       "port": 8022,
-      "send": "/opt/bin/busybox grep -Eq '0100007F:2383 +[0-9A-F]{8}:[0-9A-F]{4} +0A ' /proc/net/tcp && /opt/bin/busybox grep -Eq '(0100007F|00000000):0D6B +[0-9A-F]{8}:[0-9A-F]{4} +0A ' /proc/net/tcp && printf 'SOCKETS_%s\\n' LISTENING",
+      "send": "/opt/bin/busybox grep -Eq '0100007F:2383 +[0-9A-F]{8}:[0-9A-F]{4} +0A ' /proc/net/tcp && /opt/bin/busybox grep -Eq '(0100007F|00000000):0D73 +[0-9A-F]{8}:[0-9A-F]{4} +0A ' /proc/net/tcp && printf 'SOCKETS_%s\\n' LISTENING",
       "expect": "SOCKETS_LISTENING",
       "timeout_sec": 90
     },
