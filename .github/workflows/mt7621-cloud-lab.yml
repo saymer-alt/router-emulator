@@ -28,11 +28,16 @@ concurrency:
 
 jobs:
   real-guest:
-    name: Real MT7621 guest (${{ inputs.stage || 'boot' }})
+    name: Real MT7621 guest (${{ matrix.stage }})
     runs-on: ubuntu-24.04
     timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        # PR: verify both real guest paths. Manual dispatch: exactly selected stage.
+        stage: ${{ github.event_name == 'pull_request' && fromJSON('["boot","entware"]') || fromJSON(format('["{0}"]', inputs.stage || 'boot')) }}
     env:
-      LAB_STAGE: ${{ inputs.stage || 'boot' }}
+      LAB_STAGE: ${{ matrix.stage }}
     steps:
       - uses: actions/checkout@v4
         with:
