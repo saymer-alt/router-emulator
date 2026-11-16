@@ -5,6 +5,10 @@
 [general]
 use_middle_proxy = false
 log_level = "normal"
+# Absolute, guest-side paths pinned for the disposable lab (no relative-path
+# resolution variance between foreground diagnostics and the daemonized run).
+proxy_secret_path = "/opt/etc/telemt-lab.secret"
+quota_state_path = "/opt/etc/telemt-lab.limit.json"
 
 [general.modes]
 classic = true

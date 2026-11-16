@@ -181,10 +181,11 @@ class CommittedFixtureContractTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1] / "lab" / "mt7621" / "fixtures"
         return (root / "S99telemtlab").read_bytes(), \
             (root / "telemt-lab.toml").read_bytes(), \
+            (root / "telemt-lab.secret").read_bytes(), \
             (root / "broken-telemt.toml").read_bytes()
 
     def test_wrapper_is_sourcing_safe_and_self_identifying(self):
-        fixture, _, _ = self.fixtures()
+        fixture, _, _, _ = self.fixtures()
         self.assertTrue(fixture.startswith(b"#!/bin/sh"))
         # rc.unslung (opt-ndmsv2 1.0-17) SOURCES every executable S* script in
         # one shell: no shell-option changes, no exit, wrapped main call.
@@ -205,17 +206,32 @@ class CommittedFixtureContractTests(unittest.TestCase):
         self.assertNotIn(b"wget", fixture)
 
     def test_config_is_loopback_only_synthetic(self):
-        _, config, _ = self.fixtures()
+        _, config, _, _ = self.fixtures()
         self.assertIn(b"use_middle_proxy = false", config)
         self.assertIn(b"tls = false", config)
         self.assertIn(b'ip = "127.0.0.1"', config)
         self.assertIn(b'listen = "127.0.0.1:9091"', config)
         self.assertIn(b'whitelist = ["127.0.0.1/32"]', config)
         self.assertIn(b'lab = "00000000000000000000000000000000"', config)
+        # Absolute guest-side runtime paths: no relative-path variance between
+        # the foreground diagnostics and the daemonized run.
+        self.assertIn(b'proxy_secret_path = "/opt/etc/telemt-lab.secret"',
+                      config)
+        self.assertIn(b'quota_state_path = "/opt/etc/telemt-lab.limit.json"',
+                      config)
         self.assertNotIn(b"petrovich", config)
 
+    def test_synthetic_secret_is_thirty_two_bytes_of_ascii(self):
+        _, _, secret, _ = self.fixtures()
+        # PROXY_SECRET_MIN_LEN (upstream transport/middle_proxy/secret.rs)
+        # is 32 bytes; the synthetic lab secret must satisfy it without any
+        # real Telegram material.
+        self.assertGreaterEqual(len(secret), 32)
+        self.assertTrue(all(0x20 <= b < 0x7F for b in secret))
+        self.assertIn(b"telemt-lab-synthetic-secret", secret)
+
     def test_broken_toml_is_the_pr45_payload(self):
-        _, _, broken = self.fixtures()
+        _, _, _, broken = self.fixtures()
         self.assertEqual(broken.replace(b"\r\n", b"\n"),
                          b"[broken-toml-table\n")
 
@@ -243,18 +259,23 @@ class CommittedScenarioContractTests(unittest.TestCase):
     def test_baseline_is_verbatim_and_chain_is_complete(self):
         baseline, stage = self.inputs()
         self.assertEqual(len(baseline["steps"]), 33)
-        self.assertEqual(len(stage["steps"]), 72)
+        self.assertEqual(len(stage["steps"]), 73)
         self.assertEqual(stage["steps"][:33], baseline["steps"][:33])
 
-    def test_seed_step_carries_all_three_fixture_payloads(self):
+    def test_seed_step_carries_all_four_fixture_payloads(self):
         _, stage = self.inputs()
         seed = stage["steps"][34]["send"]
         self.assertIn("base64 -d > /opt/etc/init.d/S99telemtlab", seed)
         self.assertIn("base64 -d > /opt/etc/telemt-lab.toml", seed)
+        self.assertIn("base64 -d > /opt/etc/telemt-lab.secret", seed)
         self.assertIn("base64 -d > /opt/lab/broken-telemt.toml", seed)
         self.assertIn("chmod 700 /opt/etc/init.d/S99telemtlab", seed)
+        # The synthetic proxy-secret is verified in-guest against the upstream
+        # minimum length (PROXY_SECRET_MIN_LEN = 32 bytes).
+        self.assertIn("-ge 32", seed)
+        self.assertIn("/opt/etc/telemt-lab.secret", seed)
         encoded = re.findall(r"printf '%s' '([A-Za-z0-9+/=]+)'", seed)
-        self.assertEqual(len(encoded), 3)
+        self.assertEqual(len(encoded), 4)
         fixtures = CommittedFixtureContractTests.fixtures()
         for chunk, fixture in zip(encoded, fixtures):
             self.assertEqual(base64.b64decode(chunk, validate=True),
@@ -310,21 +331,58 @@ class CommittedScenarioContractTests(unittest.TestCase):
         self.assertIn("grep -q 'unclosed table'", toml)
         self.assertIn("grep -qi 'panicked'", toml)
 
-    def test_daemon_liveness_and_log_emit_steps_precede_the_health_probe(self):
+    def test_foreground_diagnostic_precedes_the_daemon_start(self):
         _, stage = self.inputs()
-        alive = stage["steps"][43]["send"]
-        self.assertIn("cat /opt/var/run/telemt-lab.pid", alive)
-        self.assertIn("[ -r /proc/$pid/cmdline ]", alive)
-        self.assertEqual(stage["steps"][43]["expect"], "DAEMON_PROC_ALIVE")
-        emit = stage["steps"][44]["send"]
-        # The daemon log goes to the private UART for post-mortem diagnosis;
-        # the step passes whether or not the log exists.
-        self.assertIn("cat /opt/var/log/telemt-lab.log > /dev/console", emit)
-        self.assertEqual(stage["steps"][44]["expect"], "LOG_(EMITTED|ABSENT)")
+        diag = stage["steps"][42]
+        started = stage["steps"][43]
+        self.assertEqual(diag["expect"], "DIAG_CAPTURED")
+        self.assertLess(42, next(i for i, s in enumerate(stage["steps"])
+                                 if s.get("expect") == "TELEMT_STARTED"))
+        # Foreground mode keeps stdio attached, so the tracing output AND the
+        # final error text are captured while the pidfile is still written.
+        self.assertIn("start --foreground", diag["send"])
+        self.assertIn("--pid-file /opt/var/run/telemt-diag.pid", diag["send"])
+        # Bounded by a kill -0 polling loop, not the `timeout` applet (the
+        # guest Entware busybox 1.38 has none); TERM'd after 20 s.
+        self.assertIn("kill -0 $fgp", diag["send"])
+        self.assertIn("$i -lt 20", diag["send"])
+        self.assertNotIn("timeout ", diag["send"])
+        self.assertIn("cd /opt/etc", diag["send"])
+        # The capture lands in the SSH stdout AND the private UART console
+        # before the real daemon start, so it survives the disposable image.
+        self.assertIn("cat /opt/lab/telemt-fg.log > /dev/console", diag["send"])
+        # The marker is echo-unsafe (printf split), so the expect cannot match
+        # the sent text.
+        self.assertNotIn("DIAG_CAPTURED", diag["send"])
+        self.assertIn("printf 'DIAG_%s\\n' CAPTURED", diag["send"])
+        self.assertEqual(started["expect"], "TELEMT_STARTED")
+
+    def test_daemon_log_is_collected_before_the_pid_liveness_check(self):
+        _, stage = self.inputs()
+        started = stage["steps"][43]
+        emit = stage["steps"][44]
+        alive = stage["steps"][45]
+        self.assertEqual(started["expect"], "TELEMT_STARTED")
+        self.assertEqual(emit["expect"], "LOG_(EMITTED|ABSENT)")
+        self.assertEqual(alive["expect"], "DAEMON_PROC_ALIVE")
+        # Log emission sits between the start and the pid check, so a child
+        # that dies at startup leaves its log behind (stdout + UART) before
+        # the failing stage stops the run.
+        self.assertIn(
+            "cat /opt/var/log/telemt-lab.log > /dev/console", emit["send"])
+        self.assertIn("cat /opt/var/run/telemt-lab.pid", alive["send"])
+        self.assertIn("[ -r /proc/$pid/cmdline ]", alive["send"])
+        # Both failing branches dump the daemon log to stdout AND the UART
+        # before exiting nonzero.
+        for step in (started, alive):
+            self.assertIn(
+                "cat /opt/var/log/telemt-lab.log > /dev/console",
+                step["send"])
+            self.assertIn("exit 1", step["send"])
 
     def test_proc_scan_cannot_match_its_own_command_line(self):
         _, stage = self.inputs()
-        scan = stage["steps"][67]["send"]
+        scan = stage["steps"][68]["send"]
         # The concatenation-built needle cannot appear contiguously in the
         # scanner's own command text (guest runs each SSH send via sh -c).
         self.assertIn('"/opt/etc/telemt-lab.""toml"', scan)
@@ -333,7 +391,7 @@ class CommittedScenarioContractTests(unittest.TestCase):
 
     def test_identity_proofs_use_proc_exe_not_pidfile_echoes(self):
         _, stage = self.inputs()
-        for index in (46, 66):
+        for index in (47, 67):
             send = stage["steps"][index]["send"]
             self.assertIn("readlink /proc/$pid/exe", send)
             self.assertIn("/proc/$pid/cmdline", send)
