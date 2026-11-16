@@ -46,24 +46,33 @@ jobs:
         id: gate
         if: env.TELEMT_TOKEN != ''
         run: echo "acquired=true" >> "$GITHUB_OUTPUT"
-      - name: Download the two frozen artifacts and verify every pin
+      - name: Download frozen MIPSel TeleMT Core artifact from entware-go
         if: steps.gate.outputs.acquired == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.TELEMT_IPK_TOKEN }}
+        uses: actions/download-artifact@v4
+        with:
+          name: telemt-core-mipsel-experimental
+          repository: saymer-alt/entware-go
+          run-id: 43742529964
+          github-token: ${{ secrets.TELEMT_IPK_TOKEN }}
+          path: ${{ runner.temp }}/telemt-ipk
+
+      - name: Download frozen MIPSel Panel Lite artifact from entware-go
+        if: steps.gate.outputs.acquired == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: telemt-panel-lite-mipsel-experimental
+          repository: saymer-alt/entware-go
+          run-id: 43742529964
+          github-token: ${{ secrets.TELEMT_IPK_TOKEN }}
+          path: ${{ runner.temp }}/telemt-ipk
+
+      - name: Audit both immutable IPK pins and ABI before guest handoff
+        if: steps.gate.outputs.acquired == 'true'
         shell: bash
         run: |
           set -euo pipefail
-          dir="$RUNNER_TEMP/telemt-ipk"
-          mkdir -p "$dir"
-          gh api --repo saymer-alt/entware-go \
-            /actions/artifacts/14173257332/zip > "$dir/core.zip"
-          gh api --repo saymer-alt/entware-go \
-            /actions/artifacts/14173356007/zip > "$dir/panel.zip"
-          unzip -j -o "$dir/core.zip" -d "$dir"
-          unzip -j -o "$dir/panel.zip" -d "$dir"
-          rm -f "$dir/core.zip" "$dir/panel.zip"
-          # Fails closed on any SHA-256/control/ELF/ABI deviation.
-          python3 -m lab.mt7621.telemt_lab --audit-ipks --ipk-dir "$dir"
+          python3 -m lab.mt7621.telemt_lab --audit-ipks --ipk-dir "$RUNNER_TEMP/telemt-ipk"
+
       - name: Publish pinned IPK artifact for the guest job
         if: steps.gate.outputs.acquired == 'true'
         uses: actions/upload-artifact@v4
