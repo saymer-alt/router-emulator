@@ -4,7 +4,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from lab.mt7621.kas_smoke import classify_failure, write_public
+from lab.mt7621.kas_smoke import classify_failure, write_public, missing_required_components
 
 
 class Mt7621KASGuestContracts(unittest.TestCase):
@@ -29,10 +29,28 @@ class Mt7621KASGuestContracts(unittest.TestCase):
             ref = "a" * 40
             write_public(p, ref, "BLOCKED", "KEENETICOS_COMPONENTS_MISSING", 1)
             rec = json.loads(p.read_text())
-            self.assertEqual(set(rec), {"schema", "kas_ref", "phase",
-                                        "reason", "kas_installed", "exit_code"})
+            self.assertEqual(set(rec), {"schema", "kas_ref", "phase", "reason", "kas_installed",
+                                        "exit_code", "component_inventory_seen",
+                                        "missing_component_ids"})
             self.assertFalse(rec["kas_installed"])
             self.assertEqual(rec["kas_ref"], ref)
+
+    def test_components_parsed_across_line_wrapping(self):
+        source = ("release: 5.01.C.8.0-2\n"
+                  "  components: proxy,dns-filter,opkg-kmod-\n"
+                  "    netfilter,ext,ext-utils,dns-\n"
+                  "    tls,system\n"
+                  "    model: KN-9999\n")
+        self.assertEqual(missing_required_components(source), [])
+
+    def test_exact_missing_public_component_ids(self):
+        source = ("components: ext,dns-https,system\n"
+                  "  platform: KN-1913\n")
+        self.assertEqual(missing_required_components(source),
+                         ["proxy", "dns-filter", "opkg-kmod-netfilter", "ext-utils"])
+
+    def test_missing_inventory_is_unknown_not_all_missing(self):
+        self.assertIsNone(missing_required_components("release: 5.01.C.8.0-2"))
 
     def test_no_markdown_banner_is_success(self):
         self.assertNotEqual(classify_failure(0, "=== Keenetic Auto Setup ==="),

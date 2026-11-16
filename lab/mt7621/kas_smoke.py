@@ -24,6 +24,41 @@ LOCK = Path(__file__).resolve().parents[1] / "entware-mipselsf.lock.json"
 PIN = re.compile(r"^[0-9a-f]{40}$")
 
 
+
+REQUIRED_KEENETIC_COMPONENTS = ("proxy", "dns-filter", "opkg-kmod-netfilter",
+                               "ext", "ext-utils")
+ONE_SECURE_DNS = ("dns-tls", "dns-https")
+
+
+def missing_required_components(version_output):
+    """Return only known component IDs, never raw device/version text.
+
+    Mirrors KAS install.sh component_list_from_show_version field parsing:
+    continuation lines can wrap even across a hyphenated identifier.
+    An absent/unparseable inventory is UNKNOWN, not an invented missing set.
+    """
+    collect = False
+    rows = []
+    for line in version_output.splitlines():
+        if not collect:
+            match = re.match(r"^\s*components:\s*(.*)$", line)
+            if match is None:
+                continue
+            collect = True
+            rows.append(re.sub(r"\s+", "", match.group(1)))
+            continue
+        value = line.strip().replace(" ", "").replace("\t", "")
+        if not re.fullmatch(r"[A-Za-z0-9_-]+(?:,[A-Za-z0-9_-]+)*,?", value):
+            break
+        rows.append(value)
+    if not collect:
+        return None
+    observed = set("".join(rows).split(","))
+    absent = [item for item in REQUIRED_KEENETIC_COMPONENTS if item not in observed]
+    if not any(x in observed for x in ONE_SECURE_DNS):
+        absent.append("dns-tls-or-dns-https")
+    return absent
+
 def classify_failure(code, output):
     """Map private installer output to an allowlisted public failure category."""
     if code == 0 and "[OK] Done" in output:
@@ -47,11 +82,13 @@ def classify_failure(code, output):
     return "INSTALLER_EXIT_NONZERO"
 
 
-def write_public(path, kas_ref, phase, reason, exit_code=None):
+def write_public(path, kas_ref, phase, reason, exit_code=None, component_gap=None):
     """No guest output, passwords, paths, script bodies, or arbitrary diagnostics."""
     record = {"schema": "mt7621-kas-smoke-v1", "kas_ref": kas_ref,
               "phase": phase, "reason": reason, "kas_installed": phase == "PASS",
-              "exit_code": exit_code if isinstance(exit_code, int) else None}
+              "exit_code": exit_code if isinstance(exit_code, int) else None,
+              "component_inventory_seen": component_gap is not None,
+              "missing_component_ids": component_gap if component_gap is not None else []}
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(record, sort_keys=True, indent=2) + "\n",
                     encoding="utf-8")
@@ -62,6 +99,7 @@ def guest_probe(credentials, workspace, deadline, source, kas_ref, public):
     from lab.guest import Guest  # lazy: unit tests do not require Paramiko
     guest = Guest(credentials, workspace, deadline=deadline)
     phase, reason, exit_code = "NOT_TESTED", "GUEST_NOT_REACHED", None
+    component_gap = None
     try:
         guest.connect(120)
         phase, reason = "BLOCKED", "ENTWARE_PREFLIGHT_UNAVAILABLE"
@@ -71,7 +109,13 @@ def guest_probe(credentials, workspace, deadline, source, kas_ref, public):
                     '/opt/bin/opkg print-architecture | '
                     'grep -q "mipsel-3.4_kn 200"')
         guest.command(required, timeout=45)
-        guest.command('/bin/ndmc -c "show version" >/dev/null', timeout=45)
+        version_output = guest.command('/bin/ndmc -c "show version"', timeout=45)
+        component_gap = missing_required_components(version_output)
+        if component_gap is None:
+            print("KAS COMPONENT INVENTORY: UNKNOWN", flush=True)
+        else:
+            print("KAS COMPONENT INVENTORY: verified required IDs, missing=%d" %
+                  len(component_gap), flush=True)
         print("KAS MIPSEL PREFLIGHT: native Entware and ndmc reachable", flush=True)
         phase, reason = "BLOCKED", "PINNED_SOURCE_DELIVERY_FAILED"
         guest.command("mkdir -p /opt/lab; chmod 700 /opt/lab", timeout=30)
@@ -112,7 +156,8 @@ def guest_probe(credentials, workspace, deadline, source, kas_ref, public):
         raise RuntimeError("KAS guest timed out") from None
     finally:
         guest.close()
-        write_public(public, kas_ref, phase, reason, exit_code)
+        write_public(public, kas_ref, phase, reason, exit_code,
+                     component_gap=component_gap)
 
 
 def main():
