@@ -698,7 +698,11 @@ def derive_telemt_gate(scenario, report):
     pid1 = positions("PID_ALIVE", "/proc/$pid/exe")
     sockets = positions("SOCKETS_LISTENING", "/proc/net/tcp")
     stable = positions("STABLE_AFTER_10S", "sleep 10")
-    stopped = positions("TELEMT_STOPPED", "telemt stop")
+    # `telemt stop` itself is unusable on the 4.9-ndm-5 guest (its
+    # signal_pid_file needs pidfd_open(2), kernel >= 5.3): the honest stop
+    # the chain verifies is SIGTERM via kill(2) on the pidfile pid - the
+    # identical signal `telemt stop` would deliver on a pidfd-capable kernel.
+    stopped = positions("TELEMT_STOPPED", "/opt/bin/busybox kill")
     down = positions("HEALTH_DOWN_AFTER_STOP", "healthcheck --mode liveness")
     restart = positions("telemtlab-start gen=1 pid=[0-9]+", "S99telemtlab start")
     restart_health = positions("RESTART_HEALTH_OK", "healthcheck --mode liveness")

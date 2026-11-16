@@ -62,8 +62,17 @@ telemtlab_start() {
 
 telemtlab_stop() {
     if [ -r "$pidfile" ]; then
-        HOME=/opt/lab TMPDIR=/opt/lab "$bin" stop --pid-file "$pidfile" \
-            >/dev/null 2>&1
+        # telemt's own `stop` uses pidfd_open(2), which the 4.9-ndm-5 guest
+        # kernel does not implement (ENOSYS); deliver the same SIGTERM via
+        # plain kill(2) and wait for the graceful tokio shutdown instead.
+        p=$(/opt/bin/busybox cat "$pidfile" 2>/dev/null)
+        [ -n "$p" ] && /opt/bin/busybox kill "$p" 2>/dev/null
+        n=0
+        while [ "$n" -lt 10 ]; do
+            telemtlab_worker_alive "$p" || break
+            /opt/bin/busybox sleep 1
+            n=$((n+1))
+        done
     fi
     /opt/bin/busybox rm -f "$pidfile"
     return 0
