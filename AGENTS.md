@@ -17,3 +17,5 @@
 ## Token economy loop guard (14.11.2026)
 
 Для агентных циклов действует [KAS token economy](https://github.com/saymer-alt/keenetic-auto-setup/blob/main/docs/agent-token-efficiency.md), адаптированная к QEMU-лаборатории: одно задание — одна ветка; сначала дешёвые host-проверки и существующие evidence, потом native QEMU; после двух одинаковых попыток без новой информации — новая гипотеза или BLOCKED, а не повтор запуска; тяжёлый прогон повторяется только под изменившийся SHA/код/окружение. Правила §1–2 (Loop Guard, Evidence Reuse) имеют приоритет над любыми бюджетными ориентирами.
+
+Практический порядок и учёт GitHub Actions: [docs/agent-token-economy.md](docs/agent-token-economy.md). Он дополняет, а не отменяет обязательные proof, safety-gates и owner GO.
