@@ -146,6 +146,35 @@ def matched_installer_error(output, source):
     return best
 
 
+MIHOMO_OUTPUT_MARKERS = (
+    # Genuine version banner (printed on the -v success path).
+    "Mihomo Meta",
+    # mihomo main() resolver tripwire: "panic: should never be called" plus a
+    # goroutine dump, then os.Exit(2); fires whenever DefaultResolver is used.
+    "panic: should never be called",
+    # Go flag package parse failure (ExitOnError -> os.Exit(2)).
+    "flag provided but not defined",
+    # Go runtime allocation/reservation fatals (exit 2).
+    "runtime: out of memory",
+    "fatal error:",
+)
+
+
+def mihomo_output_marker(stdout, stderr):
+    """Match guest output against fixed mihomo/Go constants; never raw text.
+
+    Same policy as matched_installer_error: only allowlisted constants from
+    the pinned upstream source may be published, in fixed priority order.
+    """
+    if not isinstance(stdout, str) or not isinstance(stderr, str):
+        return None
+    text = stdout + "\n" + stderr
+    for marker in MIHOMO_OUTPUT_MARKERS:
+        if marker in text:
+            return marker
+    return None
+
+
 def mihomo_output_categories(stdout, stderr):
     """Fixed booleans about Mihomo -v output; never the raw guest text."""
     if not isinstance(stdout, str) or not isinstance(stderr, str):
@@ -181,7 +210,8 @@ def write_public(path, kas_ref, phase, reason, exit_code=None, component_gap=Non
                  mihomo_binary_version_verified=False,
                  installer_error_prefix=None, mihomo_binary_path="none",
                  mihomo_probe_exit_code=None, mihomo_output_has_name=False,
-                 mihomo_output_has_version=False, kas_magitrickle_feed=False,
+                 mihomo_output_has_version=False, mihomo_output_marker=None,
+                 kas_magitrickle_feed=False,
                  socat_package_installed=False,
                  magitrickle_package_installed=False,
                  magitrickle_daemon_running=False,
@@ -220,6 +250,9 @@ def write_public(path, kas_ref, phase, reason, exit_code=None, component_gap=Non
                                          else None),
               "mihomo_output_has_name": bool(mihomo_output_has_name),
               "mihomo_output_has_version": bool(mihomo_output_has_version),
+              "mihomo_output_marker": (mihomo_output_marker
+                                       if mihomo_output_marker in MIHOMO_OUTPUT_MARKERS
+                                       else None),
               "kas_magitrickle_feed": bool(kas_magitrickle_feed),
               "socat_package_installed": bool(socat_package_installed),
               "magitrickle_package_installed": bool(magitrickle_package_installed),
@@ -252,6 +285,7 @@ def guest_probe(credentials, workspace, deadline, source, kas_ref, public,
     mihomo_probe_exit_code = None
     mihomo_output_has_name = False
     mihomo_output_has_version = False
+    mihomo_output_marker_value = None
     socat_package_installed = False
     magitrickle_package_installed = False
     magitrickle_daemon_running = False
@@ -365,14 +399,17 @@ def guest_probe(credentials, workspace, deadline, source, kas_ref, public,
                         (mihomo_output_has_name,
                          mihomo_output_has_version) = mihomo_output_categories(
                             ver_out, ver_err)
+                        mihomo_output_marker_value = mihomo_output_marker(
+                            ver_out, ver_err)
                         mihomo_binary_version_verified = (
                             ver_rc == 0 and mihomo_output_has_name
                             and mihomo_output_has_version)
                 print("KAS MIPSEL MIHOMO: opkg=%s binary_version=%s probe_rc=%s "
-                      "path=%s name=%s version=%s" %
+                      "path=%s name=%s version=%s marker=%s" %
                       (mihomo_package_installed, mihomo_binary_version_verified,
                        mihomo_probe_exit_code, mihomo_binary_path,
-                       mihomo_output_has_name, mihomo_output_has_version),
+                       mihomo_output_has_name, mihomo_output_has_version,
+                       mihomo_output_marker_value),
                       flush=True)
             if kas_magitrickle_feed:
                 # Lab-direct pinned-dependency probe. The real installer's
@@ -459,6 +496,7 @@ def guest_probe(credentials, workspace, deadline, source, kas_ref, public,
                      mihomo_probe_exit_code=mihomo_probe_exit_code,
                      mihomo_output_has_name=mihomo_output_has_name,
                      mihomo_output_has_version=mihomo_output_has_version,
+                     mihomo_output_marker=mihomo_output_marker_value,
                      kas_magitrickle_feed=kas_magitrickle_feed,
                      socat_package_installed=socat_package_installed,
                      magitrickle_package_installed=magitrickle_package_installed,

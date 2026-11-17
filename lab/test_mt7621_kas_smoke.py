@@ -9,7 +9,7 @@ from lab.mt7621.kas_smoke import (
     classify_failure, write_public, missing_required_components,
     guarded_refusal_proven, lab_only_without_ext_utils_guard,
     verified_mihomo_version, matched_installer_error,
-    mihomo_output_categories,
+    mihomo_output_categories, mihomo_output_marker,
     require_exact_lab_component_gap, LAB_EXT_UTILS_GUARD,
     LAB_EXT_UTILS_DISABLED,
 )
@@ -47,7 +47,8 @@ class Mt7621KASGuestContracts(unittest.TestCase):
                                         "mihomo_binary_version_verified",
                                         "installer_error_prefix", "mihomo_binary_path",
                                         "mihomo_probe_exit_code", "mihomo_output_has_name",
-                                        "mihomo_output_has_version", "kas_magitrickle_feed",
+                                        "mihomo_output_has_version", "mihomo_output_marker",
+                                        "kas_magitrickle_feed",
                                         "socat_package_installed", "magitrickle_package_installed",
                                         "magitrickle_daemon_running",
                                         "magitrickle_init_script_present"})
@@ -67,6 +68,7 @@ class Mt7621KASGuestContracts(unittest.TestCase):
             self.assertIsNone(rec["mihomo_probe_exit_code"])
             self.assertFalse(rec["mihomo_output_has_name"])
             self.assertFalse(rec["mihomo_output_has_version"])
+            self.assertIsNone(rec["mihomo_output_marker"])
             self.assertFalse(rec["kas_magitrickle_feed"])
             self.assertFalse(rec["socat_package_installed"])
             self.assertFalse(rec["magitrickle_package_installed"])
@@ -239,3 +241,19 @@ class Mt7621KASGuestContracts(unittest.TestCase):
             "", "sh: /opt/bin/mihomo: Exec format error"), (True, False))
         self.assertEqual(mihomo_output_categories("", ""), (False, False))
         self.assertEqual(mihomo_output_categories(None, ""), (False, False))
+
+    def test_mihomo_output_marker_matches_only_pinned_constants(self):
+        self.assertEqual(mihomo_output_marker(
+            "Mihomo Meta v1.19.33 linux mipsle", ""), "Mihomo Meta")
+        self.assertEqual(mihomo_output_marker(
+            "", "panic: should never be called\n\ngoroutine 1 [running]:"),
+            "panic: should never be called")
+        self.assertEqual(mihomo_output_marker(
+            "", "flag provided but not defined: -v\nUsage of mihomo:"),
+            "flag provided but not defined")
+        self.assertEqual(mihomo_output_marker(
+            "runtime: out of memory: cannot allocate", ""), "runtime: out of memory")
+        self.assertEqual(mihomo_output_marker(
+            "", "fatal error: unexpected signal"), "fatal error:")
+        self.assertIsNone(mihomo_output_marker("", "completely unrelated"))
+        self.assertIsNone(mihomo_output_marker(None, None))
