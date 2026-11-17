@@ -123,6 +123,32 @@ base packages are installed. An additional `BLOCKED` (for example a later
 missing Mihomo/MagiTrickle release asset) is a *diagnostic*, never KAS PASS.
 Do not merge, export or run the lab-only patched KAS on physical Keenetic.
 
+### KAS MIPSel Mihomo package and real ELF execution (disposable guest only)
+
+After [PR #105](https://github.com/saymer-alt/router-emulator/pull/105),
+actual native Ported 5.1.8 guest `opkg list-installed` confirmed 6/6 KAS
+base packages, but the overall installer still ended `BLOCKED: IPK_UNAVAILABLE`.
+That category alone did **not** prove which subsequent stage failed.
+
+The next **separate** experiment uses `--lab-ext-utils-exception
+--kas-base-deps --kas-mihomo`: add exactly ONE official native
+`mihomo_1.19.33-1_mipsel-3.4.ipk` (20,301,332 bytes) to the verified
+loopback feed after the existing 25+11 package stages. Its real bytes
+and SHA256 `3f37931cafa0ff08d99a718a0aba171ae4c1dea390a51d557a9baf77aad5f087`
+were verified against upstream's `mipselsf-k3.4` index (2026-11-17).
+The source/ABI/version/dependency closure validator in
+`lab/mt7621/kas_mihomo_deps.py` refuses any additional package or wrong
+digest. The already-proven 25- and 11-package locks are not changed.
+
+The dedicated CI `.github/workflows/mt7621-kas-mihomo-ipk-lab.yml`
+accepts this *limited* experimental goal only when the native QEMU guest
+shows **6/6 base packages**, the exact Mihomo version in `opkg list-installed`,
+**and** successfully executes the real installed MIPSel binary `mihomo -v`
+with a matching version. Neither downloaded-IPK presence nor a green
+diagnostic workflow is proof that KAS has been installed. This run is
+deliberately **not** MagiTrickle readiness; do not spoof component inventory,
+alter production KAS or treat a Ported clone as supported hardware.
+
 ## Quick start (Linux x86_64, incl. WSL2)
 
 ```bash
