@@ -83,6 +83,23 @@ generations; the *broken-sh window* is reproduced by executing an installed
 remove-branch `prerm` outside opkg (same technique and explicit limitation as
 PR #56: this is **not** a truly interrupted opkg transaction).
 
+## Outcome of the window (2026-11-18)
+
+- **MIPSel: the full planned matrix ran on real opkg** — fresh / transition /
+  feedfail / interrupt scenarios, every scenario chain `RESULT PASS` (17/17
+  UART steps) with 69 recorded observations (`evidence.json` + `junit.xml`
+  committed). Headlines: fresh bootstrap busybox is **already held**;
+  `opkg install busybox` **upgrades through the hold flag**; the remove-branch
+  `prerm` window breaks `/bin/sh` exactly as PR #56 observed on AArch64 and
+  the package-owned `postinst` recovers it; killed-opkg states are recoverable
+  by re-running the transaction; `dropbear.conf-opkg` backup reproduced.
+- **AArch64: boot/AUTH/reset-persistence PASS (41/41)** tonight + reused
+  2026-11-06 CI evidence for its Entware/transition rows; its full matrix
+  rerun is queued as the first follow-up (the netns expedient blocked the
+  in-window Entware rerun — see AARCH64-RESULTS.md).
+- **1.37.0-6 baseline: BLOCKED** — the historical IPKs are not published
+  anymore (404 on both feeds); no substitute was invented.
+
 ## Result documents
 
 - `MIPSEL-RESULTS.md` — MT7621 matrix evidence.

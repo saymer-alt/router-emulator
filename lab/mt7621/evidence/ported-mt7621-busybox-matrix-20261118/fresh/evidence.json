@@ -1,0 +1,161 @@
+{
+  "kind": "fresh",
+  "meta": {
+    "arch": "mipsel-3.4",
+    "preset": "xiaomi-mi-router-3g-breed",
+    "pinned_bootstrap_busybox": "1.38.0-5",
+    "old_ipk": {
+      "url": "https://test.entware.net/mipselsf-k3.4/busybox_1.38.0-3_mipsel-3.4.ipk",
+      "version": "1.38.0-3",
+      "sha256": "29954f847e9442fc30cebf6bc7dd17a1fc1d391c2fd037c6df582a30c0e40645"
+    },
+    "preflight_sha256": "defb91a0fa819f06d6dcc6651704b183d45a6bf638f831167da2cb5c3132378e"
+  },
+  "entries": [
+    {
+      "id": "BASELINE_BUSYBOX_STATUS",
+      "label": "opkg status busybox",
+      "command": "/opt/bin/opkg status busybox | /opt/bin/busybox grep -E 'Version|Status'",
+      "rc": 0,
+      "status": "PASS",
+      "reasons": [],
+      "output_tail": "Version: 1.38.0-5\nStatus: install hold installed"
+    },
+    {
+      "id": "BASELINE_SH_LINK",
+      "label": "/opt/bin/sh symlink identity",
+      "command": "/opt/bin/busybox ls -l /opt/bin/sh; /opt/bin/busybox readlink -f /opt/bin/sh",
+      "rc": 0,
+      "status": "PASS",
+      "reasons": [],
+      "output_tail": "lrwxr-xr-x    1 root     root            16 Jan  1 00:05 /opt/bin/sh -> /opt/bin/busybox\n/opt/bin/busybox"
+    },
+    {
+      "id": "BASELINE_VERSION",
+      "label": "busybox banner",
+      "command": "/opt/bin/busybox | /opt/bin/busybox head -1; /opt/bin/sh -c 'echo SHELL_EXEC_OK'",
+      "rc": 0,
+      "status": "PASS",
+      "reasons": [],
+      "output_tail": "BusyBox v1.38.0 (2026-05-13 02:19:59 UTC) multi-call binary.\nSHELL_EXEC_OK"
+    },
+    {
+      "id": "BASELINEAPPLETS",
+      "label": "core applets executable",
+      "command": "/opt/bin/busybox sh -c 'chmod --help >/dev/null 2>&1; printf A_%s $((40+$?)); rm --help >/dev/null 2>&1; printf R_%s $((40+$?)); sleep 0; printf S_%s $((40+$?)); ls /opt >/dev/null; printf L_%s $((40+$?))'",
+      "rc": 0,
+      "status": "PASS",
+      "reasons": [],
+      "output_tail": "A_40R_40S_40L_40"
+    },
+    {
+      "id": "BASELINE_WGET_TLS",
+      "label": "wget/curl TLS capability inventory",
+      "command": "/opt/bin/busybox ls -l /opt/bin/wget /opt/bin/wget-ssl 2>&1; /opt/bin/busybox command -v curl && /opt/bin/curl --version | head -1",
+      "rc": 127,
+      "status": "OBSERVED",
+      "reasons": [],
+      "output_tail": "ls: /opt/bin/wget-ssl: No such file or directory\nlrwxr-xr-x    1 root     root            16 Jan  1 00:05 /opt/bin/wget -> /opt/bin/busybox\ncommand: applet not found"
+    },
+    {
+      "id": "BASELINE_Dropbear",
+      "label": "dropbear config + listener",
+      "command": "/opt/bin/busybox cat /opt/etc/config/dropbear.conf; /opt/bin/busybox netstat -tln 2>/dev/null | /opt/bin/busybox grep :222 || echo NETSTAT_UNAVAILABLE",
+      "rc": 0,
+      "status": "PASS",
+      "reasons": [],
+      "output_tail": "PORT=222\nPIDFILE=\"/var/run/lab-dropbear.pid\"\ntcp        0      0 0.0.0.0:222             0.0.0.0:*               LISTEN      \ntcp        0      0 :::222                  :::*                    LISTEN"
+    },
+    {
+      "id": "P01_FRESH_BOOTSTRAP_STATE",
+      "label": "busybox version from fresh pinned bootstrap",
+      "command": "/opt/bin/opkg status busybox | /opt/bin/busybox grep -E 'Package|Version'",
+      "rc": 0,
+      "status": "PASS",
+      "reasons": [],
+      "output_tail": "Package: busybox\nVersion: 1.38.0-5"
+    },
+    {
+      "id": "P02_OPKG_UPDATE",
+      "label": "opkg update against pinned local mirror",
+      "command": "/opt/bin/opkg update",
+      "rc": 0,
+      "status": "PASS",
+      "reasons": [],
+      "output_tail": "Downloading http://192.168.1.100/entware/Packages.gz\nUpdated list of available packages in /opt/var/opkg-lists/entware\nDownloading http://192.168.1.100/keenetic/Packages.gz\nUpdated list of available packages in /opt/var/opkg-lists/keendev"
+    },
+    {
+      "id": "P03_INSTALL_CURRENT",
+      "label": "opkg install busybox at current version",
+      "command": "/opt/bin/opkg install busybox",
+      "rc": 0,
+      "status": "PASS",
+      "reasons": [],
+      "output_tail": "Package busybox (1.38.0-5) installed in root is up to date."
+    },
+    {
+      "id": "P10_FORCE_REINSTALL",
+      "label": "opkg install --force-reinstall busybox (real scripts)",
+      "command": "/opt/bin/opkg install --force-reinstall busybox",
+      "rc": 0,
+      "status": "PASS",
+      "reasons": [],
+      "output_tail": "Warning: '/opt/bin/grep' is already exists, skipping.\nRemoving package busybox from root...\nInstalling busybox (1.38.0-5) to root...\nDownloading http://192.168.1.100/entware/busybox_1.38.0-5_mipsel-3.4.ipk\nConfiguring busybox."
+    },
+    {
+      "id": "P10_POST_REINSTALL_STATE",
+      "label": "applets + sh after forced reinstall",
+      "command": "/opt/bin/sh -c 'echo SHELL_OK'; /opt/bin/busybox ls -l /opt/bin/.busybox.opkg-keep 2>&1 | head -1",
+      "rc": 0,
+      "status": "PASS",
+      "reasons": [],
+      "output_tail": "SHELL_OK\nls: /opt/bin/.busybox.opkg-keep: No such file or directory"
+    },
+    {
+      "id": "PREFLIGHT_FRESH",
+      "label": "KAS preflight on healthy fresh bootstrap",
+      "command": "/opt/bin/busybox sh /opt/lab/preflight.sh > /opt/lab/preflight-out.txt 2>&1; printf 'PREFLIGHT_RC=%s\\n' \"$?\"; /opt/bin/busybox tail -40 /opt/lab/preflight-out.txt",
+      "rc": 0,
+      "status": "OBSERVED",
+      "reasons": [],
+      "output_tail": "PREFLIGHT_RC=2\nPASS: busybox-binary: /opt/bin/busybox present and executes\nPASS: opt-sh: /opt/bin/sh present and executes\nPASS: applet-chmod: /opt/bin/chmod resolves to an executable file\nPASS: applet-ln: /opt/bin/ln resolves to an executable file\nPASS: applet-rm: /opt/bin/rm resolves to an executable file\nPASS: applet-cp: /opt/bin/cp resolves to an executable file\nPASS: applet-mv: /opt/bin/mv resolves to an executable file\nPASS: applet-ls: /opt/bin/ls resolves to an executable file\nPASS: applet-cat: /opt/bin/cat resolves to an executable file\nPASS: applet-grep: /opt/bin/grep resolves to an executable file\nPASS: applet-sed: /opt/bin/sed resolves to an executable file\nPASS: applet-awk: /opt/bin/awk resolves to an executable file\nPASS: applet-wget: /opt/bin/wget resolves to an executable file\nWARN: wget-capability: /opt/bin/wget points at busybox: the BusyBox wget applet has no HTTPS support, https feeds will fail with 'wget returned 1' (Entware #887)\nUNKNOWN: opkg-view: opkg did not report busybox as 'install ok installed'; the package database may be damaged or mid-transaction",
+      "preflight_rc": 2
+    },
+    {
+      "id": "P11_REBOOT",
+      "label": "native system reboot",
+      "command": "/bin/ndmc -c 'system reboot'",
+      "rc": 0,
+      "status": "PASS",
+      "reasons": [],
+      "output_tail": "\u001b[KCore::System::RebootManager: Activated system reboot.\n\u001b[K"
+    },
+    {
+      "id": "P11_POST_REBOOT",
+      "label": "/opt ext4 + opkg + busybox after reboot",
+      "command": "/opt/bin/busybox grep ' /opt ext4' /proc/mounts | head -1; /opt/bin/opkg status busybox | /opt/bin/busybox grep '^Version'; /opt/bin/sh -c 'echo SHELL_OK_AFTER_REBOOT'",
+      "rc": 0,
+      "status": "PASS",
+      "reasons": [],
+      "output_tail": "/dev/sda1 /opt ext4 rw,noatime,data=ordered 0 0\nVersion: 1.38.0-5\nSHELL_OK_AFTER_REBOOT"
+    },
+    {
+      "id": "P12_IDEMPOTENT_UPGRADE",
+      "label": "opkg update && opkg upgrade busybox (no version delta)",
+      "command": "/opt/bin/opkg update >/dev/null 2>&1; /opt/bin/opkg upgrade busybox",
+      "rc": 0,
+      "status": "PASS",
+      "reasons": [],
+      "output_tail": "Not upgrading package busybox which is marked hold (flags=0x302)."
+    },
+    {
+      "id": "P12_FINAL_STATE",
+      "label": "final busybox state",
+      "command": "/opt/bin/opkg status busybox | /opt/bin/busybox grep '^Version'; /opt/bin/sh -c 'echo FINAL_SHELL_OK'",
+      "rc": 0,
+      "status": "PASS",
+      "reasons": [],
+      "output_tail": "Version: 1.38.0-5\nFINAL_SHELL_OK"
+    }
+  ]
+}

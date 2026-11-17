@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<testsuite name="feedfail" tests="14">
+  <testcase name="BASELINE_BUSYBOX_STATUS" classname="busybox-matrix.feedfail" status="PASS"></testcase>
+  <testcase name="BASELINE_SH_LINK" classname="busybox-matrix.feedfail" status="PASS"></testcase>
+  <testcase name="BASELINE_VERSION" classname="busybox-matrix.feedfail" status="PASS"></testcase>
+  <testcase name="BASELINEAPPLETS" classname="busybox-matrix.feedfail" status="PASS"></testcase>
+  <testcase name="BASELINE_WGET_TLS" classname="busybox-matrix.feedfail" status="OBSERVED"></testcase>
+  <testcase name="BASELINE_Dropbear" classname="busybox-matrix.feedfail" status="PASS"></testcase>
+  <testcase name="N07_FEED_DOWN_UPDATE" classname="busybox-matrix.feedfail" status="OBSERVED"></testcase>
+  <testcase name="N07_STATE_UNCHANGED" classname="busybox-matrix.feedfail" status="PASS"></testcase>
+  <testcase name="N07_INSTALL_REFUSAL" classname="busybox-matrix.feedfail" status="OBSERVED"></testcase>
+  <testcase name="N07_PREFLIGHT" classname="busybox-matrix.feedfail" status="OBSERVED"></testcase>
+  <testcase name="N07_FEED_RESTORED" classname="busybox-matrix.feedfail" status="PASS"></testcase>
+  <testcase name="N08_TLS_CLIENT_ERRORS" classname="busybox-matrix.feedfail" status="OBSERVED"></testcase>
+  <testcase name="N08_PREFLIGHT" classname="busybox-matrix.feedfail" status="OBSERVED"></testcase>
+  <testcase name="N08_FINAL_STATE" classname="busybox-matrix.feedfail" status="PASS"></testcase>
+</testsuite>

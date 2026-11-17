@@ -436,7 +436,7 @@ def after_scenario_factory(args, recorder, phases):
             guest.command("mkdir -p /opt/lab")
             guest_put(guest, "/opt/lab/preflight.sh", args.preflight_data)
             guest.command("/opt/bin/busybox sha256sum /opt/lab/preflight.sh"
-                          " | /opt/bin/busybox grep -q %s" % args.preflight_sha)
+                          " | /opt/bin/busybox grep -q %s" % args.preflight_sha256)
             if args.kind == "transition":
                 guest_put(guest, "/opt/lab/busybox-old.ipk", args.old_ipk_data)
                 guest.command("/opt/bin/busybox sha256sum /opt/lab/busybox-old.ipk"
@@ -493,6 +493,7 @@ def main():
     preflight_data = Path(args.preflight_file).read_bytes()
     if hashlib.sha256(preflight_data).hexdigest() != args.preflight_sha256:
         raise ValueError("preflight digest mismatch (fail closed)")
+    Path(args.cache_dir).mkdir(parents=True, exist_ok=True)
     old_ipk_data = fetch(OLD_IPK_URL, OLD_IPK_SHA256,
                          Path(args.cache_dir) / ("busybox_%s_mipsel-3.4.ipk" % OLD_IPK_VERSION))
     args.preflight_data = preflight_data
@@ -515,8 +516,8 @@ def main():
                     "sha256": OLD_IPK_SHA256},
         "preflight_sha256": args.preflight_sha256,
     })
-    phases = {"fresh": phase_fresh, "transition": phase_transition,
-              "feedfail": phase_feedfail, "interrupt": phase_interrupt}[args.kind]
+    phases = [{"fresh": phase_fresh, "transition": phase_transition,
+               "feedfail": phase_feedfail, "interrupt": phase_interrupt}[args.kind]]
     scenario = workspace / "scenario.json"
     scenario.write_text(json.dumps({
         "name": "MT7621 Entware BusyBox matrix (%s): pristine NAND + fresh pinned bootstrap"

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<testsuite name="interrupt" tests="15">
+  <testcase name="BASELINE_BUSYBOX_STATUS" classname="busybox-matrix.interrupt" status="PASS"></testcase>
+  <testcase name="BASELINE_SH_LINK" classname="busybox-matrix.interrupt" status="PASS"></testcase>
+  <testcase name="BASELINE_VERSION" classname="busybox-matrix.interrupt" status="PASS"></testcase>
+  <testcase name="BASELINEAPPLETS" classname="busybox-matrix.interrupt" status="PASS"></testcase>
+  <testcase name="BASELINE_WGET_TLS" classname="busybox-matrix.interrupt" status="OBSERVED"></testcase>
+  <testcase name="BASELINE_Dropbear" classname="busybox-matrix.interrupt" status="PASS"></testcase>
+  <testcase name="N01_PIN_POSTINST" classname="busybox-matrix.interrupt" status="PASS"></testcase>
+  <testcase name="N01_PRERM_WINDOW" classname="busybox-matrix.interrupt" status="OBSERVED"></testcase>
+  <testcase name="N01_NEW_SSH_SESSION" classname="busybox-matrix.interrupt" status="PASS"></testcase>
+  <testcase name="N01_PREFLIGHT_RECOVERED" classname="busybox-matrix.interrupt" status="OBSERVED"></testcase>
+  <testcase name="N10_KILL_MID_TRANSACTION" classname="busybox-matrix.interrupt" status="OBSERVED"></testcase>
+  <testcase name="N10_STATE_AFTER_KILL" classname="busybox-matrix.interrupt" status="OBSERVED"></testcase>
+  <testcase name="N15_RERUN_COMPLETES" classname="busybox-matrix.interrupt" status="PASS"></testcase>
+  <testcase name="N15_STATE_CLEAN" classname="busybox-matrix.interrupt" status="PASS"></testcase>
+  <testcase name="PREFLIGHT_FINAL" classname="busybox-matrix.interrupt" status="OBSERVED"></testcase>
+</testsuite>

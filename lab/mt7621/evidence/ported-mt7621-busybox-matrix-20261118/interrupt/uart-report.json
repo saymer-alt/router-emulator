@@ -1,0 +1,95 @@
+{
+  "scenario": "MT7621 Entware BusyBox matrix (interrupt): pristine NAND + fresh pinned bootstrap",
+  "evidence": "KEENETIC_PORTED_EXPERIMENTAL",
+  "outcome": "PASS",
+  "elapsed_seconds": 438.76,
+  "steps": [
+    {
+      "action": "wait_serial",
+      "outcome": "PASS",
+      "elapsed_seconds": 1.25
+    },
+    {
+      "action": "wait_serial",
+      "outcome": "PASS",
+      "elapsed_seconds": 27.8
+    },
+    {
+      "action": "wait_serial",
+      "outcome": "PASS",
+      "elapsed_seconds": 0.0
+    },
+    {
+      "action": "wait_serial",
+      "outcome": "PASS",
+      "elapsed_seconds": 20.02
+    },
+    {
+      "action": "wait_serial",
+      "outcome": "PASS",
+      "elapsed_seconds": 141.74
+    },
+    {
+      "action": "wait_serial",
+      "outcome": "PASS",
+      "elapsed_seconds": 2.5
+    },
+    {
+      "action": "sleep",
+      "outcome": "PASS",
+      "elapsed_seconds": 15.02
+    },
+    {
+      "action": "telnet",
+      "outcome": "PASS",
+      "elapsed_seconds": 0.48
+    },
+    {
+      "action": "telnet",
+      "outcome": "PASS",
+      "elapsed_seconds": 0.35
+    },
+    {
+      "action": "telnet",
+      "outcome": "PASS",
+      "elapsed_seconds": 2.53
+    },
+    {
+      "action": "wait_serial",
+      "outcome": "PASS",
+      "elapsed_seconds": 32.09
+    },
+    {
+      "action": "wait_serial",
+      "outcome": "PASS",
+      "elapsed_seconds": 4.01
+    },
+    {
+      "action": "wait_serial",
+      "outcome": "PASS",
+      "elapsed_seconds": 106.96
+    },
+    {
+      "action": "ssh",
+      "outcome": "PASS",
+      "elapsed_seconds": 1.2
+    },
+    {
+      "action": "ssh",
+      "outcome": "PASS",
+      "elapsed_seconds": 0.47
+    },
+    {
+      "action": "ssh",
+      "outcome": "PASS",
+      "elapsed_seconds": 0.7
+    },
+    {
+      "action": "ssh",
+      "outcome": "PASS",
+      "elapsed_seconds": 1.06
+    }
+  ],
+  "failure": null,
+  "warning": "Virtual test evidence is NOT physical-router acceptance."
+}

@@ -1,0 +1,234 @@
+{
+  "kind": "transition",
+  "meta": {
+    "arch": "mipsel-3.4",
+    "preset": "xiaomi-mi-router-3g-breed",
+    "pinned_bootstrap_busybox": "1.38.0-5",
+    "old_ipk": {
+      "url": "https://test.entware.net/mipselsf-k3.4/busybox_1.38.0-3_mipsel-3.4.ipk",
+      "version": "1.38.0-3",
+      "sha256": "29954f847e9442fc30cebf6bc7dd17a1fc1d391c2fd037c6df582a30c0e40645"
+    },
+    "preflight_sha256": "defb91a0fa819f06d6dcc6651704b183d45a6bf638f831167da2cb5c3132378e"
+  },
+  "entries": [
+    {
+      "id": "BASELINE_BUSYBOX_STATUS",
+      "label": "opkg status busybox",
+      "command": "/opt/bin/opkg status busybox | /opt/bin/busybox grep -E 'Version|Status'",
+      "rc": 0,
+      "status": "PASS",
+      "reasons": [],
+      "output_tail": "Version: 1.38.0-5\nStatus: install hold installed"
+    },
+    {
+      "id": "BASELINE_SH_LINK",
+      "label": "/opt/bin/sh symlink identity",
+      "command": "/opt/bin/busybox ls -l /opt/bin/sh; /opt/bin/busybox readlink -f /opt/bin/sh",
+      "rc": 0,
+      "status": "PASS",
+      "reasons": [],
+      "output_tail": "lrwxr-xr-x    1 root     root            16 Jan  1 00:04 /opt/bin/sh -> /opt/bin/busybox\n/opt/bin/busybox"
+    },
+    {
+      "id": "BASELINE_VERSION",
+      "label": "busybox banner",
+      "command": "/opt/bin/busybox | /opt/bin/busybox head -1; /opt/bin/sh -c 'echo SHELL_EXEC_OK'",
+      "rc": 0,
+      "status": "PASS",
+      "reasons": [],
+      "output_tail": "BusyBox v1.38.0 (2026-05-13 02:19:59 UTC) multi-call binary.\nSHELL_EXEC_OK"
+    },
+    {
+      "id": "BASELINEAPPLETS",
+      "label": "core applets executable",
+      "command": "/opt/bin/busybox sh -c 'chmod --help >/dev/null 2>&1; printf A_%s $((40+$?)); rm --help >/dev/null 2>&1; printf R_%s $((40+$?)); sleep 0; printf S_%s $((40+$?)); ls /opt >/dev/null; printf L_%s $((40+$?))'",
+      "rc": 0,
+      "status": "PASS",
+      "reasons": [],
+      "output_tail": "A_40R_40S_40L_40"
+    },
+    {
+      "id": "BASELINE_WGET_TLS",
+      "label": "wget/curl TLS capability inventory",
+      "command": "/opt/bin/busybox ls -l /opt/bin/wget /opt/bin/wget-ssl 2>&1; /opt/bin/busybox command -v curl && /opt/bin/curl --version | head -1",
+      "rc": 127,
+      "status": "OBSERVED",
+      "reasons": [],
+      "output_tail": "ls: /opt/bin/wget-ssl: No such file or directory\nlrwxr-xr-x    1 root     root            16 Jan  1 00:04 /opt/bin/wget -> /opt/bin/busybox\ncommand: applet not found"
+    },
+    {
+      "id": "BASELINE_Dropbear",
+      "label": "dropbear config + listener",
+      "command": "/opt/bin/busybox cat /opt/etc/config/dropbear.conf; /opt/bin/busybox netstat -tln 2>/dev/null | /opt/bin/busybox grep :222 || echo NETSTAT_UNAVAILABLE",
+      "rc": 0,
+      "status": "PASS",
+      "reasons": [],
+      "output_tail": "PORT=222\nPIDFILE=\"/var/run/lab-dropbear.pid\"\ntcp        0      0 0.0.0.0:222             0.0.0.0:*               LISTEN      \ntcp        0      0 :::222                  :::*                    LISTEN"
+    },
+    {
+      "id": "P04_DOWNGRADE_TO_OLD",
+      "label": "real opkg downgrade 1.38.0-5 -> 1.38.0-3 (local pinned IPK)",
+      "command": "/opt/bin/opkg install --force-downgrade /opt/lab/busybox-old.ipk",
+      "rc": 0,
+      "status": "PASS",
+      "reasons": [],
+      "output_tail": "Multiple packages (busybox and busybox) providing same name marked HOLD or PREFER. Using latest.\nDowngrading busybox on root from 1.38.0-5 to 1.38.0-3...\nConfiguring busybox."
+    },
+    {
+      "id": "P04_STATE_OLD",
+      "label": "installed version + .busybox.opkg-keep mechanism after downgrade",
+      "command": "/opt/bin/opkg status busybox | /opt/bin/busybox grep '^Version'; /opt/bin/busybox ls -l /opt/bin/.busybox.opkg-keep 2>&1; /opt/bin/busybox readlink /opt/bin/sh; /opt/bin/busybox /opt/bin/busybox 2>/dev/null | head -1",
+      "rc": 0,
+      "status": "PASS",
+      "reasons": [],
+      "output_tail": "Version: 1.38.0-3\n-rwsr-xr-x    1 root     root        658452 May 13  2026 /opt/bin/.busybox.opkg-keep\n/opt/bin/.busybox.opkg-keep\nBusyBox v1.38.0 (2026-05-13 02:19:59 UTC) multi-call binary."
+    },
+    {
+      "id": "PREFLIGHT_AFTER_DOWNGRADE",
+      "label": "KAS preflight after downgrade",
+      "command": "/opt/bin/busybox sh /opt/lab/preflight.sh > /opt/lab/preflight-out.txt 2>&1; printf 'PREFLIGHT_RC=%s\\n' \"$?\"; /opt/bin/busybox tail -40 /opt/lab/preflight-out.txt",
+      "rc": 0,
+      "status": "OBSERVED",
+      "reasons": [],
+      "output_tail": "PREFLIGHT_RC=2\nPASS: busybox-binary: /opt/bin/busybox present and executes\nPASS: opt-sh: /opt/bin/sh present and executes\nPASS: applet-chmod: /opt/bin/chmod resolves to an executable file\nPASS: applet-ln: /opt/bin/ln resolves to an executable file\nPASS: applet-rm: /opt/bin/rm resolves to an executable file\nPASS: applet-cp: /opt/bin/cp resolves to an executable file\nPASS: applet-mv: /opt/bin/mv resolves to an executable file\nPASS: applet-ls: /opt/bin/ls resolves to an executable file\nPASS: applet-cat: /opt/bin/cat resolves to an executable file\nPASS: applet-grep: /opt/bin/grep resolves to an executable file\nPASS: applet-sed: /opt/bin/sed resolves to an executable file\nPASS: applet-awk: /opt/bin/awk resolves to an executable file\nPASS: applet-wget: /opt/bin/wget resolves to an executable file\nPASS: wget-capability: /opt/bin/wget does not resolve to the canonical BusyBox binary\nUNKNOWN: opkg-view: opkg did not report busybox as 'install ok installed'; the package database may be damaged or mid-transaction",
+      "preflight_rc": 2
+    },
+    {
+      "id": "P08_HOLD_SET",
+      "label": "flag hold busybox while an older version is installed",
+      "command": "/opt/bin/opkg flag hold busybox; /opt/bin/opkg status busybox | /opt/bin/busybox grep -E '^Status'",
+      "rc": 0,
+      "status": "PASS",
+      "reasons": [],
+      "output_tail": "Setting flags for package busybox to hold.\nStatus: install hold installed"
+    },
+    {
+      "id": "P07A_OPKG_UPDATE",
+      "label": "opkg update (feed index now offers 1.38.0-5)",
+      "command": "/opt/bin/opkg update",
+      "rc": 0,
+      "status": "PASS",
+      "reasons": [],
+      "output_tail": "Downloading http://192.168.1.100/entware/Packages.gz\nUpdated list of available packages in /opt/var/opkg-lists/entware\nDownloading http://192.168.1.100/keenetic/Packages.gz\nUpdated list of available packages in /opt/var/opkg-lists/keendev"
+    },
+    {
+      "id": "P07B_INSTALL_BUSYBOX",
+      "label": "the advised 'opkg install busybox' step (real upgrade here)",
+      "command": "/opt/bin/opkg install busybox",
+      "rc": 0,
+      "status": "PASS",
+      "reasons": [],
+      "output_tail": "Warning: '/opt/bin/grep' is already exists, skipping.\nUpgrading busybox on root from 1.38.0-3 to 1.38.0-5...\nDownloading http://192.168.1.100/entware/busybox_1.38.0-5_mipsel-3.4.ipk\nConfiguring busybox."
+    },
+    {
+      "id": "P07C_OPKG_UPGRADE",
+      "label": "mass opkg upgrade after the install step (busybox still held)",
+      "command": "/opt/bin/opkg upgrade",
+      "rc": 0,
+      "status": "PASS",
+      "reasons": [],
+      "output_tail": ""
+    },
+    {
+      "id": "P08_UNHOLD",
+      "label": "unhold busybox after the transition",
+      "command": "/opt/bin/opkg flag unhold busybox; /opt/bin/opkg status busybox | /opt/bin/busybox grep -E '^Status'",
+      "rc": 0,
+      "status": "PASS",
+      "reasons": [],
+      "output_tail": "Setting flags for package busybox to unhold.\nStatus: install user installed"
+    },
+    {
+      "id": "P05_STATE_AFTER_TRANSITION",
+      "label": "final version + links + fresh SSH exec",
+      "command": "/opt/bin/opkg status busybox | /opt/bin/busybox grep '^Version'; /opt/bin/busybox readlink /opt/bin/sh; /opt/bin/busybox ls -l /opt/bin/.busybox.opkg-keep 2>&1 | head -1",
+      "rc": 0,
+      "status": "PASS",
+      "reasons": [],
+      "output_tail": "Version: 1.38.0-5\n/opt/bin/busybox\nls: /opt/bin/.busybox.opkg-keep: No such file or directory"
+    },
+    {
+      "id": "P05_APPLETS_AFTER_TRANSITION",
+      "label": "applets and warnings inventory",
+      "command": "/opt/bin/sh -c 'echo SHELL_OK'; /opt/bin/busybox sh -c 'chmod --help >/dev/null 2>&1; printf A_%s $((40+$?)); rm --help >/dev/null 2>&1; printf R_%s $((40+$?))'",
+      "rc": 0,
+      "status": "PASS",
+      "reasons": [],
+      "output_tail": "SHELL_OK\nA_40R_40"
+    },
+    {
+      "id": "PREFLIGHT_AFTER_TRANSITION",
+      "label": "KAS preflight after the full transition",
+      "command": "/opt/bin/busybox sh /opt/lab/preflight.sh > /opt/lab/preflight-out.txt 2>&1; printf 'PREFLIGHT_RC=%s\\n' \"$?\"; /opt/bin/busybox tail -40 /opt/lab/preflight-out.txt",
+      "rc": 0,
+      "status": "OBSERVED",
+      "reasons": [],
+      "output_tail": "PREFLIGHT_RC=2\nPASS: busybox-binary: /opt/bin/busybox present and executes\nPASS: opt-sh: /opt/bin/sh present and executes\nPASS: applet-chmod: /opt/bin/chmod resolves to an executable file\nPASS: applet-ln: /opt/bin/ln resolves to an executable file\nPASS: applet-rm: /opt/bin/rm resolves to an executable file\nPASS: applet-cp: /opt/bin/cp resolves to an executable file\nPASS: applet-mv: /opt/bin/mv resolves to an executable file\nPASS: applet-ls: /opt/bin/ls resolves to an executable file\nPASS: applet-cat: /opt/bin/cat resolves to an executable file\nPASS: applet-grep: /opt/bin/grep resolves to an executable file\nPASS: applet-sed: /opt/bin/sed resolves to an executable file\nPASS: applet-awk: /opt/bin/awk resolves to an executable file\nPASS: applet-wget: /opt/bin/wget resolves to an executable file\nWARN: wget-capability: /opt/bin/wget points at busybox: the BusyBox wget applet has no HTTPS support, https feeds will fail with 'wget returned 1' (Entware #887)\nUNKNOWN: opkg-view: opkg did not report busybox as 'install ok installed'; the package database may be damaged or mid-transaction",
+      "preflight_rc": 2
+    },
+    {
+      "id": "P11_REBOOT",
+      "label": "native system reboot",
+      "command": "/bin/ndmc -c 'system reboot'",
+      "rc": 0,
+      "status": "PASS",
+      "reasons": [],
+      "output_tail": "\u001b[KCore::System::RebootManager: Activated system reboot.\n\u001b[K"
+    },
+    {
+      "id": "P11_POST_REBOOT",
+      "label": "/opt ext4 + opkg + busybox after reboot",
+      "command": "/opt/bin/busybox grep ' /opt ext4' /proc/mounts | head -1; /opt/bin/opkg status busybox | /opt/bin/busybox grep '^Version'; /opt/bin/sh -c 'echo SHELL_OK_AFTER_REBOOT'",
+      "rc": 0,
+      "status": "PASS",
+      "reasons": [],
+      "output_tail": "/dev/sda1 /opt ext4 rw,noatime,data=ordered 0 0\nVersion: 1.38.0-5\nSHELL_OK_AFTER_REBOOT"
+    },
+    {
+      "id": "P12_IDEMPOTENT_UPGRADE",
+      "label": "second opkg upgrade (idempotence)",
+      "command": "/opt/bin/opkg upgrade busybox",
+      "rc": 0,
+      "status": "PASS",
+      "reasons": [],
+      "output_tail": ""
+    },
+    {
+      "id": "P12_FINAL_STATE",
+      "label": "final state after idempotent upgrade",
+      "command": "/opt/bin/opkg status busybox | /opt/bin/busybox grep '^Version'; /opt/bin/sh -c 'echo FINAL_SHELL_OK'",
+      "rc": 0,
+      "status": "PASS",
+      "reasons": [],
+      "output_tail": "Version: 1.38.0-5\nFINAL_SHELL_OK"
+    },
+    {
+      "id": "N14_MODIFY_DROPCONF",
+      "label": "operator modification of dropbear.conf",
+      "command": "/opt/bin/busybox sh -c 'echo \"# N14 lab modification\" >> /opt/etc/config/dropbear.conf'; /opt/bin/busybox tail -2 /opt/etc/config/dropbear.conf",
+      "rc": 0,
+      "status": "PASS",
+      "reasons": [],
+      "output_tail": "PIDFILE=\"/var/run/lab-dropbear.pid\"\n# N14 lab modification"
+    },
+    {
+      "id": "N14_REINSTALL_DROPCONF",
+      "label": "opkg force-reinstall dropbear (conffile owner)",
+      "command": "/opt/bin/opkg install --force-reinstall dropbear",
+      "rc": 0,
+      "status": "OBSERVED",
+      "reasons": [],
+      "output_tail": "Removing package dropbear from root...\nNot deleting modified conffile /opt/etc/config/dropbear.conf.\nInstalling dropbear (2026.94-4) to root...\nDownloading http://192.168.1.100/entware/dropbear_2026.94-4_mipsel-3.4.ipk\nConfiguring dropbear.\nCollected errors:\n * resolve_conffiles: Existing conffile /opt/etc/config/dropbear.conf is different from the conffile in the new package. The new conffile will be placed at /opt/etc/config/dropbear.conf-opkg."
+    },
+    {
+      "id": "N14_CONFILE_BACKUP",
+      "label": "dropbear.conf-opkg backup preserved",
+      "command": "/opt/bin/busybox ls /opt/etc/config/; /opt/bin/busybox ls -l /opt/etc/config/dropbear.conf-opkg 2>&1 | head -1",
+      "rc": 0,
+      "status": "OBSERVED",
+      "reasons": [],
+      "output_tail": "dropbear.conf\ndropbear.conf-opkg\n-rw-------    1 root     root            44 Jul 23  2026 /opt/etc/config/dropbear.conf-opkg"
+    }
+  ]
+}

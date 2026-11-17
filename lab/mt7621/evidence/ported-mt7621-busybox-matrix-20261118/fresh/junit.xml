@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<testsuite name="fresh" tests="16">
+  <testcase name="BASELINE_BUSYBOX_STATUS" classname="busybox-matrix.fresh" status="PASS"></testcase>
+  <testcase name="BASELINE_SH_LINK" classname="busybox-matrix.fresh" status="PASS"></testcase>
+  <testcase name="BASELINE_VERSION" classname="busybox-matrix.fresh" status="PASS"></testcase>
+  <testcase name="BASELINEAPPLETS" classname="busybox-matrix.fresh" status="PASS"></testcase>
+  <testcase name="BASELINE_WGET_TLS" classname="busybox-matrix.fresh" status="OBSERVED"></testcase>
+  <testcase name="BASELINE_Dropbear" classname="busybox-matrix.fresh" status="PASS"></testcase>
+  <testcase name="P01_FRESH_BOOTSTRAP_STATE" classname="busybox-matrix.fresh" status="PASS"></testcase>
+  <testcase name="P02_OPKG_UPDATE" classname="busybox-matrix.fresh" status="PASS"></testcase>
+  <testcase name="P03_INSTALL_CURRENT" classname="busybox-matrix.fresh" status="PASS"></testcase>
+  <testcase name="P10_FORCE_REINSTALL" classname="busybox-matrix.fresh" status="PASS"></testcase>
+  <testcase name="P10_POST_REINSTALL_STATE" classname="busybox-matrix.fresh" status="PASS"></testcase>
+  <testcase name="PREFLIGHT_FRESH" classname="busybox-matrix.fresh" status="OBSERVED"></testcase>
+  <testcase name="P11_REBOOT" classname="busybox-matrix.fresh" status="PASS"></testcase>
+  <testcase name="P11_POST_REBOOT" classname="busybox-matrix.fresh" status="PASS"></testcase>
+  <testcase name="P12_IDEMPOTENT_UPGRADE" classname="busybox-matrix.fresh" status="PASS"></testcase>
+  <testcase name="P12_FINAL_STATE" classname="busybox-matrix.fresh" status="PASS"></testcase>
+</testsuite>
