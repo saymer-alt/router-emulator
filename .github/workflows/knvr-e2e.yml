@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - 'lab/**'
+      # Documentation-only lab edits must not run KNVR guest acceptance.
+      - '!lab/**/*.md'
       - 'qemu-patches/0064-hw-arm-filogic-preserve-Keenetic-4.9-FE-receive-IRQ.patch'
       - '.github/workflows/knvr-e2e.yml'
 
