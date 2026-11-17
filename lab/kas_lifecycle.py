@@ -211,10 +211,10 @@ def classify_iptables_error(exit_code, stderr):
     return 'COMMAND_NONZERO'
 
 
-def read_iptables_diagnostic(guest, command):
+def read_iptables_diagnostic(guest, command, timeout=30):
     """Return output or fixed failure category; keep all raw output private."""
     try:
-        code, output, stderr = guest.execute(command)
+        code, output, stderr = guest.execute(command, timeout=timeout)
     except TimeoutError:
         return None, 'TIMEOUT'
     except (OSError, EOFError):
@@ -242,15 +242,25 @@ def wait_netfilter_settled(guest, budget=60):
     incomplete_samples = 0
     last_shape = None
     failures = {}
+
+    def probe(command):
+        # Each SSH command must share the outer settle deadline. A late
+        # 30-second channel cannot silently extend the 60-second budget.
+        remaining = until - time.monotonic()
+        if remaining <= 0 and budget > 0:
+            return None, 'TIMEOUT'
+        # budget=0 is used by host tests to make a single diagnostic sample;
+        # use a tiny positive transport timeout rather than 0/None.
+        return read_iptables_diagnostic(
+            guest, command, timeout=max(0.001, min(30.0, remaining)))
+
     while True:
-        rules, reason = read_iptables_diagnostic(
-            guest, 'iptables -t mangle -S _CUST_BYPASS_WA_')
+        rules, reason = probe('iptables -t mangle -S _CUST_BYPASS_WA_')
         if reason is not None:
             failures['CHAIN_' + reason] = failures.get('CHAIN_' + reason, 0) + 1
             probe_failures += 1
         else:
-            prerouting, reason = read_iptables_diagnostic(
-                guest, 'iptables -t mangle -S PREROUTING')
+            prerouting, reason = probe('iptables -t mangle -S PREROUTING')
             if reason is not None:
                 failures['PREROUTING_' + reason] = (
                     failures.get('PREROUTING_' + reason, 0) + 1)
@@ -285,7 +295,8 @@ def wait_netfilter_settled(guest, budget=60):
                   'last_shape(entries,links,order_ok)=%s failure_categories=%s'
                   % (probe_failures, content_samples, last_shape, counts), flush=True)
             raise ContractFailure('native_rules_not_ready')
-        time.sleep(2)
+        # A full two-second retry delay must not overrun the shared deadline.
+        time.sleep(min(2.0, max(0.0, until - time.monotonic())))
 
 # Issue #50: a surviving KeeneticOS-side legacy-compatible bridge fixture.
 # The description is deliberately non-canonical (never 'mihomo t2s<n>'); the

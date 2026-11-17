@@ -236,6 +236,85 @@ class LifecycleDataTests(unittest.TestCase):
         self.assertEqual(raised.exception.reason, 'native_rules_not_ready')
 
 
+    def test_iptables_probes_share_a_single_outer_deadline(self):
+        """A second probe must receive only the budget left after the first."""
+        import lab.kas_lifecycle as lifecycle
+
+        clock = [100.0]
+        rules = ('-P _CUST_BYPASS_WA_ ACCEPT\n'
+                 '-A _CUST_BYPASS_WA_ -j MARK --set-xmark 0x2000/0xffffffff\n'
+                 '-A _CUST_BYPASS_WA_ -j CONNMARK --save-mark\n'
+                 '-A _CUST_BYPASS_WA_ -j RETURN\n')
+
+        class Guest:
+            def __init__(self):
+                self.timeouts = []
+
+            def execute(self, command, timeout=30):
+                self.timeouts.append(timeout)
+                if command.endswith('_CUST_BYPASS_WA_'):
+                    clock[0] += 7.25
+                    return 0, rules, ''
+                return (0, '-P PREROUTING ACCEPT\n'
+                        '-A PREROUTING -m mark --mark 0x0 -j _CUST_BYPASS_WA_\n', '')
+
+        guest = Guest()
+        with mock.patch.object(lifecycle.time, 'monotonic', side_effect=lambda: clock[0]):
+            observed_rules, observed_links = lifecycle.wait_netfilter_settled(guest, budget=10)
+        self.assertTrue(netfilter_settled(observed_rules, observed_links))
+        self.assertEqual(len(guest.timeouts), 2)
+        self.assertAlmostEqual(guest.timeouts[0], 10.0)
+        self.assertAlmostEqual(guest.timeouts[1], 2.75)
+
+    def test_expired_deadline_prevents_second_ssh_probe_and_fails_closed(self):
+        """Never claim settled rules from a partial chain-only read."""
+        import lab.kas_lifecycle as lifecycle
+
+        clock = [5.0]
+        class Guest:
+            def __init__(self):
+                self.calls = []
+
+            def execute(self, command, timeout=30):
+                self.calls.append((command, timeout))
+                clock[0] += 4.0
+                return 0, '-P _CUST_BYPASS_WA_ ACCEPT\n', ''
+
+        guest = Guest()
+        output = io.StringIO()
+        with mock.patch.object(lifecycle.time, 'monotonic', side_effect=lambda: clock[0]), \
+             redirect_stdout(output):
+            with self.assertRaises(ContractFailure) as result:
+                lifecycle.wait_netfilter_settled(guest, budget=3)
+        self.assertEqual(result.exception.reason, 'native_rules_not_ready')
+        self.assertEqual(len(guest.calls), 1)
+        self.assertAlmostEqual(guest.calls[0][1], 3.0)
+        self.assertIn('PREROUTING_TIMEOUT:1', output.getvalue())
+        self.assertNotIn('-P _CUST_BYPASS_WA_', output.getvalue())
+
+    def test_retry_sleep_never_exceeds_remaining_deadline(self):
+        import lab.kas_lifecycle as lifecycle
+
+        clock = [10.0]
+        sleeps = []
+
+        class Guest:
+            def execute(self, command, timeout=30):
+                return 1, '', 'private-host: No chain/target/match by that name'
+
+        def advance(seconds):
+            sleeps.append(seconds)
+            clock[0] += seconds
+
+        with mock.patch.object(lifecycle.time, 'monotonic', side_effect=lambda: clock[0]), \
+             mock.patch.object(lifecycle.time, 'sleep', side_effect=advance), \
+             redirect_stdout(io.StringIO()):
+            with self.assertRaises(ContractFailure):
+                lifecycle.wait_netfilter_settled(Guest(), budget=1.5)
+        self.assertEqual(sleeps, [1.5])
+
+
+
 class _UninstallGuest:
     """Records phase traffic; per-command scripted returns/raises."""
 
