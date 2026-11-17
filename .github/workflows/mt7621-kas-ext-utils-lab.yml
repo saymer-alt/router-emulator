@@ -1,5 +1,15 @@
 # Real KeeneticOS MT7621/MIPSel on ephemeral GitHub Ubuntu runners.
 # Public evaluation files are checksum-pinned. No physical routers or private dumps.
+#
+# Lab CI adapter (this branch only): GitHub runs workflow_dispatch only for a
+# workflow whose file exists on the default branch, and the dedicated
+# dispatch-only mt7621-kas-runtime-tls-lab.yml exists solely on this branch.
+# This registered, dispatchable workflow therefore takes an opt-in
+# https_mirror input: dispatching it with -f https_mirror=true runs the full
+# KAS MagiTrickle stage over the verified-TLS lab mirror (guest certificate
+# verification stays ON, the disposable lab CA private key never leaves the
+# runner). pull_request runs and dispatches without the input keep the proven
+# ext-utils exception scenario byte-for-byte unchanged.
 name: MT7621 - KAS LAB-ONLY ext-utils exception experiment
 
 on:
@@ -9,6 +19,11 @@ on:
       - 'lab/mt7621/kas_smoke.py'
       - 'lab/test_mt7621_kas_smoke.py'
   workflow_dispatch:
+    inputs:
+      https_mirror:
+        description: 'Verified-TLS KAS MagiTrickle stage (lab adapter, this branch only)'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -133,29 +148,62 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Default flags are the proven ext-utils exception scenario exactly
+          # as registered; the opt-in input switches to the full verified-TLS
+          # MagiTrickle stage (--kas-https-mirror serves only the five pinned
+          # records from lab/mt7621/kas-mipsel-https.lock.json).
+          flags="--max-seconds 2300 --lab-ext-utils-exception"
+          if [ "${{ inputs.https_mirror }}" = "true" ]; then
+            flags="--max-seconds 2300 --lab-ext-utils-exception --kas-base-deps --kas-mihomo --kas-magitrickle --kas-https-mirror"
+          fi
           python3 -m lab.mt7621.kas_smoke \
             --emulator-root . \
             --nand-dir "$RUNNER_TEMP/mt7621-nand" \
             --workspace "$RUNNER_TEMP/mt7621-workspace" \
             --credentials-file "$RUNNER_TEMP/mt7621-credentials.json" \
             --kas-dir "$GITHUB_WORKSPACE/kas-source" --kas-ref "$KAS_REF" \
-            --max-seconds 2300 --lab-ext-utils-exception
+            $flags
 
       - name: Evaluate isolated lab experiment evidence (BLOCKED is not KAS PASS)
         if: always()
         shell: bash
+        env:
+          HTTPS_MIRROR: ${{ inputs.https_mirror }}
         run: |
           python3 - "$RUNNER_TEMP/mt7621-workspace/report/kas-smoke.json" "$GITHUB_STEP_SUMMARY" <<'PY'
-          import json, pathlib, sys
+          import json, os, pathlib, sys
           p = pathlib.Path(sys.argv[1])
           if not p.is_file():
               raise SystemExit("LAB_PROBE_NOT_REACHED: sanitized report missing")
           r = json.loads(p.read_text())
+          https_mode = os.environ.get("HTTPS_MIRROR") == "true"
           if (r.get("source_variant") != "DISPOSABLE_LAB_EXT_UTILS_EXCEPTION"
                   or r.get("lab_ext_utils_exception_applied") is not True
                   or r.get("guest_source_verified") is not True
                   or r.get("missing_component_ids") != ["ext-utils"]):
               raise SystemExit("LAB_EXCEPTION_NOT_VERIFIED: source, guest or component drift")
+          if https_mode:
+              if r.get("schema") != "mt7621-kas-smoke-v3":
+                  raise SystemExit("REPORT_SCHEMA_DRIFT")
+              required = ("kas_base_deps_feed", "kas_mihomo_feed",
+                          "kas_magitrickle_feed", "kas_https_stage",
+                          "kas_https_dns_configured", "kas_https_clock_synced",
+                          "kas_https_ca_trust_applied",
+                          "kas_https_helper_tls_verified")
+              missing = [key for key in required if r.get(key) is not True]
+              if missing:
+                  raise SystemExit("VERIFIED_TLS_STAGE_NOT_PROVEN: %s" % ",".join(missing))
+              if r.get("base_packages_installed") != ["ca-bundle", "curl", "jq",
+                                                      "iptables", "nano", "cron"]:
+                  raise SystemExit("KAS_BASE_IPKS_NOT_INSTALLED")
+              if (r.get("socat_package_installed") is not True
+                      or r.get("magitrickle_package_installed") is not True
+                      or r.get("magitrickle_daemon_running") is not True
+                      or r.get("magitrickle_init_script_present") is not True):
+                  raise SystemExit("KAS_MAGITRICKLE_STAGE_NOT_PROVEN: the real "
+                                   "installer did not deliver a running MagiTrickle")
+              if r.get("mihomo_package_installed") is not True:
+                  raise SystemExit("KAS_MIHOMO_IPK_NOT_INSTALLED")
           phase, reason = r["phase"], r["reason"]
           if reason == "KEENETICOS_COMPONENTS_MISSING":
               raise SystemExit("LAB_EXCEPTION_DID_NOT_PASS_KAS_COMPONENT_GUARD")
@@ -166,8 +214,25 @@ jobs:
           if phase == "BLOCKED" and r.get("kas_installed") is not False:
               raise SystemExit("LAB_BLOCKED_MISLABELLED")
           with open(sys.argv[2], "a", encoding="utf8") as out:
-              out.write("### Disposable Ported 5.1.8 lab exception: VERIFIED\n")
+              if https_mode:
+                  out.write("### Verified-TLS KAS MagiTrickle stage (lab adapter on this branch)\n")
+                  out.write("HTTPS stage: dns=%s clock=%s ca=%s pinned_helper_tls=%s\n" % (
+                      r.get("kas_https_dns_configured"), r.get("kas_https_clock_synced"),
+                      r.get("kas_https_ca_trust_applied"),
+                      r.get("kas_https_helper_tls_verified")))
+                  out.write("Mihomo 1.19.33-1: opkg=%s, ELF -v verified=%s (probe_rc=%s, path=%s, "
+                            "output_marker=%s, head=%s, stdout=%s, stderr=%s)\n" % (
+                      r.get("mihomo_package_installed"), r.get("mihomo_binary_version_verified"),
+                      r.get("mihomo_probe_exit_code"), r.get("mihomo_binary_path"),
+                      r.get("mihomo_output_marker"), r.get("mihomo_output_head_marker"),
+                      r.get("mihomo_stdout_size"), r.get("mihomo_stderr_size")))
+                  if r.get("mihomo_binary_version_verified") is not True:
+                      out.write("WARNING: MIPSEL_MIHOMO_ELF_UNPROVEN (head marker above; not KAS PASS)\n")
+              else:
+                  out.write("### Disposable Ported 5.1.8 lab exception: VERIFIED\n")
               out.write("KAS experimental installer phase: %s; category: %s\n" % (phase, reason))
+              if r.get("installer_error_prefix"):
+                  out.write("Matched pinned installer err prefix: `%s`\n" % r["installer_error_prefix"])
               out.write("Neither BLOCKED nor this experiment is production KAS acceptance.\n")
           print("LAB_EXT_UTILS_ONLY_EXCEPTION_REACHED: " + phase + " " + reason)
           PY
