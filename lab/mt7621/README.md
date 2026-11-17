@@ -149,6 +149,32 @@ diagnostic workflow is proof that KAS has been installed. This run is
 deliberately **not** MagiTrickle readiness; do not spoof component inventory,
 alter production KAS or treat a Ported clone as supported hardware.
 
+### KAS MIPSel MagiTrickle stage, the HTTPS blocker and the verified-TLS lab mirror (2026-11-17)
+
+Guest CI (PR [#106](https://github.com/saymer-alt/router-emulator/pull/106)/[#107](https://github.com/saymer-alt/router-emulator/pull/107) draft runs, e.g. [run 44120337098](https://github.com/saymer-alt/router-emulator/actions/runs/44120337098), [run 44120337317](https://github.com/saymer-alt/router-emulator/actions/runs/44120337317), [run 44120337114](https://github.com/saymer-alt/router-emulator/actions/runs/44120337114)) proved the next two stages on the disposable Ported 5.1.8 guest: `--kas-magitrickle` installs socat 1.8.1.1-1 + MagiTrickle 0.8.2-1 from the pinned MIPSel locks with the init script present and the daemon running (real installer path). `--kas-mihomo` installs the pinned Mihomo IPK, but the real installed binary `mihomo -v` exits RC=2 with no version line — **MIPSEL_MIHOMO_ELF_UNPROVEN**. Two hypotheses, both explicitly **unproven**, are recorded in [issue #89](https://github.com/saymer-alt/router-emulator/issues/89): (1) a capture artifact (the runner keeps only the last 64 KiB of guest stderr, so a crash header could be lost and the five-marker exclusion is unreliable); (2) a guest-specific Go 1.27 runtime failure under system QEMU (futex/time/arena — masked under qemu-user). A fixed head-marker enum plus stdout/stderr size buckets in the next run discriminates them; a Go panic is *not* asserted as the cause.
+
+The real installer stops before MagiTrickle for a verified reason: the pinned `install.sh` (KAS `2fcd1608…`) has exactly **one** HTTPS dependency on an Entware/MIPSel guest — `https://bin.magitrickle.dev/packages/add_repo.sh` — and the fresh guest has no trusted CA and no synced clock. Everything after it (the Entware feeds) is plain HTTP exactly as upstream wrote it.
+
+Host-only preparation (branch `experiment/mt7621-kas-runtime-tls-20261117`, zero QEMU builds, zero guest runs) adds, without touching the proven 25+11+1+2 locks, the public KAS or any production image:
+
+* `lab/mt7621/kas-mipsel-https.lock.json` + `lab/mt7621/kas_mipsel_https.py`: five hard pins (helper script, both `mipsel-3.4{,_kn}` feed indexes, both feed IPKs; MD5s cross-checked against the upstream indexes) served by the existing disposable lab-CA mirror via `KASMirror(..., asset_records=…)`; `KASMirror` refuses any digest drift. The guest keeps certificate verification **ON**: `ca-bundle` + `curl` are pre-installed from the pinned feed, the lab CA is appended to the Entware bundle, DNS goes through `ip host` + dns-proxy, and the pinned helper is accepted over TLS only after an in-guest SHA256 match. The CA private key stays in the disposable workspace and is never uploaded or published.
+* `classify_installer_failure` in `lab/mt7621/kas_smoke.py`: the pinned final `err` literal wins over an early `warn` (a failed GitHub Mihomo download with a successful Entware fallback is no longer a failure); 16 fixed categories, negative unit tests for the early-WARN/real-ERROR combinations.
+* Mihomo crash diagnostics: the guest captures `-v` stdout/stderr in tmpfs; the host publishes only the classified head marker and byte sizes (raw output stays private).
+* Opt-in `--kas-https-mirror` stage; report schema `mt7621-kas-smoke-v3`. 374 host-only tests pass on the branch (the single `KASDeliveryTests` CRLF failure is pre-existing on Windows and reproduces on a clean tree).
+
+**Full KAS remains BLOCKED** until one guest run executes the HTTPS stage. A `BLOCKED` outcome is a diagnostic, never KAS acceptance.
+
+#### Running the single future guest run
+
+GitHub executes `workflow_dispatch` only for workflows whose file exists on the **default branch**, and the dedicated `.github/workflows/mt7621-kas-runtime-tls-lab.yml` (dispatch-only) exists only on this branch — the registered-but-not-on-main PR workflows are not dispatchable either. The lab CI adapter therefore extends this branch's registered, dispatchable `mt7621-kas-ext-utils-lab.yml` with an opt-in `https_mirror` input that switches the run to the full verified-TLS stage; `pull_request` behaviour and the default dispatch stay the proven ext-utils scenario. Owner GO is a single command:
+
+```bash
+gh workflow run mt7621-kas-ext-utils-lab.yml \
+  --ref experiment/mt7621-kas-runtime-tls-20261117 -f https_mirror=true
+```
+
+`build.yml` `paths-ignore` on this branch now also lists the MT7621 KAS workflow files, so pushing these documentation/adapter edits cannot repeat the accidental Build/release trigger.
+
 ## Quick start (Linux x86_64, incl. WSL2)
 
 ```bash
