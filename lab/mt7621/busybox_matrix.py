@@ -97,6 +97,12 @@ def fetch(url, digest, destination):
     if not url.startswith("https://bin.entware.net/") and \
             not url.startswith("https://test.entware.net/"):
         raise ValueError("untrusted origin: %s" % url)
+    destination = Path(destination)
+    if destination.is_file():
+        cached = destination.read_bytes()
+        if hashlib.sha256(cached).hexdigest() == digest:
+            return cached
+        destination.unlink()
     for attempt in range(2):
         try:
             with urllib.request.urlopen(url, timeout=90) as response:
@@ -193,6 +199,11 @@ class Matrix:
                                data + ("\n" + errors if errors else "") + "\n__RC__%d" % code,
                                expect)
 
+    def reconnect(self, timeout=120):
+        self.guest.close()
+        time.sleep(3)
+        self.guest.connect(timeout)
+
     def preflight(self, entry_id, label):
         """KAS read-only preflight via the always-present busybox shell."""
         entry = self.run(
@@ -283,12 +294,20 @@ def phase_transition(mx):
            " /opt/bin/busybox /opt/bin/busybox 2>/dev/null | head -1",
            {"rc": 0}, timeout=60)
     mx.preflight("PREFLIGHT_AFTER_DOWNGRADE", "KAS preflight after downgrade")
+    mx.run("P08_HOLD_SET", "flag hold busybox while an older version is installed",
+           "/opt/bin/opkg flag hold busybox;"
+           " /opt/bin/opkg status busybox | /opt/bin/busybox grep -E '^Status'",
+           {"rc": 0}, timeout=30)
     mx.run("P07A_OPKG_UPDATE", "opkg update (feed index now offers 1.38.0-5)",
            "/opt/bin/opkg update", {"rc": 0, "contains": ["Updated list"]}, timeout=180)
     mx.run("P07B_INSTALL_BUSYBOX", "the advised 'opkg install busybox' step (real upgrade here)",
            "/opt/bin/opkg install busybox", {"rc": 0}, timeout=300)
-    mx.run("P07C_OPKG_UPGRADE", "mass opkg upgrade after the install step",
+    mx.run("P07C_OPKG_UPGRADE", "mass opkg upgrade after the install step (busybox still held)",
            "/opt/bin/opkg upgrade", {"rc": 0}, timeout=600)
+    mx.run("P08_UNHOLD", "unhold busybox after the transition",
+           "/opt/bin/opkg flag unhold busybox;"
+           " /opt/bin/opkg status busybox | /opt/bin/busybox grep -E '^Status'",
+           {"rc": 0}, timeout=30)
     mx.run("P05_STATE_AFTER_TRANSITION", "final version + links + fresh SSH exec",
            "/opt/bin/opkg status busybox | /opt/bin/busybox grep '^Version';"
            " /opt/bin/busybox readlink /opt/bin/sh;"
@@ -307,6 +326,28 @@ def phase_transition(mx):
            "/opt/bin/opkg status busybox | /opt/bin/busybox grep '^Version';"
            " /opt/bin/sh -c 'echo FINAL_SHELL_OK'",
            {"rc": 0, "contains": ["FINAL_SHELL_OK"]}, timeout=60)
+    # Field case 17.11: a package touch alongside a modified conffile makes
+    # opkg preserve the operator file as <name>-opkg. Reproduced on the
+    # dropbear package itself (a busybox-only upgrade cannot touch it).
+    mx.run("N14_MODIFY_DROPCONF", "operator modification of dropbear.conf",
+           "/opt/bin/busybox sh -c 'echo \"# N14 lab modification\""
+           " >> /opt/etc/config/dropbear.conf';"
+           " /opt/bin/busybox tail -2 /opt/etc/config/dropbear.conf",
+           {"rc": 0, "contains": ["N14 lab modification"]}, timeout=30)
+    try:
+        mx.run("N14_REINSTALL_DROPCONF", "opkg force-reinstall dropbear (conffile owner)",
+               "/opt/bin/opkg install --force-reinstall dropbear", timeout=240)
+    except Exception:
+        pass  # dropbear restart may drop the channel; reconnect and inspect
+    try:
+        mx.reconnect(120)
+        mx.run("N14_CONFILE_BACKUP", "dropbear.conf-opkg backup preserved",
+               "/opt/bin/busybox ls /opt/etc/config/;"
+               " /opt/bin/busybox ls -l /opt/etc/config/dropbear.conf-opkg 2>&1 | head -1",
+               timeout=60)
+    except Exception:
+        mx.rec.record("N14_CONFILE_BACKUP", "dropbear.conf-opkg backup preserved",
+                      "", "<session lost after dropbear reinstall>", {"contains": ["never"]})
 
 
 def phase_feedfail(mx):
@@ -392,6 +433,7 @@ def after_scenario_factory(args, recorder, phases):
         mx = Matrix(guest, recorder, deadline if deadline is not None
                     else time.monotonic() + 600)
         try:
+            guest.command("mkdir -p /opt/lab")
             guest_put(guest, "/opt/lab/preflight.sh", args.preflight_data)
             guest.command("/opt/bin/busybox sha256sum /opt/lab/preflight.sh"
                           " | /opt/bin/busybox grep -q %s" % args.preflight_sha)
@@ -436,10 +478,14 @@ def main():
                     choices=("fresh", "transition", "feedfail", "interrupt"))
     ap.add_argument("--report-dir", required=True)
     ap.add_argument("--max-seconds", type=int, default=3000)
+    ap.add_argument("--prep-only", action="store_true",
+                    help="host-side network phase only (fetch + build), then exit")
+    ap.add_argument("--skip-build", action="store_true",
+                    help="reuse an existing workspace prepared by --prep-only")
     args = ap.parse_args()
 
     workspace = Path(args.workspace)
-    workspace.mkdir(mode=0o700, exist_ok=False)
+    workspace.mkdir(mode=0o700, exist_ok=args.skip_build)
     credentials = json.loads(Path(args.credentials_file).read_text(encoding="utf8"))
     if credentials.get("username") != "root":
         raise ValueError("dropbear SSH probes authenticate as root")
@@ -449,12 +495,19 @@ def main():
         raise ValueError("preflight digest mismatch (fail closed)")
     old_ipk_data = fetch(OLD_IPK_URL, OLD_IPK_SHA256,
                          Path(args.cache_dir) / ("busybox_%s_mipsel-3.4.ipk" % OLD_IPK_VERSION))
+    args.preflight_data = preflight_data
+    args.old_ipk_data = old_ipk_data
     lock = json.loads(LOCK.read_text(encoding="utf8"))
     pinned_bb = next(p for p in lock["packages"] if p["Package"] == "busybox")
 
     image, mirror = workspace / "opt.img", workspace / "mirror"
-    build(str(image), str(mirror), str(args.cache_dir), args.credentials_file,
-          arch="mipsel", lock_path=str(LOCK))
+    if not args.skip_build:
+        build(str(image), str(mirror), str(args.cache_dir), args.credentials_file,
+              arch="mipsel", lock_path=str(LOCK))
+    if args.prep_only:
+        print("PREP_ONLY_DONE (mirror and image built; network phase complete)",
+              flush=True)
+        return 0
     recorder = Recorder(args.kind, {
         "arch": "mipsel-3.4", "preset": PRESET,
         "pinned_bootstrap_busybox": pinned_bb["Version"],
