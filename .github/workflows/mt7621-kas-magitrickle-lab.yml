@@ -1,0 +1,269 @@
+# Real KeeneticOS MT7621/MIPSel on ephemeral GitHub Ubuntu runners.
+# Public evaluation files are checksum-pinned. No physical routers or private dumps.
+# Sequential experiment on top of PR #106: same disposable guest, one more
+# pinned MagiTrickle dependency pair plus installer-error diagnostics.
+name: MT7621 - KAS MagiTrickle MIPSel dependency experiment
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/mt7621-kas-magitrickle-lab.yml'
+      - 'lab/mt7621/kas_magitrickle_deps.py'
+      - 'lab/mt7621/kas-magitrickle-mipsel.lock.json'
+      - 'lab/test_mt7621_kas_magitrickle_deps.py'
+      - 'lab/mt7621/kas_mihomo_deps.py'
+      - 'lab/mt7621/kas-mihomo-mipsel.lock.json'
+      - 'lab/test_mt7621_kas_mihomo_deps.py'
+      - 'lab/mt7621/kas_smoke.py'
+      - 'lab/mt7621/kas_base_deps.py'
+      - 'lab/mt7621/kas-base-mipsel.lock.json'
+      - 'lab/test_mt7621_kas_smoke.py'
+      - 'lab/test_mt7621_kas_base_deps.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mt7621-kas-magitrickle-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  real-guest:
+    name: Real Ported 5.1.8 KAS MagiTrickle MIPSel dependency proof
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    env:
+      KAS_REF: 2fcd16089374604e10c201c6cd5a805fba3b100d
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Fetch public KAS at immutable SHA (do not checkout private dev)
+        uses: actions/checkout@v4
+        with:
+          repository: saymer-alt/keenetic-auto-setup
+          ref: ${{ env.KAS_REF }}
+          path: kas-source
+          persist-credentials: false
+
+      - name: Dependencies, offline contracts and exact pinned-source delta
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends p7zip-full socat e2fsprogs openssl \
+            python3 python3-paramiko build-essential ninja-build meson pkg-config \
+            libglib2.0-dev libpixman-1-dev zlib1g-dev libslirp-dev libfdt-dev python3-venv
+          python3 -m unittest discover -s lab -p 'test*.py' -q
+          python3 - <<'PY'
+          from pathlib import Path
+          from lab.mt7621.kas_smoke import (
+              lab_only_without_ext_utils_guard, LAB_EXT_UTILS_DISABLED,
+              LAB_EXT_UTILS_GUARD,
+          )
+          original = Path("kas-source/install.sh").read_bytes()
+          candidate = lab_only_without_ext_utils_guard(original)
+          assert candidate != original and candidate.count(LAB_EXT_UTILS_DISABLED) == 1
+          assert candidate.replace(LAB_EXT_UTILS_DISABLED, LAB_EXT_UTILS_GUARD, 1) == original
+          print("KAS_LAB_PATCH_CONTRACT_PASS: exactly one conditional, original unmodified")
+          PY
+          python3 - <<'PY'
+          from lab.mt7621.kas_magitrickle_deps import validated_kas_magitrickle_overlay
+          data = validated_kas_magitrickle_overlay()
+          assert {row["Package"] for row in data["packages"]} == {"socat", "magitrickle"}
+          print("KAS_MAGITRICKLE_MIPSEL_IPK_LOCK_PASS: pinned socat 1.8.1.1-1 + MagiTrickle 0.8.2-1, closure verified")
+          PY
+
+      - name: Cache exact patched MIPSel QEMU
+        id: qemu-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ runner.temp }}/mt7621-qemu/qemu-system-mipsel
+            ${{ runner.temp }}/mt7621-qemu/qemu-mipsel.sha256
+          key: mipsel-ubuntu24-v10.1.0-${{ hashFiles('qemu-patches/*.patch', 'lab/mt7621/build_qemu_mipsel.sh') }}
+
+      - name: Build the native MT7621 QEMU target
+        if: steps.qemu-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash lab/mt7621/build_qemu_mipsel.sh "$RUNNER_TEMP/mt7621-qemu"
+
+      - name: Verify QEMU binary before guest execution
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256sum -c "$RUNNER_TEMP/mt7621-qemu/qemu-mipsel.sha256"
+          test -x "$RUNNER_TEMP/mt7621-qemu/qemu-system-mipsel"
+          echo "QEMU_BIN=$RUNNER_TEMP/mt7621-qemu/qemu-system-mipsel" >> "$GITHUB_ENV"
+
+      - name: Fetch only public, pinned Ported Xiaomi R3G assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          src="$RUNNER_TEMP/mt7621-public"
+          mkdir -p "$src"
+          curl -fL --retry 3 --connect-timeout 15 --max-time 300 \
+            -o "$src/breed.bin" 'https://breed.hackpascal.net/breed-mt7621-xiaomi-r3g.bin'
+          echo "05ebb31fd889b148022346179346d91c60a1b4518bdc4d8b9717a62aec638bed  $src/breed.bin" | sha256sum -c -
+          curl -fL --retry 3 --connect-timeout 15 --max-time 300 \
+            -o "$src/ported.bin" 'https://osvault.project-athens.com/osvault/Xiaomi%20R3G/Xiaomi-R3G_5.1.8.bin'
+          echo "05958b9786621ee014bb72551f6458d0672c93370cbce9aec3573c6bba038cb2  $src/ported.bin" | sha256sum -c -
+          curl -fL --retry 3 --connect-timeout 15 --max-time 300 \
+            -o "$src/Xiaomi-R3G.7z" 'https://osvault.project-athens.com/files/firmware/Xiaomi-R3G.7z'
+          # Vendor public /files/firmware/md5sum; individual NAND parts are SHA256 verified.
+          echo "397e07a20c6a02911e8fd3be756d23c8  $src/Xiaomi-R3G.7z" | md5sum -c -
+          7z x -y -o"$src/unpacked" "$src/Xiaomi-R3G.7z" >/dev/null
+          python3 -m lab.mt7621.ci_assets --unpacked "$src/unpacked" --out "$src/verified"
+          rm -rf "$src/unpacked"
+
+      - name: Build disposable 128 MiB Ported NAND using pinned components
+        shell: bash
+        run: |
+          set -euo pipefail
+          src="$RUNNER_TEMP/mt7621-public"
+          python3 -m lab.mt7621.prepare_ported_mir3g \
+            --breed "$src/breed.bin" --firmware "$src/ported.bin" \
+            --uconfig "$src/verified/uconfig.bin" \
+            --ustate "$src/verified/ustate.bin" \
+            --eeprom "$src/verified/eeprom.bin" \
+            --out "$RUNNER_TEMP/mt7621-nand"
+
+      - name: Generate ephemeral synthetic guest credentials (never log)
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          python3 - "$RUNNER_TEMP/mt7621-credentials.json" <<'PY'
+          import json, pathlib, secrets, sys
+          pathlib.Path(sys.argv[1]).write_text(json.dumps({
+              "username": "root", "password": secrets.token_urlsafe(28)
+          }), encoding="utf-8")
+          PY
+
+      - name: Run MIPSel Entware with pinned base, Mihomo, MagiTrickle then real KAS lab-copy
+        id: experiment
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m lab.mt7621.kas_smoke \
+            --emulator-root . \
+            --nand-dir "$RUNNER_TEMP/mt7621-nand" \
+            --workspace "$RUNNER_TEMP/mt7621-workspace" \
+            --credentials-file "$RUNNER_TEMP/mt7621-credentials.json" \
+            --kas-dir "$GITHUB_WORKSPACE/kas-source" --kas-ref "$KAS_REF" \
+            --max-seconds 2300 --lab-ext-utils-exception --kas-base-deps --kas-mihomo --kas-magitrickle
+
+      - name: Evaluate isolated lab experiment evidence (BLOCKED is not KAS PASS)
+        if: always()
+        shell: bash
+        run: |
+          python3 - "$RUNNER_TEMP/mt7621-workspace/report/kas-smoke.json" "$GITHUB_STEP_SUMMARY" <<'PY'
+          import json, pathlib, sys
+          p = pathlib.Path(sys.argv[1])
+          if not p.is_file():
+              raise SystemExit("LAB_PROBE_NOT_REACHED: sanitized report missing")
+          r = json.loads(p.read_text())
+          if r.get("schema") != "mt7621-kas-smoke-v2":
+              raise SystemExit("REPORT_SCHEMA_DRIFT")
+          if (r.get("source_variant") != "DISPOSABLE_LAB_EXT_UTILS_EXCEPTION"
+                  or r.get("lab_ext_utils_exception_applied") is not True
+                  or r.get("guest_source_verified") is not True
+                  or r.get("missing_component_ids") != ["ext-utils"]
+                  or r.get("kas_base_deps_feed") is not True
+                  or r.get("kas_mihomo_feed") is not True
+                  or r.get("kas_magitrickle_feed") is not True):
+              raise SystemExit("LAB_EXCEPTION_NOT_VERIFIED: source, guest or component drift")
+          phase, reason = r["phase"], r["reason"]
+          required_base = ["ca-bundle", "curl", "jq", "iptables", "nano", "cron"]
+          observed = r.get("base_packages_installed")
+          if observed != required_base:
+              raise SystemExit("KAS_BASE_IPKS_NOT_INSTALLED: verified %s of %s"
+                               % (observed, required_base))
+          if (r.get("socat_package_installed") is not True
+                  or r.get("magitrickle_package_installed") is not True
+                  or r.get("magitrickle_daemon_running") is not True
+                  or r.get("magitrickle_init_script_present") is not True):
+              raise SystemExit("MIPSEL_MAGITRICKLE_NOT_PROVEN: missing native "
+                               "opkg install, init script or running daemon")
+          if reason == "KEENETICOS_COMPONENTS_MISSING":
+              raise SystemExit("LAB_EXCEPTION_DID_NOT_PASS_KAS_COMPONENT_GUARD")
+          if phase not in ("BLOCKED", "PASS"):
+              raise SystemExit("LAB_EXPERIMENT_UNEXPECTED_PHASE")
+          if phase == "PASS" and r.get("kas_installed") is not True:
+              raise SystemExit("LAB_INSTALL_INCONSISTENT")
+          if phase == "BLOCKED" and r.get("kas_installed") is not False:
+              raise SystemExit("LAB_BLOCKED_MISLABELLED")
+          with open(sys.argv[2], "a", encoding="utf8") as out:
+              out.write("### Ported 5.1.8: socat 1.8.1.1-1 + MagiTrickle 0.8.2-1 opkg INSTALLED, init script present, daemon running\n")
+              out.write("Mihomo 1.19.33-1: opkg=%s, ELF -v verified=%s (probe_rc=%s, path=%s, output_marker=%s)\n" % (
+                  r.get("mihomo_package_installed"), r.get("mihomo_binary_version_verified"),
+                  r.get("mihomo_probe_exit_code"), r.get("mihomo_binary_path"),
+                  r.get("mihomo_output_marker")))
+              if r.get("mihomo_binary_version_verified") is not True:
+                  out.write("WARNING: MIPSEL_MIHOMO_ELF_UNPROVEN (diagnostic above; not KAS PASS)\n")
+              out.write("KAS experimental installer phase: %s; category: %s\n" % (phase, reason))
+              if r.get("installer_error_prefix"):
+                  out.write("Matched pinned installer err prefix: `%s`\n" % r["installer_error_prefix"])
+              out.write("Neither BLOCKED nor this experiment is production KAS acceptance.\n")
+          print("KAS_MIPSEL_MAGITRICKLE_DEPENDENCY_PROVEN: " + phase + " " + reason)
+          PY
+
+      - name: Report only safe action counts (no UART)
+        if: always()
+        shell: bash
+        run: |
+          python3 - "$RUNNER_TEMP" "$GITHUB_STEP_SUMMARY" <<'PY'
+          import json, pathlib, sys
+          root = pathlib.Path(sys.argv[1])
+          files = (root/"mt7621-report"/"report.json",
+                   root/"mt7621-workspace"/"report"/"report.json")
+          source = next((p for p in files if p.is_file()), None)
+          with open(sys.argv[2], "a", encoding="utf-8") as out:
+              if source:
+                  obj = json.loads(source.read_text())
+                  rows = obj.get("steps", [])
+                  passed = sum(s.get("outcome") == "PASS" for s in rows)
+                  out.write(f"### MT7621 real guest: {obj.get('outcome')} ({passed}/{len(rows)} steps)\n")
+                  stage = root/"mt7621-workspace"/"report"/"kas-smoke.json"
+                  if stage.is_file():
+                      result = json.loads(stage.read_text())
+                      out.write("### KAS installer: %s (%s)\n" % (result['phase'], result['reason']))
+                      out.write("### Base IPKs: %s; Mihomo installed: %s; Mihomo ELF: %s; socat: %s; MagiTrickle: %s; MT daemon: %s; complete KAS: %s\n" %
+                          (len(result['base_packages_installed']),
+                           result.get('mihomo_package_installed'),
+                           result.get('mihomo_binary_version_verified'),
+                           result.get('socat_package_installed'),
+                           result.get('magitrickle_package_installed'),
+                           result.get('magitrickle_daemon_running'),
+                           result['kas_installed']))
+              else:
+                  out.write("### MT7621 guest not reached: host-side preparation failed\n")
+          PY
+
+      - name: Publish sanitized JSON and JUnit only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mt7621-kas-magitrickle-mipsel-ipk-public-reports
+          path: |
+            ${{ runner.temp }}/mt7621-report/report.json
+            ${{ runner.temp }}/mt7621-report/junit.xml
+            ${{ runner.temp }}/mt7621-workspace/report/report.json
+            ${{ runner.temp }}/mt7621-workspace/report/junit.xml
+            ${{ runner.temp }}/mt7621-workspace/report/kas-smoke.json
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Remove all firmware, NAND, credentials and private UART
+        if: always()
+        shell: bash
+        run: |
+          rm -rf "$RUNNER_TEMP/mt7621-public" "$RUNNER_TEMP/mt7621-nand" \
+            "$RUNNER_TEMP/mt7621-credentials.json" "$RUNNER_TEMP/mt7621-workspace" \
+            "$RUNNER_TEMP/mt7621-report"
+          echo 'No private NAND, original firmware, KAS guest output or full UART is uploaded.'

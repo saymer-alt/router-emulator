@@ -8,7 +8,8 @@ import unittest
 from lab.mt7621.kas_smoke import (
     classify_failure, write_public, missing_required_components,
     guarded_refusal_proven, lab_only_without_ext_utils_guard,
-    verified_mihomo_version,
+    verified_mihomo_version, matched_installer_error,
+    mihomo_output_categories, mihomo_output_marker,
     require_exact_lab_component_gap, LAB_EXT_UTILS_GUARD,
     LAB_EXT_UTILS_DISABLED,
 )
@@ -43,7 +44,15 @@ class Mt7621KASGuestContracts(unittest.TestCase):
                                         "guest_source_verified", "source_variant",
                                         "kas_base_deps_feed", "base_packages_installed",
                                         "kas_mihomo_feed", "mihomo_package_installed",
-                                        "mihomo_binary_version_verified"})
+                                        "mihomo_binary_version_verified",
+                                        "installer_error_prefix", "mihomo_binary_path",
+                                        "mihomo_probe_exit_code", "mihomo_output_has_name",
+                                        "mihomo_output_has_version", "mihomo_output_marker",
+                                        "kas_magitrickle_feed",
+                                        "socat_package_installed", "magitrickle_package_installed",
+                                        "magitrickle_daemon_running",
+                                        "magitrickle_init_script_present"})
+            self.assertEqual(rec["schema"], "mt7621-kas-smoke-v2")
             self.assertFalse(rec["kas_installed"])
             self.assertEqual(rec["kas_ref"], ref)
             self.assertFalse(rec["lab_ext_utils_exception_applied"])
@@ -54,6 +63,17 @@ class Mt7621KASGuestContracts(unittest.TestCase):
             self.assertFalse(rec["kas_mihomo_feed"])
             self.assertFalse(rec["mihomo_package_installed"])
             self.assertFalse(rec["mihomo_binary_version_verified"])
+            self.assertIsNone(rec["installer_error_prefix"])
+            self.assertEqual(rec["mihomo_binary_path"], "none")
+            self.assertIsNone(rec["mihomo_probe_exit_code"])
+            self.assertFalse(rec["mihomo_output_has_name"])
+            self.assertFalse(rec["mihomo_output_has_version"])
+            self.assertIsNone(rec["mihomo_output_marker"])
+            self.assertFalse(rec["kas_magitrickle_feed"])
+            self.assertFalse(rec["socat_package_installed"])
+            self.assertFalse(rec["magitrickle_package_installed"])
+            self.assertFalse(rec["magitrickle_daemon_running"])
+            self.assertFalse(rec["magitrickle_init_script_present"])
 
     def test_report_exposes_only_allowed_actual_base_install_ids(self):
         with tempfile.TemporaryDirectory() as td:
@@ -191,3 +211,49 @@ class Mt7621KASGuestContracts(unittest.TestCase):
     def test_no_markdown_banner_is_success(self):
         self.assertNotEqual(classify_failure(0, "=== Keenetic Auto Setup ==="),
                             "INSTALLER_COMPLETED")
+
+    def test_matched_installer_error_uses_only_pinned_source_constants(self):
+        source = (b'#!/bin/sh\n'
+                  b'err "Mihomo install failed: GitHub package unavailable and '
+                  b'Entware feed fallback failed"\n'
+                  b'err "Failed to install $_pkg"\n'
+                  b'err "MagiTrickle start failed"\n')
+        matched = matched_installer_error(
+            "[ERROR] Failed to install magitrickle\n", source)
+        self.assertEqual(matched, "Failed to install")
+        matched = matched_installer_error(
+            "[ERROR] Mihomo install failed: GitHub package unavailable and "
+            "Entware feed fallback failed\n", source)
+        self.assertEqual(
+            matched, "Mihomo install failed: GitHub package unavailable and "
+                     "Entware feed fallback failed")
+        self.assertIsNone(matched_installer_error("clean output", source))
+        self.assertIsNone(matched_installer_error(None, source))
+        # A guest-echoed installer-like string without matching pinned
+        # constant must never be returned.
+        self.assertIsNone(matched_installer_error(
+            "[ERROR] something completely different", source))
+
+    def test_mihomo_output_categories_are_fixed_booleans(self):
+        self.assertEqual(mihomo_output_categories(
+            "Mihomo Meta v1.19.33 linux mipsle", ""), (True, True))
+        self.assertEqual(mihomo_output_categories(
+            "", "sh: /opt/bin/mihomo: Exec format error"), (True, False))
+        self.assertEqual(mihomo_output_categories("", ""), (False, False))
+        self.assertEqual(mihomo_output_categories(None, ""), (False, False))
+
+    def test_mihomo_output_marker_matches_only_pinned_constants(self):
+        self.assertEqual(mihomo_output_marker(
+            "Mihomo Meta v1.19.33 linux mipsle", ""), "Mihomo Meta")
+        self.assertEqual(mihomo_output_marker(
+            "", "panic: should never be called\n\ngoroutine 1 [running]:"),
+            "panic: should never be called")
+        self.assertEqual(mihomo_output_marker(
+            "", "flag provided but not defined: -v\nUsage of mihomo:"),
+            "flag provided but not defined")
+        self.assertEqual(mihomo_output_marker(
+            "runtime: out of memory: cannot allocate", ""), "runtime: out of memory")
+        self.assertEqual(mihomo_output_marker(
+            "", "fatal error: unexpected signal"), "fatal error:")
+        self.assertIsNone(mihomo_output_marker("", "completely unrelated"))
+        self.assertIsNone(mihomo_output_marker(None, None))
