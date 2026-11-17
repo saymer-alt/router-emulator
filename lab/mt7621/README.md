@@ -98,6 +98,31 @@ NAND, firmware or credentials should be published; the guest is WAN-offline and
 host forwards are loopback-only. TeleMT product development has its own task
 stream and is not changed by this documentation update.
 
+### KAS MIPSel base-IPK acceptance (disposable Ported 5.1.8)
+
+After the previous **verified** `ext-utils` lab-only exception passed, the real
+KAS installer stopped at `IPK_UNAVAILABLE`. That category does not establish
+the exact missing package. The initial 25-package Entware lock was designed
+for native Entware bootstrap, not full KAS prerequisites.
+
+`lab/mt7621/kas-base-mipsel.lock.json` is a **separate additive 11-IPK lock**:
+six KAS base requirements (`ca-bundle curl jq iptables nano cron`) plus
+`libcurl libopenssl libnghttp2 zlib libatomic`. Each official MIPSel soft-float
+package was checked against its published `Size` and SHA256. No AArch64
+assets, firmware modifications or WAN traffic from the guest are allowed.
+`lab/mt7621/kas_base_deps.py` rejects incorrect arch/origin, missing transitive
+dependencies, surplus packages, malformed digests and upstream source drift
+before the guest runs; `add_packages()` validates every downloaded IPK.
+
+`python3 -m lab.mt7621.kas_smoke ... --lab-ext-utils-exception --kas-base-deps`
+extends **only** the ephemeral loopback Entware feed; the original 25-package
+bootstrap, historical refusal scenario and public stable KAS are unchanged.
+The dedicated workflow `.github/workflows/mt7621-kas-base-ipk-lab.yml`
+requires evidence from actual guest `opkg list-installed` that **all six**
+base packages are installed. An additional `BLOCKED` (for example a later
+missing Mihomo/MagiTrickle release asset) is a *diagnostic*, never KAS PASS.
+Do not merge, export or run the lab-only patched KAS on physical Keenetic.
+
 ## Quick start (Linux x86_64, incl. WSL2)
 
 ```bash
