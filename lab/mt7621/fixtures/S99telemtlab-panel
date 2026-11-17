@@ -1,0 +1,101 @@
+#!/bin/sh
+# Disposable MT7621 Entware-only autostart wrapper for the synthetic TeleMT
+# Panel Lite configuration, never installed on real routers.
+# The pinned rc.unslung (opt-ndmsv2 1.0-17) SOURCES every executable S*
+# script in /opt/etc/init.d inside one shell: this wrapper must not alter
+# shell options or terminate the sourcing shell, so all logic stays inside
+# functions and every branch returns instead of exiting.
+# Lexicographic order note: "S99telemtlab" sorts before
+# "S99telemtlab-panel", so the Core UART marker is always emitted first and
+# the panel wait_serial step can only pass after the Core one.
+pidfile=/opt/var/run/telemt-panel-lab.pid
+genfile=/opt/var/run/telemt-panel-lab.gen
+conf=/opt/etc/telemt-panel/config.toml
+bin=/opt/bin/telemt-panel
+
+panellab_worker_alive() {
+    [ -n "$1" ] && [ -r "/proc/$1/cmdline" ] || return 1
+    /opt/bin/busybox readlink "/proc/$1/exe" 2>/dev/null \
+        | /opt/bin/busybox grep -q '^/opt/bin/telemt-panel$'
+}
+
+panellab_wait_ready() {
+    n=0
+    while [ "$n" -lt 10 ]; do
+        if [ -r "$pidfile" ]; then
+            p=$(/opt/bin/busybox cat "$pidfile" 2>/dev/null)
+            if panellab_worker_alive "$p"; then return 0; fi
+        fi
+        /opt/bin/busybox sleep 1
+        n=$((n+1))
+    done
+    return 1
+}
+
+panellab_start() {
+    /opt/bin/busybox mkdir -p /opt/var/run /opt/var/lib/telemt-panel
+    if [ -r "$pidfile" ]; then
+        old=$(/opt/bin/busybox cat "$pidfile" 2>/dev/null)
+        if panellab_worker_alive "$old"; then
+            return 0   # genuine worker from the current boot: idempotent no-op
+        fi
+    fi
+    gen=0
+    if [ -r "$genfile" ]; then
+        gen=$(/opt/bin/busybox cat "$genfile" 2>/dev/null)
+    fi
+    case "$gen" in ''|*[!0-9]*) gen=0 ;; esac
+    gen=$((gen+1))
+    printf '%s\n' "$gen" > "$genfile"
+    # Panel Lite runs in the foreground (signal.NotifyContext in-process);
+    # it does not daemonize and ships no pid file support, so the wrapper
+    # backgrounds it and records the direct child PID.  A non-interactive
+    # ash does not SIGHUP background jobs on exit, so the worker survives
+    # the sourcing rc.unslung shell and the SSH session shell alike.
+    "$bin" -config "$conf" >/dev/null 2>&1 &
+    printf '%s\n' "$!" > "$pidfile"
+    if panellab_wait_ready; then
+        p=$(/opt/bin/busybox cat "$pidfile" 2>/dev/null)
+        /opt/bin/busybox echo "telemtlab-panel-start gen=$gen pid=$p" \
+            > /dev/console 2>/dev/null
+        printf 'telemtlab-panel-start gen=%s pid=%s\n' "$gen" "$p"
+        return 0
+    fi
+    /opt/bin/busybox echo "telemtlab-panel-start gen=$gen pid=none" \
+        > /dev/console 2>/dev/null
+    printf 'telemtlab-panel-start gen=%s pid=none\n' "$gen"
+    return 1
+}
+
+panellab_stop() {
+    # Panel is a plain foreground Go process: SIGTERM via kill(2) drives its
+    # signal.NotifyContext graceful shutdown (no pidfd_open dependency).
+    if [ -r "$pidfile" ]; then
+        p=$(/opt/bin/busybox cat "$pidfile" 2>/dev/null)
+        [ -n "$p" ] && /opt/bin/busybox kill "$p" 2>/dev/null
+        n=0
+        while [ "$n" -lt 10 ]; do
+            panellab_worker_alive "$p" || break
+            /opt/bin/busybox sleep 1
+            n=$((n+1))
+        done
+    fi
+    /opt/bin/busybox rm -f "$pidfile"
+    return 0
+}
+
+panellab_restart() {
+    panellab_stop
+    panellab_start
+}
+
+panellab_main() {
+    case "$1" in
+    start) panellab_start ;;
+    stop) panellab_stop ;;
+    restart) panellab_restart ;;
+    *) return 2 ;;
+    esac
+}
+
+panellab_main "$@"

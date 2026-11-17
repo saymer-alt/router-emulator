@@ -552,6 +552,40 @@ fixture use the identical SIGTERM via plain `kill(2)` and verify the
 graceful tokio shutdown.  Telegram upstream and Panel HTTP remain
 NOT_TESTED; nothing merged, nothing released.
 
+### TeleMT Panel Lite Stage G cycle (2026-11-17, Issue #94 / PR #96): Panel HTTP + Core integration VERIFIED — 93/93 PASS
+
+The Stage G branch stacks on the getfb acceptance above (Core stages
+byte-identical) and adds 19 Panel stages (`ported-mt7621-telemt-panel.json`,
+93 steps): **PASS, 93/93 rows, 900.83 s** on the same verified pins (Core
+`2c8a84fb…`/`d4ba4381…`, Panel frozen `0236dfb0…`/`380cb511…`).  Panel Lite
+RC4 served its real loopback HTTP API in the Entware guest: in-guest
+`telemt-panel version` (`1.0.0-rc.4 (lite: memory)`), config seeded with the
+bcrypt hash generated in-guest by the panel's own `hash-password`
+(loopback-only `127.0.0.1:8080`, memory store, Core API url), negative
+malformed-config contract (`unknown configuration fields`, exit ≠ 0, no
+panic — the exact startup-rejection string of
+internal/config/source.go:178), wrapper-baked daemon start, `/proc/pid/exe`
+identity, grounded `/api/health` body, `/proc/net/tcp` loopback listener
+(`0100007F:1F90`), synthetic login + `/api/auth/me`, wrong-password 401
+negative, 10 s stability, SIGTERM stop with a no-orphan exe scan.  **Core–
+Panel integration PASS via the real protocol** (explicitly distinguished
+from the Panel HTTP PASS): authenticated `GET /api/telemt/info` → panel →
+Core `GET /v1/system/info` → `{"reachable":true,"version":"3.5.17","arch":
+"mips","os":"linux",…}` — on the daemonized run AND after the native reboot
+via a fresh login (memory sessions never survive a restart).  Native reboot
+then autostarted BOTH services through rc.unslung (`telemtlab-start gen=2
+pid=701` then `telemtlab-panel-start gen=2 pid=725` on the UART; the panel
+marker is waited AFTER the Core marker because S99telemtlab sorts before
+S99telemtlab-panel), with health/pid/single-instance (`panel=1 core=1`)/
+gen=2/persisted config + panel-state.json proofs.  Budget: 2 QEMU boots,
+zero product failures — cycle A failed only on a fixture grep needle
+(`unknown config keys` vs the measured `unknown configuration fields`),
+repaired against that run's own evidence.  Evidence:
+`lab/mt7621/evidence/ported-mt7621-telemt-panel-20261117/panel-verification.md`.
+Telegram upstream, panel subpage, service-manager/status integrations and
+optional opkg-removal rollback remain NOT_TESTED; nothing merged, nothing
+released.
+
 ## Gate aggregation
 
 ```bash

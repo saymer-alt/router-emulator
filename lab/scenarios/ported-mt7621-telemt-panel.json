@@ -1,0 +1,635 @@
+{
+  "name": "KeeneticOS MT7621 TeleMT MIPSel pinned IPK: Core getfb acceptance, Panel Lite RC4 HTTP lifecycle, Core-Panel loopback integration, native reboot and rc.unslung autostart of both services",
+  "evidence": "KEENETIC_PORTED_EXPERIMENTAL",
+  "steps": [
+    {
+      "action": "wait_serial",
+      "pattern": "Boot and Recovery Environment",
+      "timeout_sec": 120
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Starting kernel",
+      "timeout_sec": 240
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Linux version",
+      "timeout_sec": 120
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Brought up 4 CPUs",
+      "timeout_sec": 240
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "system ready",
+      "timeout_sec": 600
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "waiting for connections",
+      "timeout_sec": 120
+    },
+    {
+      "action": "sleep",
+      "seconds": 15
+    },
+    {
+      "action": "telnet",
+      "port": 8023,
+      "greeting": "\\(config\\)>",
+      "timeout_sec": 60
+    },
+    {
+      "action": "telnet",
+      "port": 8023,
+      "send": "show version",
+      "expect": "release: 5\\.01\\.C\\.8\\.0-2",
+      "timeout_sec": 60,
+      "greeting": "\\(config\\)>"
+    },
+    {
+      "action": "telnet",
+      "port": 8023,
+      "send": "show running-config",
+      "expect": "Model:|interface|dns|opkg|hostname",
+      "timeout_sec": 60,
+      "greeting": "\\(config\\)>"
+    },
+    {
+      "action": "telnet",
+      "port": 8023,
+      "greeting": "\\(config\\)>",
+      "send": [
+        "user admin",
+        "password plain {password}",
+        "exit",
+        "system configuration save",
+        "opkg disk KASOPT:/"
+      ],
+      "expect": "\\(config\\)>",
+      "timeout_sec": 180
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "mounted to /opt",
+      "timeout_sec": 180
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "\\[1/5\\]",
+      "reject_pattern": "Critical error:|Please use ext2/ext3/ext4",
+      "timeout_sec": 300
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "lab-tz-skipped",
+      "reject_pattern": "do_page_fault\\(\\)|Segmentation fault|SIGSEGV",
+      "timeout_sec": 600
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "configured init script",
+      "reject_pattern": "Critical error:|Please use ext2/ext3/ext4|do_page_fault\\(\\)|Segmentation fault|SIGSEGV",
+      "timeout_sec": 600
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "/opt/bin/opkg print-architecture",
+      "expect": "mipsel-3\\.4_kn 200",
+      "timeout_sec": 120
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "/opt/bin/opkg list-installed",
+      "expect": "entware-release - ",
+      "timeout_sec": 60
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "/opt/bin/opkg install bash",
+      "expect": "Configuring bash",
+      "timeout_sec": 300
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "/opt/bin/bash --version",
+      "expect": "mipsel-openwrt-linux-gnu",
+      "timeout_sec": 60
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "/opt/bin/busybox test ! -e /opt/etc/init.d/doinstall && printf 'DOINSTALL_%s\\n' ABSENT",
+      "expect": "DOINSTALL_ABSENT",
+      "timeout_sec": 60
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "printf MARK$((7*6)) > /opt/.lab-marker; /opt/bin/busybox cat /opt/.lab-marker",
+      "expect": "MARK42",
+      "timeout_sec": 60
+    },
+    {
+      "action": "telnet",
+      "port": 8023,
+      "greeting": "Login:|\\(config\\)>",
+      "send": [
+        "admin",
+        "{password}",
+        "system reboot"
+      ],
+      "expect": "Activated system reboot",
+      "timeout_sec": 120
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "reboot: Restarting system",
+      "timeout_sec": 120
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Boot and Recovery Environment",
+      "timeout_sec": 240
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Starting kernel",
+      "timeout_sec": 240
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Brought up 4 CPUs",
+      "timeout_sec": 240
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "system ready",
+      "timeout_sec": 600
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "waiting for connections",
+      "timeout_sec": 120
+    },
+    {
+      "action": "telnet",
+      "port": 8023,
+      "greeting": "Login:|\\(config\\)>",
+      "send": [
+        "admin",
+        "{password}",
+        "show version"
+      ],
+      "expect": "release: 5\\.01\\.C\\.8\\.0-2",
+      "timeout_sec": 120
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "/opt/bin/busybox cat /proc/mounts",
+      "expect": "/opt ext4",
+      "timeout_sec": 180
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "/opt/bin/opkg print-architecture",
+      "expect": "mipsel-3\\.4_kn 200",
+      "timeout_sec": 180
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "/opt/bin/bash --version",
+      "expect": "mipsel-openwrt-linux-gnu",
+      "timeout_sec": 120
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "/opt/bin/busybox cat /opt/.lab-marker",
+      "expect": "MARK42",
+      "timeout_sec": 120
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "/opt/bin/busybox --list | /opt/bin/busybox grep -x base64 >/dev/null && /opt/bin/busybox --list | /opt/bin/busybox grep -x readlink >/dev/null && /opt/bin/busybox --list | /opt/bin/busybox grep -x wget >/dev/null && /opt/bin/busybox --list | /opt/bin/busybox grep -x sha256sum >/dev/null && printf 'APPLET_%s\\n' READY",
+      "expect": "APPLET_READY",
+      "timeout_sec": 90
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "mkdir -p /opt/etc/init.d /opt/lab /opt/var/run /opt/var/log && printf '%s' 'IyEvYmluL3NoCiMgRGlzcG9zYWJsZSBNVDc2MjEgRW50d2FyZS1vbmx5IGF1dG9zdGFydCB3cmFwcGVyIGZvciB0aGUgc3ludGhldGljIFRlbGVNVAojIENvcmUgY29uZmlndXJhdGlvbiwgbmV2ZXIgaW5zdGFsbGVkIG9uIHJlYWwgcm91dGVycy4KIyBUaGUgcGlubmVkIHJjLnVuc2x1bmcgKG9wdC1uZG1zdjIgMS4wLTE3KSBTT1VSQ0VTIGV2ZXJ5IGV4ZWN1dGFibGUgUyoKIyBzY3JpcHQgaW4gL29wdC9ldGMvaW5pdC5kIGluc2lkZSBvbmUgc2hlbGw6IHRoaXMgd3JhcHBlciBtdXN0IG5vdCBhbHRlcgojIHNoZWxsIG9wdGlvbnMgb3IgdGVybWluYXRlIHRoZSBzb3VyY2luZyBzaGVsbCwgc28gYWxsIGxvZ2ljIHN0YXlzIGluc2lkZQojIGZ1bmN0aW9ucyBhbmQgZXZlcnkgYnJhbmNoIHJldHVybnMgaW5zdGVhZCBvZiBleGl0aW5nLgpwaWRmaWxlPS9vcHQvdmFyL3J1bi90ZWxlbXQtbGFiLnBpZApnZW5maWxlPS9vcHQvdmFyL3J1bi90ZWxlbXQtbGFiLmdlbgpjb25mPS9vcHQvZXRjL3RlbGVtdC1sYWIudG9tbApiaW49L29wdC9iaW4vdGVsZW10CmxvZz0vb3B0L3Zhci9sb2cvdGVsZW10LWxhYi5sb2cKCnRlbGVtdGxhYl93b3JrZXJfYWxpdmUoKSB7CiAgICBbIC1uICIkMSIgXSAmJiBbIC1yICIvcHJvYy8kMS9jbWRsaW5lIiBdIHx8IHJldHVybiAxCiAgICAvb3B0L2Jpbi9idXN5Ym94IHJlYWRsaW5rICIvcHJvYy8kMS9leGUiIDI+L2Rldi9udWxsIFwKICAgICAgICB8IC9vcHQvYmluL2J1c3lib3ggZ3JlcCAtcSAnXi9vcHQvYmluL3RlbGVtdCQnCn0KCnRlbGVtdGxhYl93YWl0X3BpZCgpIHsKICAgIG49MAogICAgd2hpbGUgWyAiJG4iIC1sdCAxMCBdOyBkbwogICAgICAgIGlmIFsgLXIgIiRwaWRmaWxlIiBdOyB0aGVuCiAgICAgICAgICAgIHA9JCgvb3B0L2Jpbi9idXN5Ym94IGNhdCAiJHBpZGZpbGUiIDI+L2Rldi9udWxsKQogICAgICAgICAgICBpZiBbIC1uICIkcCIgXTsgdGhlbiByZXR1cm4gMDsgZmkKICAgICAgICBmaQogICAgICAgIC9vcHQvYmluL2J1c3lib3ggc2xlZXAgMQogICAgICAgIG49JCgobisxKSkKICAgIGRvbmUKICAgIHJldHVybiAxCn0KCnRlbGVtdGxhYl9zdGFydCgpIHsKICAgIC9vcHQvYmluL2J1c3lib3ggbWtkaXIgLXAgL29wdC92YXIvcnVuIC9vcHQvdmFyL2xvZwogICAgaWYgWyAtciAiJHBpZGZpbGUiIF07IHRoZW4KICAgICAgICBvbGQ9JCgvb3B0L2Jpbi9idXN5Ym94IGNhdCAiJHBpZGZpbGUiIDI+L2Rldi9udWxsKQogICAgICAgIGlmIHRlbGVtdGxhYl93b3JrZXJfYWxpdmUgIiRvbGQiOyB0aGVuCiAgICAgICAgICAgIHJldHVybiAwICAgIyBnZW51aW5lIHdvcmtlciBmcm9tIHRoZSBjdXJyZW50IGJvb3Q6IGlkZW1wb3RlbnQgbm8tb3AKICAgICAgICBmaQogICAgZmkKICAgIGdlbj0wCiAgICBpZiBbIC1yICIkZ2VuZmlsZSIgXTsgdGhlbgogICAgICAgIGdlbj0kKC9vcHQvYmluL2J1c3lib3ggY2F0ICIkZ2VuZmlsZSIgMj4vZGV2L251bGwpCiAgICBmaQogICAgY2FzZSAiJGdlbiIgaW4gJyd8KlshMC05XSopIGdlbj0wIDs7IGVzYWMKICAgIGdlbj0kKChnZW4rMSkpCiAgICBwcmludGYgJyVzXG4nICIkZ2VuIiA+ICIkZ2VuZmlsZSIKICAgIEhPTUU9L29wdC9sYWIgVE1QRElSPS9vcHQvbGFiICIkYmluIiBzdGFydCAtLWxvZy1maWxlICIkbG9nIiBcCiAgICAgICAgLS1waWQtZmlsZSAiJHBpZGZpbGUiICIkY29uZiIgPi9kZXYvbnVsbCAyPiYxCiAgICBpZiB0ZWxlbXRsYWJfd2FpdF9waWQ7IHRoZW4KICAgICAgICBwPSQoL29wdC9iaW4vYnVzeWJveCBjYXQgIiRwaWRmaWxlIiAyPi9kZXYvbnVsbCkKICAgICAgICAvb3B0L2Jpbi9idXN5Ym94IGVjaG8gInRlbGVtdGxhYi1zdGFydCBnZW49JGdlbiBwaWQ9JHAiIFwKICAgICAgICAgICAgPiAvZGV2L2NvbnNvbGUgMj4vZGV2L251bGwKICAgICAgICBwcmludGYgJ3RlbGVtdGxhYi1zdGFydCBnZW49JXMgcGlkPSVzXG4nICIkZ2VuIiAiJHAiCiAgICAgICAgcmV0dXJuIDAKICAgIGZpCiAgICAvb3B0L2Jpbi9idXN5Ym94IGVjaG8gInRlbGVtdGxhYi1zdGFydCBnZW49JGdlbiBwaWQ9bm9uZSIgXAogICAgICAgID4gL2Rldi9jb25zb2xlIDI+L2Rldi9udWxsCiAgICBwcmludGYgJ3RlbGVtdGxhYi1zdGFydCBnZW49JXMgcGlkPW5vbmVcbicgIiRnZW4iCiAgICByZXR1cm4gMQp9Cgp0ZWxlbXRsYWJfc3RvcCgpIHsKICAgIGlmIFsgLXIgIiRwaWRmaWxlIiBdOyB0aGVuCiAgICAgICAgIyB0ZWxlbXQncyBvd24gYHN0b3BgIHVzZXMgcGlkZmRfb3BlbigyKSwgd2hpY2ggdGhlIDQuOS1uZG0tNSBndWVzdAogICAgICAgICMga2VybmVsIGRvZXMgbm90IGltcGxlbWVudCAoRU5PU1lTKTsgZGVsaXZlciB0aGUgc2FtZSBTSUdURVJNIHZpYQogICAgICAgICMgcGxhaW4ga2lsbCgyKSBhbmQgd2FpdCBmb3IgdGhlIGdyYWNlZnVsIHRva2lvIHNodXRkb3duIGluc3RlYWQuCiAgICAgICAgcD0kKC9vcHQvYmluL2J1c3lib3ggY2F0ICIkcGlkZmlsZSIgMj4vZGV2L251bGwpCiAgICAgICAgWyAtbiAiJHAiIF0gJiYgL29wdC9iaW4vYnVzeWJveCBraWxsICIkcCIgMj4vZGV2L251bGwKICAgICAgICBuPTAKICAgICAgICB3aGlsZSBbICIkbiIgLWx0IDEwIF07IGRvCiAgICAgICAgICAgIHRlbGVtdGxhYl93b3JrZXJfYWxpdmUgIiRwIiB8fCBicmVhawogICAgICAgICAgICAvb3B0L2Jpbi9idXN5Ym94IHNsZWVwIDEKICAgICAgICAgICAgbj0kKChuKzEpKQogICAgICAgIGRvbmUKICAgIGZpCiAgICAvb3B0L2Jpbi9idXN5Ym94IHJtIC1mICIkcGlkZmlsZSIKICAgIHJldHVybiAwCn0KCnRlbGVtdGxhYl9yZXN0YXJ0KCkgewogICAgdGVsZW10bGFiX3N0b3AKICAgIHRlbGVtdGxhYl9zdGFydAp9Cgp0ZWxlbXRsYWJfbWFpbigpIHsKICAgIGNhc2UgIiQxIiBpbgogICAgc3RhcnQpIHRlbGVtdGxhYl9zdGFydCA7OwogICAgc3RvcCkgdGVsZW10bGFiX3N0b3AgOzsKICAgIHJlc3RhcnQpIHRlbGVtdGxhYl9yZXN0YXJ0IDs7CiAgICAqKSByZXR1cm4gMiA7OwogICAgZXNhYwp9Cgp0ZWxlbXRsYWJfbWFpbiAiJEAiCg==' | base64 -d > /opt/etc/init.d/S99telemtlab && printf '%s' 'IyBUZWxlTVQgbGFiIHN5bnRoZXRpYyBjb25maWd1cmF0aW9uIChJc3N1ZSAjOTEsIGRpc3Bvc2FibGUgZ3Vlc3Qgb25seSk6CiMgbG9vcGJhY2stb25seSBiaW5kcywgc3ludGhldGljIGFsbC16ZXJvIHVzZXIgc2VjcmV0LCBjbGFzc2ljIHJlbGF5IG1vZGUKIyB3aXRob3V0IG1pZGRsZS1wcm94eSB1cHN0cmVhbSBjb25uZWN0aW9ucywgQVBJIGVuYWJsZWQgZm9yIGxpdmVuZXNzIHByb2Jlcy4KIyBObyByZWFsIFRlbGVncmFtIGNyZWRlbnRpYWxzLCBubyBwcm9kdWN0aW9uIGVuZHBvaW50cy4KW2dlbmVyYWxdCnVzZV9taWRkbGVfcHJveHkgPSBmYWxzZQpsb2dfbGV2ZWwgPSAibm9ybWFsIgojIEFic29sdXRlLCBndWVzdC1zaWRlIHBhdGhzIHBpbm5lZCBmb3IgdGhlIGRpc3Bvc2FibGUgbGFiIChubyByZWxhdGl2ZS1wYXRoCiMgcmVzb2x1dGlvbiB2YXJpYW5jZSBiZXR3ZWVuIGZvcmVncm91bmQgZGlhZ25vc3RpY3MgYW5kIHRoZSBkYWVtb25pemVkIHJ1bikuCnByb3h5X3NlY3JldF9wYXRoID0gIi9vcHQvZXRjL3RlbGVtdC1sYWIuc2VjcmV0IgpxdW90YV9zdGF0ZV9wYXRoID0gIi9vcHQvZXRjL3RlbGVtdC1sYWIubGltaXQuanNvbiIKCltnZW5lcmFsLm1vZGVzXQpjbGFzc2ljID0gdHJ1ZQpzZWN1cmUgPSB0cnVlCnRscyA9IGZhbHNlCgpbc2VydmVyXQpwb3J0ID0gMzQ0MwoKW1tzZXJ2ZXIubGlzdGVuZXJzXV0KaXAgPSAiMTI3LjAuMC4xIgoKW3NlcnZlci5hcGldCmVuYWJsZWQgPSB0cnVlCmxpc3RlbiA9ICIxMjcuMC4wLjE6OTA5MSIKd2hpdGVsaXN0ID0gWyIxMjcuMC4wLjEvMzIiXQoKW2FjY2Vzcy51c2Vyc10KbGFiID0gIjAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwIgoKW2NlbnNvcnNoaXBdCiMgVGhlIGlzb2xhdGVkIGxhYiBndWVzdCBoYXMgbm8gV0FOOiBtYXNraW5nIHdvdWxkIHJlbGF5IHVucmVjb2duaXplZAojIGNvbm5lY3Rpb25zIHRvIHRoZSBkZWZhdWx0IHB1YmxpYyBtYXNrIGhvc3QsIHNvIGl0IGlzIGRpc2FibGVkIGhlcmUuCm1hc2sgPSBmYWxzZQo=' | base64 -d > /opt/etc/telemt-lab.toml && printf '%s' 'dGVsZW10LWxhYi1zeW50aGV0aWMtc2VjcmV0LTAwMDE=' | base64 -d > /opt/etc/telemt-lab.secret && printf '%s' 'W2Jyb2tlbi10b21sLXRhYmxlCg==' | base64 -d > /opt/lab/broken-telemt.toml && chmod 700 /opt/etc/init.d/S99telemtlab && chmod 600 /opt/etc/telemt-lab.toml /opt/etc/telemt-lab.secret /opt/lab/broken-telemt.toml && [ \"$(/opt/bin/busybox wc -c < /opt/etc/telemt-lab.secret | /opt/bin/busybox tr -d ' ')\" -ge 32 ] && test -x /opt/etc/init.d/S99telemtlab && printf 'TELEMT_%s\\n' FILES_READY",
+      "expect": "TELEMT_FILES_READY",
+      "timeout_sec": 90
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "/opt/bin/busybox wget -qO /opt/lab/telemt.ipk http://192.168.1.100/entware/telemt_3.5.17-2fb1_mipsel-3.4.ipk && /opt/bin/busybox wget -qO /opt/lab/telemt-panel.ipk http://192.168.1.100/entware/telemt-panel-lite_1.0.0.rc.4-1_mipsel-3.4.ipk && printf '%s  %s\\n' '2c8a84fb93535303eeb4bb8a0a5057370f4e625b1cdf0e102f04e33e28c85d8d' telemt.ipk '0236dfb076b14b129a6392de49f287838a11aebe7681e092084d4ce87e771e68' telemt-panel.ipk > /opt/lab/expected.sha && cd /opt/lab && /opt/bin/busybox sha256sum -c expected.sha >/dev/null && printf 'IPKS_%s\\n' DELIVERED",
+      "expect": "IPKS_DELIVERED",
+      "timeout_sec": 300
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "/opt/bin/opkg install /opt/lab/telemt.ipk >/opt/lab/opkg-core.log 2>&1 && /opt/bin/opkg status telemt | /opt/bin/busybox grep -q 'Version: 3.5.17-2fb1' && printf 'OPKG_%s\\n' CORE_OK",
+      "expect": "OPKG_CORE_OK",
+      "timeout_sec": 300
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "/opt/bin/opkg install /opt/lab/telemt-panel.ipk >/opt/lab/opkg-panel.log 2>&1 && /opt/bin/opkg status telemt-panel-lite | /opt/bin/busybox grep -q 'Version: 1.0.0~rc.4-1' && printf 'OPKG_%s\\n' PANEL_OK",
+      "expect": "OPKG_PANEL_OK",
+      "timeout_sec": 300
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "printf '%s  %s\\n' 'd4ba43815883dd1ce9aa57349602598127781e8966d51dab97616dbdb35b216f' /opt/bin/telemt '380cb5112b58538eafec9ae9fab27fb22c994fd36ce3130c541c5e11b29a40c8' /opt/bin/telemt-panel > /opt/lab/elf.sha && cd / && /opt/bin/busybox sha256sum -c /opt/lab/elf.sha >/dev/null && test -x /opt/bin/telemt && test -x /opt/bin/telemt-panel && printf 'BINARIES_%s\\n' PINNED",
+      "expect": "BINARIES_PINNED",
+      "timeout_sec": 90
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "HOME=/opt/lab TMPDIR=/opt/lab /opt/bin/telemt healthcheck --mode=lab-probe-invalid >/opt/lab/cli.out 2>/opt/lab/cli.err; rc=$?; [ \"$rc\" = 2 ] && printf 'CLI_%s\\n' REJECTED || exit 1",
+      "expect": "CLI_REJECTED",
+      "timeout_sec": 90
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "/opt/bin/busybox cat /opt/lab/cli.err",
+      "expect": "Invalid --mode value 'lab-probe-invalid' \\(supported: liveness, ready\\)",
+      "timeout_sec": 90
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "HOME=/opt/lab TMPDIR=/opt/lab /opt/bin/telemt run /opt/lab/broken-telemt.toml >/opt/lab/toml.out 2>/opt/lab/toml.err; rc=$?; [ \"$rc\" = 1 ] && /opt/bin/busybox grep -q 'unclosed table' /opt/lab/toml.err && ! /opt/bin/busybox grep -qi 'panicked' /opt/lab/toml.err && printf 'TOML_%s\\n' REJECTED || exit 1",
+      "expect": "TOML_REJECTED",
+      "timeout_sec": 120
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "cd /opt/lab && /opt/bin/busybox wget -qO /opt/lab/probe-entware http://192.168.1.100/entware/probe-entware && chmod 755 /opt/lab/probe-entware && /opt/lab/probe-entware > /opt/lab/probe.out 2>&1; /opt/bin/busybox cat /opt/lab/probe.out; /opt/bin/busybox cat /opt/lab/probe.out > /dev/console 2>/dev/null; /opt/bin/busybox grep -q 'PROBE_GLIBC_SYMBOL_RET_-1_ERRNO_89' /opt/lab/probe.out && /opt/bin/busybox grep -q 'PROBE_LIBC_GETRANDOM_RET_32_ERRNO_0' /opt/lab/probe.out && /opt/bin/busybox grep -q 'PROBE_RAW_SYSCALL_RET_32_ERRNO_0' /opt/lab/probe.out && /opt/bin/busybox grep -q 'PROBE_URANDOM_READ_OK' /opt/lab/probe.out && /opt/bin/busybox grep -q 'PROBE_DEVRANDOM_POLLIN_READY' /opt/lab/probe.out && printf 'PROBE_KERNEL_%s\\n' FACT_OK",
+      "expect": "PROBE_KERNEL_FACT_OK",
+      "timeout_sec": 120
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "cd /opt/etc; rm -f /opt/var/run/telemt-diag.pid; HOME=/opt/lab TMPDIR=/opt/lab /opt/bin/telemt start --foreground --pid-file /opt/var/run/telemt-diag.pid /opt/etc/telemt-lab.toml > /opt/lab/telemt-fg.log 2>&1 & fgp=$!; i=0; alive=1; while [ $i -lt 20 ]; do kill -0 $fgp 2>/dev/null || { alive=0; break; }; /opt/bin/busybox sleep 1; i=$((i+1)); done; if [ \"$alive\" = 1 ]; then kill $fgp 2>/dev/null; printf 'FG_%s\\n' ALIVE_20S; else wait $fgp; printf 'FG_%s\\n' EXITED; fi; /opt/bin/busybox cat /opt/lab/telemt-fg.log; /opt/bin/busybox cat /opt/lab/telemt-fg.log > /dev/console 2>/dev/null; printf 'DIAG_%s\\n' CAPTURED",
+      "expect": "DIAG_CAPTURED",
+      "timeout_sec": 120
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "rm -f /opt/var/run/telemt-lab.pid; HOME=/opt/lab TMPDIR=/opt/lab /opt/bin/telemt start --log-file /opt/var/log/telemt-lab.log --pid-file /opt/var/run/telemt-lab.pid /opt/etc/telemt-lab.toml; if [ $? = 0 ]; then printf 'TELEMT_%s\\n' STARTED; else /opt/bin/busybox cat /opt/var/log/telemt-lab.log > /dev/console 2>/dev/null; /opt/bin/busybox cat /opt/var/log/telemt-lab.log 2>/dev/null; exit 1; fi",
+      "expect": "TELEMT_STARTED",
+      "timeout_sec": 120
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "/opt/bin/busybox sleep 3; /opt/bin/busybox cat /opt/var/log/telemt-lab.log 2>/dev/null; /opt/bin/busybox cat /opt/var/log/telemt-lab.log > /dev/console 2>/dev/null; printf 'LOG_%s\\n' EMITTED",
+      "expect": "LOG_(EMITTED|ABSENT)",
+      "timeout_sec": 90
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "pid=$(/opt/bin/busybox cat /opt/var/run/telemt-lab.pid 2>/dev/null); if [ -n \"$pid\" ] && [ -r /proc/$pid/cmdline ]; then printf 'DAEMON_%s\\n' PROC_ALIVE; else /opt/bin/busybox sleep 2; /opt/bin/busybox cat /opt/var/log/telemt-lab.log > /dev/console 2>/dev/null; /opt/bin/busybox cat /opt/var/log/telemt-lab.log 2>/dev/null; exit 1; fi",
+      "expect": "DAEMON_PROC_ALIVE",
+      "timeout_sec": 90
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "ok=0; i=0; while [ \"$i\" -lt 20 ]; do if HOME=/opt/lab /opt/bin/telemt healthcheck --mode liveness /opt/etc/telemt-lab.toml >/dev/null 2>&1; then ok=1; break; fi; /opt/bin/busybox sleep 2; i=$((i+1)); done; [ \"$ok\" = 1 ] && printf 'HEALTH_%s\\n' 'LIVE' || exit 1",
+      "expect": "HEALTH_LIVE",
+      "timeout_sec": 120
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "pid=$(/opt/bin/busybox cat /opt/var/run/telemt-lab.pid); cmd=$(/opt/bin/busybox tr '\\0' ' ' < /proc/$pid/cmdline 2>/dev/null); exe=$(/opt/bin/busybox readlink /proc/$pid/exe 2>/dev/null); case \"$cmd\" in *telemt*) [ \"$exe\" = /opt/bin/telemt ] && printf 'PID_%s\\n' 'ALIVE' || exit 1;; *) exit 1;; esac",
+      "expect": "PID_ALIVE",
+      "timeout_sec": 90
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "/opt/bin/busybox grep -Eq '0100007F:2383 +[0-9A-F]{8}:[0-9A-F]{4} +0A ' /proc/net/tcp && /opt/bin/busybox grep -Eq '(0100007F|00000000):0D73 +[0-9A-F]{8}:[0-9A-F]{4} +0A ' /proc/net/tcp && printf 'SOCKETS_%s\\n' LISTENING",
+      "expect": "SOCKETS_LISTENING",
+      "timeout_sec": 90
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "/opt/bin/busybox sleep 10 && HOME=/opt/lab /opt/bin/telemt healthcheck --mode liveness /opt/etc/telemt-lab.toml >/dev/null 2>&1 && pid=$(/opt/bin/busybox cat /opt/var/run/telemt-lab.pid) && [ -r /proc/$pid/cmdline ] && printf 'STABLE_%s\\n' AFTER_10S",
+      "expect": "STABLE_AFTER_10S",
+      "timeout_sec": 90
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "pid=$(/opt/bin/busybox cat /opt/var/run/telemt-lab.pid 2>/dev/null); [ -n \"$pid\" ] && /opt/bin/busybox kill \"$pid\" 2>/dev/null; ok=0; i=0; while [ \"$i\" -lt 10 ]; do if [ ! -r /proc/$pid/cmdline ]; then ok=1; break; fi; /opt/bin/busybox sleep 2; i=$((i+1)); done; /opt/bin/busybox tail -c 2000 /opt/var/log/telemt-lab.log > /dev/console 2>/dev/null; [ \"$ok\" = 1 ] && /opt/bin/busybox rm -f /opt/var/run/telemt-lab.pid && printf 'TELEMT_%s\\n' 'STOPPED' || exit 1",
+      "expect": "TELEMT_STOPPED",
+      "timeout_sec": 90
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "HOME=/opt/lab /opt/bin/telemt healthcheck --mode liveness /opt/etc/telemt-lab.toml >/dev/null 2>&1 && exit 1 || printf 'HEALTH_%s\\n' DOWN_AFTER_STOP",
+      "expect": "HEALTH_DOWN_AFTER_STOP",
+      "timeout_sec": 90
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "out=$(/opt/etc/init.d/S99telemtlab start) || exit 1; printf '%s\\n' \"$out\" && /opt/bin/busybox cat /opt/var/run/telemt-lab.pid > /opt/var/run/telemt-lab.pid1",
+      "expect": "telemtlab-start gen=1 pid=[0-9]+",
+      "timeout_sec": 120
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "ok=0; i=0; while [ \"$i\" -lt 20 ]; do if HOME=/opt/lab /opt/bin/telemt healthcheck --mode liveness /opt/etc/telemt-lab.toml >/dev/null 2>&1; then ok=1; break; fi; /opt/bin/busybox sleep 2; i=$((i+1)); done; [ \"$ok\" = 1 ] && printf 'RESTART_HEALTH_%s\\n' 'OK' || exit 1",
+      "expect": "RESTART_HEALTH_OK",
+      "timeout_sec": 120
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "timeout_sec": 90,
+      "send": "/opt/bin/telemt-panel version > /opt/lab/panel-version.out 2>&1; rc=$?; /opt/bin/busybox cat /opt/lab/panel-version.out; /opt/bin/busybox cat /opt/lab/panel-version.out > /dev/console 2>/dev/null; [ \"$rc\" = 0 ] && /opt/bin/busybox grep -q 'telemt-panel 1.0.0-rc.4 (lite: memory)' /opt/lab/panel-version.out && printf 'PANEL_%s\\n' VERSION_RC4",
+      "expect": "PANEL_VERSION_RC4"
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "timeout_sec": 90,
+      "send": "/opt/bin/busybox mkdir -p /opt/etc/telemt-panel /opt/var/lib/telemt-panel && h=$(/opt/bin/busybox printf '%s\\n' 'telemt-lab-panel-synthetic-pass-01' | /opt/bin/telemt-panel hash-password) && [ ${#h} -ge 50 ] && /opt/bin/busybox printf 'listen = \"127.0.0.1:8080\"\\ndata_dir = \"/opt/var/lib/telemt-panel\"\\n\\n[tls]\\nmode = \"http\"\\n\\n[telemt]\\nurl = \"http://127.0.0.1:9091\"\\nauth_header = \"\"\\n\\n[auth]\\nusername = \"labadmin\"\\npassword_hash = \"%s\"\\n\\n[store]\\ndriver = \"memory\"\\n\\n[host]\\nservice_manager = \"none\"\\n' \"$h\" > /opt/etc/telemt-panel/config.toml && chmod 600 /opt/etc/telemt-panel/config.toml && /opt/bin/busybox cat /opt/etc/telemt-panel/config.toml && /opt/bin/busybox cat /opt/etc/telemt-panel/config.toml > /dev/console 2>/dev/null && printf 'PANEL_%s\\n' CFG_SEEDED",
+      "expect": "PANEL_CFG_SEEDED"
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "timeout_sec": 90,
+      "send": "/opt/bin/busybox cp /opt/etc/telemt-panel/config.toml /opt/lab/panel-bad.toml && printf 'lab_unknown_key = 1\\n' >> /opt/lab/panel-bad.toml && /opt/bin/telemt-panel -config /opt/lab/panel-bad.toml > /opt/lab/panel-bad.out 2>&1; rc=$?; /opt/bin/busybox cat /opt/lab/panel-bad.out; /opt/bin/busybox cat /opt/lab/panel-bad.out > /dev/console 2>/dev/null; [ \"$rc\" != 0 ] && /opt/bin/busybox grep -qi 'unknown configuration fields' /opt/lab/panel-bad.out && printf 'PANEL_%s\\n' BADCFG_REJECTED",
+      "expect": "PANEL_BADCFG_REJECTED"
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "timeout_sec": 120,
+      "send": "printf '%s' 'IyEvYmluL3NoCiMgRGlzcG9zYWJsZSBNVDc2MjEgRW50d2FyZS1vbmx5IGF1dG9zdGFydCB3cmFwcGVyIGZvciB0aGUgc3ludGhldGljIFRlbGVNVAojIFBhbmVsIExpdGUgY29uZmlndXJhdGlvbiwgbmV2ZXIgaW5zdGFsbGVkIG9uIHJlYWwgcm91dGVycy4KIyBUaGUgcGlubmVkIHJjLnVuc2x1bmcgKG9wdC1uZG1zdjIgMS4wLTE3KSBTT1VSQ0VTIGV2ZXJ5IGV4ZWN1dGFibGUgUyoKIyBzY3JpcHQgaW4gL29wdC9ldGMvaW5pdC5kIGluc2lkZSBvbmUgc2hlbGw6IHRoaXMgd3JhcHBlciBtdXN0IG5vdCBhbHRlcgojIHNoZWxsIG9wdGlvbnMgb3IgdGVybWluYXRlIHRoZSBzb3VyY2luZyBzaGVsbCwgc28gYWxsIGxvZ2ljIHN0YXlzIGluc2lkZQojIGZ1bmN0aW9ucyBhbmQgZXZlcnkgYnJhbmNoIHJldHVybnMgaW5zdGVhZCBvZiBleGl0aW5nLgojIExleGljb2dyYXBoaWMgb3JkZXIgbm90ZTogIlM5OXRlbGVtdGxhYiIgc29ydHMgYmVmb3JlCiMgIlM5OXRlbGVtdGxhYi1wYW5lbCIsIHNvIHRoZSBDb3JlIFVBUlQgbWFya2VyIGlzIGFsd2F5cyBlbWl0dGVkIGZpcnN0IGFuZAojIHRoZSBwYW5lbCB3YWl0X3NlcmlhbCBzdGVwIGNhbiBvbmx5IHBhc3MgYWZ0ZXIgdGhlIENvcmUgb25lLgpwaWRmaWxlPS9vcHQvdmFyL3J1bi90ZWxlbXQtcGFuZWwtbGFiLnBpZApnZW5maWxlPS9vcHQvdmFyL3J1bi90ZWxlbXQtcGFuZWwtbGFiLmdlbgpjb25mPS9vcHQvZXRjL3RlbGVtdC1wYW5lbC9jb25maWcudG9tbApiaW49L29wdC9iaW4vdGVsZW10LXBhbmVsCgpwYW5lbGxhYl93b3JrZXJfYWxpdmUoKSB7CiAgICBbIC1uICIkMSIgXSAmJiBbIC1yICIvcHJvYy8kMS9jbWRsaW5lIiBdIHx8IHJldHVybiAxCiAgICAvb3B0L2Jpbi9idXN5Ym94IHJlYWRsaW5rICIvcHJvYy8kMS9leGUiIDI+L2Rldi9udWxsIFwKICAgICAgICB8IC9vcHQvYmluL2J1c3lib3ggZ3JlcCAtcSAnXi9vcHQvYmluL3RlbGVtdC1wYW5lbCQnCn0KCnBhbmVsbGFiX3dhaXRfcmVhZHkoKSB7CiAgICBuPTAKICAgIHdoaWxlIFsgIiRuIiAtbHQgMTAgXTsgZG8KICAgICAgICBpZiBbIC1yICIkcGlkZmlsZSIgXTsgdGhlbgogICAgICAgICAgICBwPSQoL29wdC9iaW4vYnVzeWJveCBjYXQgIiRwaWRmaWxlIiAyPi9kZXYvbnVsbCkKICAgICAgICAgICAgaWYgcGFuZWxsYWJfd29ya2VyX2FsaXZlICIkcCI7IHRoZW4gcmV0dXJuIDA7IGZpCiAgICAgICAgZmkKICAgICAgICAvb3B0L2Jpbi9idXN5Ym94IHNsZWVwIDEKICAgICAgICBuPSQoKG4rMSkpCiAgICBkb25lCiAgICByZXR1cm4gMQp9CgpwYW5lbGxhYl9zdGFydCgpIHsKICAgIC9vcHQvYmluL2J1c3lib3ggbWtkaXIgLXAgL29wdC92YXIvcnVuIC9vcHQvdmFyL2xpYi90ZWxlbXQtcGFuZWwKICAgIGlmIFsgLXIgIiRwaWRmaWxlIiBdOyB0aGVuCiAgICAgICAgb2xkPSQoL29wdC9iaW4vYnVzeWJveCBjYXQgIiRwaWRmaWxlIiAyPi9kZXYvbnVsbCkKICAgICAgICBpZiBwYW5lbGxhYl93b3JrZXJfYWxpdmUgIiRvbGQiOyB0aGVuCiAgICAgICAgICAgIHJldHVybiAwICAgIyBnZW51aW5lIHdvcmtlciBmcm9tIHRoZSBjdXJyZW50IGJvb3Q6IGlkZW1wb3RlbnQgbm8tb3AKICAgICAgICBmaQogICAgZmkKICAgIGdlbj0wCiAgICBpZiBbIC1yICIkZ2VuZmlsZSIgXTsgdGhlbgogICAgICAgIGdlbj0kKC9vcHQvYmluL2J1c3lib3ggY2F0ICIkZ2VuZmlsZSIgMj4vZGV2L251bGwpCiAgICBmaQogICAgY2FzZSAiJGdlbiIgaW4gJyd8KlshMC05XSopIGdlbj0wIDs7IGVzYWMKICAgIGdlbj0kKChnZW4rMSkpCiAgICBwcmludGYgJyVzXG4nICIkZ2VuIiA+ICIkZ2VuZmlsZSIKICAgICMgUGFuZWwgTGl0ZSBydW5zIGluIHRoZSBmb3JlZ3JvdW5kIChzaWduYWwuTm90aWZ5Q29udGV4dCBpbi1wcm9jZXNzKTsKICAgICMgaXQgZG9lcyBub3QgZGFlbW9uaXplIGFuZCBzaGlwcyBubyBwaWQgZmlsZSBzdXBwb3J0LCBzbyB0aGUgd3JhcHBlcgogICAgIyBiYWNrZ3JvdW5kcyBpdCBhbmQgcmVjb3JkcyB0aGUgZGlyZWN0IGNoaWxkIFBJRC4gIEEgbm9uLWludGVyYWN0aXZlCiAgICAjIGFzaCBkb2VzIG5vdCBTSUdIVVAgYmFja2dyb3VuZCBqb2JzIG9uIGV4aXQsIHNvIHRoZSB3b3JrZXIgc3Vydml2ZXMKICAgICMgdGhlIHNvdXJjaW5nIHJjLnVuc2x1bmcgc2hlbGwgYW5kIHRoZSBTU0ggc2Vzc2lvbiBzaGVsbCBhbGlrZS4KICAgICIkYmluIiAtY29uZmlnICIkY29uZiIgPi9kZXYvbnVsbCAyPiYxICYKICAgIHByaW50ZiAnJXNcbicgIiQhIiA+ICIkcGlkZmlsZSIKICAgIGlmIHBhbmVsbGFiX3dhaXRfcmVhZHk7IHRoZW4KICAgICAgICBwPSQoL29wdC9iaW4vYnVzeWJveCBjYXQgIiRwaWRmaWxlIiAyPi9kZXYvbnVsbCkKICAgICAgICAvb3B0L2Jpbi9idXN5Ym94IGVjaG8gInRlbGVtdGxhYi1wYW5lbC1zdGFydCBnZW49JGdlbiBwaWQ9JHAiIFwKICAgICAgICAgICAgPiAvZGV2L2NvbnNvbGUgMj4vZGV2L251bGwKICAgICAgICBwcmludGYgJ3RlbGVtdGxhYi1wYW5lbC1zdGFydCBnZW49JXMgcGlkPSVzXG4nICIkZ2VuIiAiJHAiCiAgICAgICAgcmV0dXJuIDAKICAgIGZpCiAgICAvb3B0L2Jpbi9idXN5Ym94IGVjaG8gInRlbGVtdGxhYi1wYW5lbC1zdGFydCBnZW49JGdlbiBwaWQ9bm9uZSIgXAogICAgICAgID4gL2Rldi9jb25zb2xlIDI+L2Rldi9udWxsCiAgICBwcmludGYgJ3RlbGVtdGxhYi1wYW5lbC1zdGFydCBnZW49JXMgcGlkPW5vbmVcbicgIiRnZW4iCiAgICByZXR1cm4gMQp9CgpwYW5lbGxhYl9zdG9wKCkgewogICAgIyBQYW5lbCBpcyBhIHBsYWluIGZvcmVncm91bmQgR28gcHJvY2VzczogU0lHVEVSTSB2aWEga2lsbCgyKSBkcml2ZXMgaXRzCiAgICAjIHNpZ25hbC5Ob3RpZnlDb250ZXh0IGdyYWNlZnVsIHNodXRkb3duIChubyBwaWRmZF9vcGVuIGRlcGVuZGVuY3kpLgogICAgaWYgWyAtciAiJHBpZGZpbGUiIF07IHRoZW4KICAgICAgICBwPSQoL29wdC9iaW4vYnVzeWJveCBjYXQgIiRwaWRmaWxlIiAyPi9kZXYvbnVsbCkKICAgICAgICBbIC1uICIkcCIgXSAmJiAvb3B0L2Jpbi9idXN5Ym94IGtpbGwgIiRwIiAyPi9kZXYvbnVsbAogICAgICAgIG49MAogICAgICAgIHdoaWxlIFsgIiRuIiAtbHQgMTAgXTsgZG8KICAgICAgICAgICAgcGFuZWxsYWJfd29ya2VyX2FsaXZlICIkcCIgfHwgYnJlYWsKICAgICAgICAgICAgL29wdC9iaW4vYnVzeWJveCBzbGVlcCAxCiAgICAgICAgICAgIG49JCgobisxKSkKICAgICAgICBkb25lCiAgICBmaQogICAgL29wdC9iaW4vYnVzeWJveCBybSAtZiAiJHBpZGZpbGUiCiAgICByZXR1cm4gMAp9CgpwYW5lbGxhYl9yZXN0YXJ0KCkgewogICAgcGFuZWxsYWJfc3RvcAogICAgcGFuZWxsYWJfc3RhcnQKfQoKcGFuZWxsYWJfbWFpbigpIHsKICAgIGNhc2UgIiQxIiBpbgogICAgc3RhcnQpIHBhbmVsbGFiX3N0YXJ0IDs7CiAgICBzdG9wKSBwYW5lbGxhYl9zdG9wIDs7CiAgICByZXN0YXJ0KSBwYW5lbGxhYl9yZXN0YXJ0IDs7CiAgICAqKSByZXR1cm4gMiA7OwogICAgZXNhYwp9CgpwYW5lbGxhYl9tYWluICIkQCIK' | base64 -d > /opt/etc/init.d/S99telemtlab-panel && chmod 700 /opt/etc/init.d/S99telemtlab-panel && out=$(/opt/etc/init.d/S99telemtlab-panel start) || exit 1; printf '%s\\n' \"$out\"",
+      "expect": "telemtlab-panel-start gen=1 pid=[0-9]+"
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "timeout_sec": 90,
+      "send": "pid=$(/opt/bin/busybox cat /opt/var/run/telemt-panel-lab.pid 2>/dev/null); if [ -n \"$pid\" ] && [ -r /proc/$pid/cmdline ] && [ \"$(/opt/bin/busybox readlink /proc/$pid/exe 2>/dev/null)\" = \"/opt/bin/telemt-panel\" ]; then /opt/bin/busybox tr '\\0' ' ' < /proc/$pid/cmdline; printf 'PANEL_%s\\n' PROC_ALIVE; else printf 'pid=%s\\n' \"$pid\"; exit 1; fi",
+      "expect": "PANEL_PROC_ALIVE"
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "timeout_sec": 120,
+      "send": "ok=0; i=0; while [ \"$i\" -lt 15 ]; do body=$(/opt/bin/busybox wget -qO- http://127.0.0.1:8080/api/health 2>/dev/null) && ok=1 && break; /opt/bin/busybox sleep 1; i=$((i+1)); done; [ \"$ok\" = 1 ] || exit 1; printf '%s\\n' \"$body\"; printf '%s\\n' \"$body\" > /dev/console 2>/dev/null; printf '%s\\n' \"$body\" | /opt/bin/busybox grep -q '\"status\":\"ok\"' && printf '%s\\n' \"$body\" | /opt/bin/busybox grep -q '\"version\":\"1.0.0-rc.4\"' && printf '%s\\n' \"$body\" | /opt/bin/busybox grep -q '\"variant\":\"lite\"' && printf 'PANEL_%s\\n' HEALTH_OK",
+      "expect": "PANEL_HEALTH_OK"
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "timeout_sec": 90,
+      "send": "/opt/bin/busybox grep -Eq '0100007F:1F90 +[0-9A-F]{8}:[0-9A-F]{4} +0A ' /proc/net/tcp && printf 'PANEL_%s\\n' SOCKET_LISTENING || { /opt/bin/busybox cat /proc/net/tcp > /dev/console 2>/dev/null; exit 1; }",
+      "expect": "PANEL_SOCKET_LISTENING"
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "timeout_sec": 120,
+      "send": "c=$(/opt/bin/busybox wget -qO- -S --post-data '{\"username\":\"labadmin\",\"password\":\"telemt-lab-panel-synthetic-pass-01\"}' --header 'Content-Type: application/json' http://127.0.0.1:8080/api/auth/login 2>&1 | /opt/bin/busybox sed -n 's/.*[Ss]et-[Cc]ookie: panel_session=\\([^;]*\\).*/\\1/p' | /opt/bin/busybox head -n 1); [ -n \"$c\" ] || { printf 'login_cookie_missing\\n'; exit 1; }; me=$(/opt/bin/busybox wget -qO- --header \"Cookie: panel_session=$c\" http://127.0.0.1:8080/api/auth/me 2>/dev/null); printf 'me=%s\\n' \"$me\"; printf 'me=%s\\n' \"$me\" > /dev/console 2>/dev/null; printf '%s\\n' \"$me\" | /opt/bin/busybox grep -q '\"username\":\"labadmin\"' && printf '%s' \"$c\" > /opt/lab/panel-cookie && chmod 600 /opt/lab/panel-cookie && printf 'PANEL_%s\\n' AUTH_OK",
+      "expect": "PANEL_AUTH_OK"
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "timeout_sec": 90,
+      "send": "/opt/bin/busybox wget -qO- -S --post-data '{\"username\":\"labadmin\",\"password\":\"telemt-lab-panel-wrong-pass\"}' --header 'Content-Type: application/json' http://127.0.0.1:8080/api/auth/login > /opt/lab/panel-401.out 2>&1; rc=$?; /opt/bin/busybox cat /opt/lab/panel-401.out; [ \"$rc\" != 0 ] && /opt/bin/busybox grep -q '401' /opt/lab/panel-401.out && printf 'PANEL_%s\\n' AUTH_NEGATIVE",
+      "expect": "PANEL_AUTH_NEGATIVE"
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "timeout_sec": 120,
+      "send": "c=$(/opt/bin/busybox cat /opt/lab/panel-cookie 2>/dev/null); [ -n \"$c\" ] || exit 1; info=$(/opt/bin/busybox wget -qO- --header \"Cookie: panel_session=$c\" http://127.0.0.1:8080/api/telemt/info 2>/dev/null); printf '%s\\n' \"$info\"; printf '%s\\n' \"$info\" > /dev/console 2>/dev/null; printf '%s\\n' \"$info\" | /opt/bin/busybox grep -q '\"reachable\":true' && printf '%s\\n' \"$info\" | /opt/bin/busybox grep -q '\"version\":\"3.5.17' && printf 'PANEL_%s\\n' CORE_INTEGRATION_OK",
+      "expect": "PANEL_CORE_INTEGRATION_OK"
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "timeout_sec": 90,
+      "send": "/opt/bin/busybox sleep 10 && pid=$(/opt/bin/busybox cat /opt/var/run/telemt-panel-lab.pid 2>/dev/null) && [ -r /proc/$pid/cmdline ] && /opt/bin/busybox wget -qO- http://127.0.0.1:8080/api/health >/dev/null 2>&1 && printf 'PANEL_%s\\n' STABLE_AFTER_10S",
+      "expect": "PANEL_STABLE_AFTER_10S"
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "timeout_sec": 120,
+      "send": "/opt/etc/init.d/S99telemtlab-panel stop || exit 1; ok=0; i=0; while [ \"$i\" -lt 5 ]; do /opt/bin/busybox wget -qO- http://127.0.0.1:8080/api/health >/dev/null 2>&1 || { ok=1; break; }; /opt/bin/busybox sleep 1; i=$((i+1)); done; [ \"$ok\" = 1 ] || exit 1; n=0; for d in /proc/[0-9]*; do e=$(/opt/bin/busybox readlink \"$d/exe\" 2>/dev/null); case \"$e\" in \"/opt/bin/telemt-pan\"\"el\") n=$((n+1));; esac; done; [ \"$n\" = 0 ] && printf 'PANEL_%s\\n' STOPPED_CLEAN || { printf 'panel_workers=%s\\n' \"$n\"; exit 1; }",
+      "expect": "PANEL_STOPPED_CLEAN"
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "/opt/etc/init.d/S99telemtlab stop; ok=0; i=0; while [ \"$i\" -lt 10 ]; do pid=$(/opt/bin/busybox cat /opt/var/run/telemt-lab.pid 2>/dev/null); if [ -z \"$pid\" ] || [ ! -r /proc/$pid/cmdline ]; then ok=1; break; fi; /opt/bin/busybox sleep 2; i=$((i+1)); done; [ \"$ok\" = 1 ] && printf 'TELEMT_OFF_%s\\n' 'PREBOOT' || exit 1",
+      "expect": "TELEMT_OFF_PREBOOT",
+      "timeout_sec": 90
+    },
+    {
+      "action": "telnet",
+      "port": 8023,
+      "greeting": "Login:|\\(config\\)>",
+      "send": [
+        "admin",
+        "{password}",
+        "system reboot"
+      ],
+      "expect": "\\(config\\)>",
+      "timeout_sec": 120
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "reboot: Restarting system",
+      "timeout_sec": 240
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Boot and Recovery Environment",
+      "timeout_sec": 240
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Starting kernel",
+      "timeout_sec": 240
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Brought up 4 CPUs",
+      "timeout_sec": 240
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "configured init script",
+      "timeout_sec": 300
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "system ready",
+      "timeout_sec": 300
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "waiting for connections",
+      "timeout_sec": 300
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "telemtlab-start gen=2 pid=[0-9]+",
+      "timeout_sec": 600
+    },
+    {
+      "action": "wait_serial",
+      "timeout_sec": 600,
+      "pattern": "telemtlab-panel-start gen=2 pid=[0-9]+"
+    },
+    {
+      "action": "telnet",
+      "port": 8023,
+      "greeting": "Login:|\\(config\\)>",
+      "send": [
+        "admin",
+        "{password}",
+        "show version"
+      ],
+      "expect": "release: 5\\.01\\.C\\.8\\.0-2",
+      "timeout_sec": 120
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "/opt/bin/busybox cat /proc/mounts",
+      "expect": "/opt ext4",
+      "timeout_sec": 180
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "ok=0; i=0; while [ \"$i\" -lt 20 ]; do if HOME=/opt/lab /opt/bin/telemt healthcheck --mode liveness /opt/etc/telemt-lab.toml >/dev/null 2>&1; then ok=1; break; fi; /opt/bin/busybox sleep 2; i=$((i+1)); done; [ \"$ok\" = 1 ] && printf 'AUTOSTART_HEALTH_%s\\n' 'OK' || exit 1",
+      "expect": "AUTOSTART_HEALTH_OK",
+      "timeout_sec": 180
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "pid=$(/opt/bin/busybox cat /opt/var/run/telemt-lab.pid); cmd=$(/opt/bin/busybox tr '\\0' ' ' < /proc/$pid/cmdline 2>/dev/null); exe=$(/opt/bin/busybox readlink /proc/$pid/exe 2>/dev/null); case \"$cmd\" in *telemt*) [ \"$exe\" = /opt/bin/telemt ] && printf 'AUTOSTART_PID_%s\\n' 'ALIVE' || exit 1;; *) exit 1;; esac",
+      "expect": "AUTOSTART_PID_ALIVE",
+      "timeout_sec": 90
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "n=0; for p in /proc/[0-9]*; do cmd=$(/opt/bin/busybox tr '\\0' ' ' < \"$p/cmdline\" 2>/dev/null); case \"$cmd\" in *\"/opt/etc/telemt-lab.\"\"toml\"*) n=$((n+1));; esac; done; [ \"$n\" = 1 ] && printf 'AUTOSTART_%s\\n' SINGLE || exit 1",
+      "expect": "AUTOSTART_SINGLE",
+      "timeout_sec": 90
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "/opt/bin/opkg status telemt | /opt/bin/busybox grep -q 'Version: 3.5.17-2fb1' && /opt/bin/opkg status telemt-panel-lite | /opt/bin/busybox grep -q 'Version: 1.0.0~rc.4-1' && test -r /opt/etc/telemt-lab.toml && test -x /opt/etc/init.d/S99telemtlab && test -r /opt/var/run/telemt-lab.gen && printf 'PERSISTED_%s\\n' FILES",
+      "expect": "PERSISTED_FILES",
+      "timeout_sec": 90
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "[ \"$(/opt/bin/busybox cat /opt/var/run/telemt-lab.gen)\" = 2 ] && printf 'GEN_%s\\n' TWO || exit 1",
+      "expect": "GEN_TWO",
+      "timeout_sec": 90
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "printf 'PIDS %s %s\\n' \"$(/opt/bin/busybox cat /opt/var/run/telemt-lab.pid1 2>/dev/null)\" \"$(/opt/bin/busybox cat /opt/var/run/telemt-lab.pid 2>/dev/null)\"",
+      "expect": "PIDS [0-9]+ [0-9]+",
+      "timeout_sec": 90
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "timeout_sec": 120,
+      "send": "ok=0; i=0; while [ \"$i\" -lt 20 ]; do body=$(/opt/bin/busybox wget -qO- http://127.0.0.1:8080/api/health 2>/dev/null) && ok=1 && break; /opt/bin/busybox sleep 1; i=$((i+1)); done; [ \"$ok\" = 1 ] || exit 1; printf '%s\\n' \"$body\"; printf '%s\\n' \"$body\" > /dev/console 2>/dev/null; printf '%s\\n' \"$body\" | /opt/bin/busybox grep -q '\"status\":\"ok\"' && printf '%s\\n' \"$body\" | /opt/bin/busybox grep -q '\"version\":\"1.0.0-rc.4\"' && printf 'PANEL_%s\\n' AUTOSTART_HEALTH_OK",
+      "expect": "PANEL_AUTOSTART_HEALTH_OK"
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "timeout_sec": 90,
+      "send": "pid=$(/opt/bin/busybox cat /opt/var/run/telemt-panel-lab.pid 2>/dev/null); cmd=$(/opt/bin/busybox tr '\\0' ' ' < /proc/$pid/cmdline 2>/dev/null); [ -n \"$cmd\" ] || exit 1; printf 'cmd=%s\\n' \"$cmd\"; case \"$cmd\" in *\"/opt/bin/telemt-pan\"\"el\"*) [ \"$(/opt/bin/busybox readlink /proc/$pid/exe 2>/dev/null)\" = \"/opt/bin/telemt-panel\" ] && printf 'PANEL_%s\\n' AUTOSTART_PID_ALIVE || exit 1;; *) exit 1;; esac",
+      "expect": "PANEL_AUTOSTART_PID_ALIVE"
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "timeout_sec": 90,
+      "send": "pn=0; cn=0; for d in /proc/[0-9]*; do e=$(/opt/bin/busybox readlink \"$d/exe\" 2>/dev/null); case \"$e\" in \"/opt/bin/telemt-pan\"\"el\") pn=$((pn+1));; \"/opt/bin/tel\"\"emt\") cn=$((cn+1));; esac; done; printf 'panel=%s core=%s\\n' \"$pn\" \"$cn\"; [ \"$pn\" = 1 ] && [ \"$cn\" = 1 ] && printf 'PANEL_%s\\n' AUTOSTART_SINGLE_BOTH || exit 1",
+      "expect": "PANEL_AUTOSTART_SINGLE_BOTH"
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "timeout_sec": 90,
+      "send": "[ \"$(/opt/bin/busybox cat /opt/var/run/telemt-panel-lab.gen)\" = 2 ] && printf 'PANEL_%s\\n' GEN_TWO || exit 1",
+      "expect": "PANEL_GEN_TWO"
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "timeout_sec": 90,
+      "send": "test -r /opt/etc/telemt-panel/config.toml && /opt/bin/opkg status telemt-panel-lite | /opt/bin/busybox grep -q 'Version: 1.0.0~rc.4-1' && /opt/bin/opkg status telemt | /opt/bin/busybox grep -q 'Version: 3.5.17-2fb1' && [ \"$(/opt/bin/busybox ls /opt/var/lib/telemt-panel 2>/dev/null | /opt/bin/busybox wc -l | /opt/bin/busybox tr -d ' ')\" -ge 1 ] && printf 'PANEL_%s\\n' PERSISTED_FILES",
+      "expect": "PANEL_PERSISTED_FILES"
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "timeout_sec": 120,
+      "send": "c=$(/opt/bin/busybox wget -qO- -S --post-data '{\"username\":\"labadmin\",\"password\":\"telemt-lab-panel-synthetic-pass-01\"}' --header 'Content-Type: application/json' http://127.0.0.1:8080/api/auth/login 2>&1 | /opt/bin/busybox sed -n 's/.*[Ss]et-[Cc]ookie: panel_session=\\([^;]*\\).*/\\1/p' | /opt/bin/busybox head -n 1); [ -n \"$c\" ] || exit 1; info=$(/opt/bin/busybox wget -qO- --header \"Cookie: panel_session=$c\" http://127.0.0.1:8080/api/telemt/info 2>/dev/null); printf '%s\\n' \"$info\"; printf '%s\\n' \"$info\" > /dev/console 2>/dev/null; printf '%s\\n' \"$info\" | /opt/bin/busybox grep -q '\"reachable\":true' && HOME=/opt/lab /opt/bin/telemt healthcheck --mode liveness /opt/etc/telemt-lab.toml >/dev/null 2>&1 && printf 'PANEL_%s\\n' AUTOSTART_INTEGRATION_OK",
+      "expect": "PANEL_AUTOSTART_INTEGRATION_OK"
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "cd / && /opt/bin/busybox sync && printf 'SYNC_%s\\n' COMPLETE",
+      "expect": "SYNC_COMPLETE",
+      "timeout_sec": 90
+    }
+  ]
+}

@@ -33,6 +33,9 @@ from lab.run import run
 LOCK = Path(__file__).resolve().parents[2] / "lab" / "entware-mipselsf.lock.json"
 SCENARIO = (Path(__file__).resolve().parents[2] / "lab" / "scenarios"
             / "ported-mt7621-telemt.json")
+PANEL_SCENARIO = (Path(__file__).resolve().parents[2] / "lab" / "scenarios"
+                  / "ported-mt7621-telemt-panel.json")
+SCENARIOS = {"core-getfb": SCENARIO, "panel-g": PANEL_SCENARIO}
 MIRROR_HOST = "192.168.1.100"
 
 # Experimental artifacts for the getrandom-fallback verification cycle.
@@ -221,6 +224,9 @@ def main():
     ap.add_argument("--workspace", help="MUST be a fresh, private directory")
     ap.add_argument("--credentials-file")
     ap.add_argument("--max-seconds", type=int, default=3000)
+    ap.add_argument("--scenario", choices=sorted(SCENARIOS), default="core-getfb",
+                    help="guest scenario: core-getfb (issue #49 acceptance) or "
+                         "panel-g (issue #94 Stage G panel HTTP/lifecycle)")
     args = ap.parse_args()
 
     summary = verify_ipk_dir(args.ipk_dir)
@@ -250,7 +256,8 @@ def main():
         target.write_bytes(source.read_bytes())
     with Mirror(feed) as port:
         return run(SimpleNamespace(
-            scenario=str(SCENARIO), emulator_root=args.emulator_root,
+            scenario=str(SCENARIOS[args.scenario]),
+            emulator_root=args.emulator_root,
             nand_dir=args.nand_dir, output_dir=workspace / "report",
             max_seconds=args.max_seconds, preset="xiaomi-mi-router-3g-breed",
             lan_forwards="8080:80;8022:222;8023:23", opt_image=str(image),

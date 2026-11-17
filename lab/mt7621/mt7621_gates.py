@@ -660,6 +660,77 @@ def derive_autostart_gate(scenario, report):
     return {"MIPSEL_AUTOSTART": _gate("FAIL", "autostart_chain_step_failed")}
 
 
+def derive_telemt_panel_gate(scenario, report):
+    """Independent guest evidence for Stage G (router-emulator issue #94):
+    the frozen Panel Lite RC4 binary serves its real loopback HTTP API in the
+    guest (grounded routes, not pidfile echoes), authenticates with synthetic
+    credentials, and reaches the NEW fixed Core through the actual
+    panel->Core protocol (GET /api/telemt/info -> Core /v1/system/info).
+    Deliberately outside GATES: the 19 core gates stay unchanged; this gate
+    only appears when its own scenario/report pair is supplied.  Because the
+    name is not in GATES, apply_labels() refuses any --set for it, so a PASS
+    can only ever come from a validated scenario report."""
+    checked = _checked_prefix(scenario, report)
+    if checked is None:
+        return {"MIPSEL_TELEMT_PANEL": _gate("FAIL", "report_scenario_mismatch")}
+    steps, rows, first_fail = checked
+
+    def positions(expect, needle):
+        return [i for i, s in enumerate(steps)
+                if s.get("action") == "ssh"
+                and s.get("expect") == expect
+                and needle in s.get("send", "")]
+
+    def waitpos(pattern):
+        return [i for i, s in enumerate(steps)
+                if s.get("action") == "wait_serial" and s.get("pattern") == pattern]
+
+    version = positions("PANEL_VERSION_RC4", "telemt-panel version")
+    cfg = positions("PANEL_CFG_SEEDED", "hash-password")
+    badcfg = positions("PANEL_BADCFG_REJECTED", "lab_unknown_key")
+    started = positions("telemtlab-panel-start gen=1 pid=[0-9]+",
+                        "S99telemtlab-panel start")
+    proc = positions("PANEL_PROC_ALIVE", "/proc/$pid/exe")
+    health = positions("PANEL_HEALTH_OK", '"variant":"lite"')
+    socket = positions("PANEL_SOCKET_LISTENING", "0100007F:1F90")
+    auth = positions("PANEL_AUTH_OK", "/api/auth/login")
+    authneg = positions("PANEL_AUTH_NEGATIVE", "telemt-lab-panel-wrong-pass")
+    integration = positions("PANEL_CORE_INTEGRATION_OK", "/api/telemt/info")
+    stable = positions("PANEL_STABLE_AFTER_10S", "sleep 10")
+    stopped = positions("PANEL_STOPPED_CLEAN", "S99telemtlab-panel stop")
+    boot = waitpos("telemtlab-panel-start gen=2 pid=[0-9]+")
+    coreboot = waitpos("telemtlab-start gen=2 pid=[0-9]+")
+    autohealth = positions("PANEL_AUTOSTART_HEALTH_OK", '"status":"ok"')
+    autopid = positions("PANEL_AUTOSTART_PID_ALIVE", "/proc/$pid/exe")
+    single = positions("PANEL_AUTOSTART_SINGLE_BOTH", "for d in /proc/[0-9]*")
+    gen2 = positions("PANEL_GEN_TWO", "telemt-panel-lab.gen")
+    persisted = positions("PANEL_PERSISTED_FILES", "opkg status telemt-panel-lite")
+    integration2 = positions("PANEL_AUTOSTART_INTEGRATION_OK", "/api/telemt/info")
+    stages = (version, cfg, badcfg, started, proc, health, socket, auth,
+              authneg, integration, stable, stopped, boot, autohealth,
+              autopid, single, gen2, persisted, integration2)
+    if not all(len(p) == 1 for p in stages) or len(coreboot) != 1:
+        return {"MIPSEL_TELEMT_PANEL": _gate(
+            "NOT_TESTED", "scenario_lacks_panel_chain")}
+    # The panel UART autostart marker can only appear after the Core one:
+    # S99telemtlab sorts before S99telemtlab-panel and both are sourced by
+    # the same rc.unslung pass.
+    order = (version[0], cfg[0], badcfg[0], started[0], proc[0], health[0],
+             socket[0], auth[0], authneg[0], integration[0], stable[0],
+             stopped[0], coreboot[0], boot[0], autohealth[0], autopid[0],
+             single[0], gen2[0], persisted[0], integration2[0])
+    if any(a >= b for a, b in zip(order, order[1:])):
+        return {"MIPSEL_TELEMT_PANEL": _gate(
+            "NOT_TESTED", "panel_chain_not_ordered")}
+    if first_fail is None:
+        return {"MIPSEL_TELEMT_PANEL": _gate(
+            "PASS" if report.get("outcome") == "PASS" else "FAIL",
+            "panel_http_then_core_integration_then_native_autostart"
+            if report.get("outcome") == "PASS" else "report_outcome_mismatch")}
+    if first_fail <= version[0]:
+        return {"MIPSEL_TELEMT_PANEL": _gate("NOT_TESTED", "prerequisite_failed")}
+    return {"MIPSEL_TELEMT_PANEL": _gate("FAIL", "panel_chain_step_failed")}
+
 def derive_telemt_gate(scenario, report):
     """Independent guest evidence: the pinned experimental TeleMT MIPSel IPKs
     install through the guest's own native opkg and the Core binary actually
@@ -785,7 +856,8 @@ def evaluate(openwrt_scenario, openwrt_report, statuses=(), reasons=None,
              service_scenario=None, service_report=None,
              persistence_scenario=None, persistence_report=None,
              autostart_scenario=None, autostart_report=None,
-             telemt_scenario=None, telemt_report=None):
+             telemt_scenario=None, telemt_report=None,
+             panel_scenario=None, panel_report=None):
     gates = {name: _gate("NOT_TESTED", "unattempted") for name in GATES}
     gates.update(derive_openwrt_gates(openwrt_scenario, openwrt_report))
     if ported_scenario is not None and ported_report is not None:
@@ -802,6 +874,8 @@ def evaluate(openwrt_scenario, openwrt_report, statuses=(), reasons=None,
         gates.update(derive_autostart_gate(autostart_scenario, autostart_report))
     if telemt_scenario is not None and telemt_report is not None:
         gates.update(derive_telemt_gate(telemt_scenario, telemt_report))
+    if panel_scenario is not None and panel_report is not None:
+        gates.update(derive_telemt_panel_gate(panel_scenario, panel_report))
     apply_labels(gates, statuses, reasons)
     return gates
 
@@ -875,6 +949,10 @@ def main():
                     help="committed TeleMT MIPSel pinned-IPK opkg/autostart scenario")
     ap.add_argument("--telemt-report",
                     help="report.json of the independent TeleMT MIPSel scenario")
+    ap.add_argument("--telemt-panel-scenario",
+                    help="committed Stage G TeleMT Panel Lite HTTP/lifecycle scenario")
+    ap.add_argument("--telemt-panel-report",
+                    help="report.json of the independent Stage G Panel scenario")
     ap.add_argument("--set", action="append", nargs=2, metavar=("GATE", "STATUS"),
                     default=[],
                     help="explicit gate status; PASS refused for native gates")
@@ -926,6 +1004,12 @@ def main():
                 Path(args.telemt_scenario).read_text(encoding="utf-8"))
             telemt_report = json.loads(
                 Path(args.telemt_report).read_text(encoding="utf-8"))
+        panel_scenario = panel_report = None
+        if args.telemt_panel_scenario and args.telemt_panel_report:
+            panel_scenario = json.loads(
+                Path(args.telemt_panel_scenario).read_text(encoding="utf-8"))
+            panel_report = json.loads(
+                Path(args.telemt_panel_report).read_text(encoding="utf-8"))
         reasons = {name: why for name, why in args.reason}
         gates = evaluate(scenario, report, args.set, reasons,
                          ported_scenario, ported_report,
@@ -934,7 +1018,8 @@ def main():
                          service_scenario, service_report,
                          persistence_scenario, persistence_report,
                          autostart_scenario, autostart_report,
-                         telemt_scenario, telemt_report)
+                         telemt_scenario, telemt_report,
+                         panel_scenario, panel_report)
     except ValueError as error:
         ap.error(str(error))
     report_dir = Path(args.report_dir)

@@ -17,9 +17,12 @@ on:
       - 'lab/mt7621/telemt_lab.py'
       - 'lab/test_mt7621_telemt.py'
       - 'lab/scenarios/ported-mt7621-telemt.json'
+      - 'lab/scenarios/ported-mt7621-telemt-panel.json'
       - 'lab/mt7621/fixtures/S99telemtlab'
+      - 'lab/mt7621/fixtures/S99telemtlab-panel'
       - 'lab/mt7621/fixtures/telemt-lab.toml'
       - 'lab/mt7621/fixtures/broken-telemt.toml'
+      - 'lab/test_mt7621_telemt_panel.py'
   workflow_dispatch: {}
 
 permissions:
@@ -46,13 +49,16 @@ jobs:
         id: gate
         if: env.TELEMT_TOKEN != ''
         run: echo "acquired=true" >> "$GITHUB_OUTPUT"
-      - name: Download frozen MIPSel TeleMT Core artifact from entware-go
+      - name: Download the getfb TeleMT Core artifact from entware-go
         if: steps.gate.outputs.acquired == 'true'
         uses: actions/download-artifact@v4
         with:
-          name: telemt-core-mipsel-experimental
+          # the NEW separately named experimental Core 3.5.17-2fb1 of
+          # entware-go Draft PR #50 (run 43948987955, getrandom ENOSYS-only
+          # fallback); its SHA is what the lab pins audit below expects
+          name: telemt-core-mipsel-experimental-getfb
           repository: saymer-alt/entware-go
-          run-id: 43742529964
+          run-id: 43948987955
           github-token: ${{ secrets.TELEMT_IPK_TOKEN }}
           path: ${{ runner.temp }}/telemt-ipk
 
@@ -199,6 +205,7 @@ jobs:
             --workspace "$RUNNER_TEMP/mt7621-workspace" \
             --credentials-file "$RUNNER_TEMP/mt7621-credentials.json" \
             --ipk-dir "$RUNNER_TEMP/telemt-ipk" \
+            --scenario panel-g \
             --max-seconds 2100
 
       - name: Report only safe action counts (no UART)
