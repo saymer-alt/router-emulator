@@ -5,8 +5,10 @@ The controller never executes KAS on the Ubuntu host. The public KAS
 checkout is verified by immutable commit SHA, then its exact install.sh
 is copied by authenticated loopback SSH into a disposable guest. Guest
 stdout/stderr remain private; only fixed result categories are published.
-An inability to satisfy the real KeeneticOS component contract is a
-BLOCKED installation, not an emulator regression or an invented PASS.
+The default mode enforces the original KAS component guard. A separate
+explicit MT7621 lab-only mode disables ONLY the ext-utils guard in a
+throwaway in-memory copy after guest EXT4 and component checks; this mode
+is NEVER suitable for real routers or for production KAS acceptance.
 """
 import argparse
 import hashlib
@@ -28,6 +30,33 @@ PIN = re.compile(r"^[0-9a-f]{40}$")
 REQUIRED_KEENETIC_COMPONENTS = ("proxy", "dns-filter", "opkg-kmod-netfilter",
                                "ext", "ext-utils")
 ONE_SECURE_DNS = ("dns-tls", "dns-https")
+
+# Exact guard in the immutable pinned KAS source. Changing any other part of
+# KAS, faking ndmc component IDs or silently accepting upstream drift is
+# forbidden. Never publish/install this modified copy on a physical router.
+LAB_EXT_UTILS_GUARD = (b'if [ "$OPT_CLASS" = "external" ] && '
+                       b'! component_list_has "$EXT_UTILS_COMPONENT_ID"; then')
+LAB_EXT_UTILS_DISABLED = (b'if [ "$OPT_CLASS" = "external" ] && '
+                          b'! component_list_has "$EXT_UTILS_COMPONENT_ID" && false; then')
+
+
+def lab_only_without_ext_utils_guard(source):
+    """One exact in-memory guard edit; fail closed on unexpected KAS source."""
+    if not isinstance(source, bytes) or source.count(LAB_EXT_UTILS_GUARD) != 1:
+        raise ValueError("pinned KAS ext-utils guard changed or missing")
+    # The only byte change is the append of ' && false' on one if-condition.
+    modified = source.replace(LAB_EXT_UTILS_GUARD, LAB_EXT_UTILS_DISABLED, 1)
+    if (modified.count(LAB_EXT_UTILS_DISABLED) != 1
+            or modified.replace(LAB_EXT_UTILS_DISABLED,
+                                LAB_EXT_UTILS_GUARD, 1) != source):
+        raise ValueError("unexpected lab-only installer mutation")
+    return modified
+
+
+def require_exact_lab_component_gap(component_gap):
+    """A lab exception is allowed ONLY for the single known missing ID."""
+    if component_gap != ["ext-utils"]:
+        raise ValueError("MT7621 lab exception requires exactly ext-utils missing")
 
 
 def missing_required_components(version_output):
@@ -93,7 +122,8 @@ def guarded_refusal_proven(exit_code, category, component_gap, package_list, no_
 
 
 def write_public(path, kas_ref, phase, reason, exit_code=None, component_gap=None,
-                 guard_verified=False, guarded_refusal_expected=False):
+                 guard_verified=False, guarded_refusal_expected=False,
+                 lab_exception_applied=False, guest_source_verified=False):
     """No guest output, passwords, paths, script bodies, or arbitrary diagnostics."""
     record = {"schema": "mt7621-kas-smoke-v1", "kas_ref": kas_ref,
               "phase": phase, "reason": reason, "kas_installed": phase == "PASS",
@@ -102,19 +132,28 @@ def write_public(path, kas_ref, phase, reason, exit_code=None, component_gap=Non
               "missing_component_ids": component_gap if component_gap is not None else [],
               "test_expectation": ("guarded_refusal" if guarded_refusal_expected
                                    else "full_install"),
-              "guard_contract_verified": guard_verified}
+              "guard_contract_verified": guard_verified,
+              "lab_ext_utils_exception_applied": bool(lab_exception_applied),
+              "guest_source_verified": bool(guest_source_verified),
+              "source_variant": ("DISPOSABLE_LAB_EXT_UTILS_EXCEPTION"
+                                 if lab_exception_applied else "PINNED_UNMODIFIED")}
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(record, sort_keys=True, indent=2) + "\n",
                     encoding="utf-8")
 
 
-def guest_probe(credentials, workspace, deadline, source, kas_ref, public, guarded_refusal_expected=False):
+def guest_probe(credentials, workspace, deadline, source, kas_ref, public,
+                guarded_refusal_expected=False, lab_ext_utils_exception=False):
     """Trusted run.py post-scenario hook; VM remains alive for the whole probe."""
     from lab.guest import Guest  # lazy: unit tests do not require Paramiko
     guest = Guest(credentials, workspace, deadline=deadline)
     phase, reason, exit_code = "NOT_TESTED", "GUEST_NOT_REACHED", None
     component_gap = None
     guard_verified = False
+    exception_applied = False
+    guest_source_verified = False
+    if guarded_refusal_expected and lab_ext_utils_exception:
+        raise ValueError("lab exception is incompatible with guarded-refusal test")
     try:
         guest.connect(120)
         phase, reason = "BLOCKED", "ENTWARE_PREFLIGHT_UNAVAILABLE"
@@ -134,6 +173,27 @@ def guest_probe(credentials, workspace, deadline, source, kas_ref, public, guard
         print("KAS MIPSEL PREFLIGHT: native Entware and ndmc reachable", flush=True)
         phase, reason = "BLOCKED", "PINNED_SOURCE_DELIVERY_FAILED"
         guest.command("mkdir -p /opt/lab; chmod 700 /opt/lab", timeout=30)
+        if lab_ext_utils_exception:
+            # Fail closed before upload: on this exact Ported image ALL other
+            # original KAS components are present. No spoofed component list.
+            phase, reason = "BLOCKED", "LAB_COMPONENT_SET_UNEXPECTED"
+            require_exact_lab_component_gap(component_gap)
+            # The initial preflight already verified a mounted /opt ext4.
+            # Explicit round-trip demonstrates it is writable, and then the
+            # synthetic file is removed from this disposable guest only.
+            phase, reason = "BLOCKED", "LAB_EXT4_READ_WRITE_UNVERIFIED"
+            guest.command(
+                "umask 077; printf LAB_EXT4_RW_OK > /opt/lab/.kas-ext4-rw; "
+                "grep -q ' /opt ext4 rw' /proc/mounts && "
+                'test "$(cat /opt/lab/.kas-ext4-rw)" = LAB_EXT4_RW_OK && '
+                "rm -f /opt/lab/.kas-ext4-rw",
+                timeout=30)
+            phase, reason = "BLOCKED", "LAB_SOURCE_PATCH_UNAVAILABLE"
+            source = lab_only_without_ext_utils_guard(source)
+            exception_applied = True
+            print("KAS MT7621 LAB EXCEPTION: only ext-utils guard disabled "
+                  "in disposable source", flush=True)
+            phase, reason = "BLOCKED", "PINNED_SOURCE_DELIVERY_FAILED"
         # Entware Dropbear does not necessarily ship an SFTP subsystem.
         # Reuse the proven Paramiko SSH-stdin upload contract from the ARM64 lab:
         # authenticated loopback exec + private stdin + native checksum.
@@ -145,6 +205,7 @@ def guest_probe(credentials, workspace, deadline, source, kas_ref, public, guard
                                  timeout=30).split()[0]
         if expected != observed:
             raise RuntimeError("pinned guest source digest mismatch")
+        guest_source_verified = True
         print("KAS MIPSEL SOURCE: pinned checkout transferred and verified", flush=True)
 
         # A real KAS installation attempt. No host-side mock or fake PASS.
@@ -187,7 +248,9 @@ def guest_probe(credentials, workspace, deadline, source, kas_ref, public, guard
         guest.close()
         write_public(public, kas_ref, phase, reason, exit_code,
                      component_gap=component_gap, guard_verified=guard_verified,
-                     guarded_refusal_expected=guarded_refusal_expected)
+                     guarded_refusal_expected=guarded_refusal_expected,
+                     lab_exception_applied=exception_applied,
+                     guest_source_verified=guest_source_verified)
 
 
 def main():
@@ -201,7 +264,11 @@ def main():
     ap.add_argument("--max-seconds", type=int, default=2400)
     ap.add_argument("--expect-guarded-refusal", action="store_true",
                     help="negative test ONLY: exact ext-utils refusal, no KAS packages/state")
+    ap.add_argument("--lab-ext-utils-exception", action="store_true",
+                    help="ONLY disposable Ported MT7621 QEMU: skip one KAS ext-utils guard")
     args = ap.parse_args()
+    if args.expect_guarded_refusal and args.lab_ext_utils_exception:
+        ap.error("lab exception and guarded refusal are mutually exclusive")
     if not PIN.fullmatch(args.kas_ref):
         ap.error("--kas-ref must be full 40-character SHA")
     source = load_sources(args.kas_dir, args.kas_ref)["install.sh"]
@@ -227,7 +294,8 @@ def main():
             credentials_file=args.credentials_file,
             after_scenario=lambda **ctx: guest_probe(args.credentials_file,
                 workspace, ctx["deadline"], source, args.kas_ref, public,
-                guarded_refusal_expected=args.expect_guarded_refusal)))
+                guarded_refusal_expected=args.expect_guarded_refusal,
+                lab_ext_utils_exception=args.lab_ext_utils_exception)))
 
 
 if __name__ == "__main__":
