@@ -13,6 +13,14 @@ Keenetic/Ported, Entware и [Keenetic Auto Setup (KAS)](https://github.com/sayme
 [English: README.upstream.md](README.upstream.md) · [Русский: README.ru.md](README.ru.md) ·
 Сборка: [Linux](README.build.linux.md) · [Windows](README.build.windows.md).
 
+**MT7621 / MIPSel, Xiaomi Mi Router 3G (Ported 5.1.8):**
+[матрица готовности и ссылки на гостевые испытания](lab/mt7621/README.md).
+На 17.11.2026 19 основных гейтов имеют независимые подтверждения PASS
+(совокупный PASS только при передаче всех соответствующих отчётов);
+дополнительный `MIPSEL_AUTOSTART` также подтверждён. Полная установка
+KAS на этом MIPSel-образе не принята из-за отсутствия `ext-utils`.
+Это не эмуляция оригинальной KeeneticOS KN-1010/KN-1012 и не приёмка физического роутера.
+
 ---
 
 ## Назначение проекта
