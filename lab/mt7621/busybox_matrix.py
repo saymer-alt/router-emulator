@@ -50,6 +50,21 @@ OLD_IPK_URL = "https://test.entware.net/mipselsf-k3.4/busybox_1.38.0-3_mipsel-3.
 OLD_IPK_SHA256 = "29954f847e9442fc30cebf6bc7dd17a1fc1d391c2fd037c6df582a30c0e40645"
 OLD_IPK_VERSION = "1.38.0-3"
 
+# Issue #254 / #108: real Entware curl/libcurl 8.23.0-1 (bin feed, sha-pinned)
+# and the synthetic '8.15-model' (real bytes, one dynamic-symbol name altered
+# so curl_multi_get_offt is missing; control Version set to 8.15.0-2).
+# The historical libcurl 8.15.0-2 is no longer published (404 both feeds,
+# verified 2026-11-18), so the skew reproduction is explicitly SYNTHETIC
+# at package level and REAL at ELF/loader level.
+CURL_IPK_URL = "https://bin.entware.net/mipselsf-k3.4/curl_8.23.0-1_mipsel-3.4.ipk"
+CURL_IPK_SHA = "4b821e371d7efae77c35bd4dbd16cffa201db820d99ed8c4b270f77c9ba72fac"
+LIBCURL_IPK_URL = "https://bin.entware.net/mipselsf-k3.4/libcurl_8.23.0-1_mipsel-3.4.ipk"
+LIBCURL_IPK_SHA = "f2f5f3cfd08413806c7970305d3aa4f52a3bd828c6d06fc99ac58896eb5510c4"
+MODEL_IPK_PATH = Path("/mnt/c/Users/Saymer/.zcode/workspace/draft-1c6aa290-d31c-40b0-a0d8-3d11be3973b8/nightly-lab/curl-ipks/libcurl_8.15.0-2-model_mipsel-3.4.ipk")
+MODEL_IPK_SHA = "aa5066cdca7355db18986be9501c32beaf1ed800ad5a631098109b62cdfaa344"
+FOREIGN_LIBCURL_PATH = Path("/mnt/c/Users/Saymer/.zcode/workspace/draft-1c6aa290-d31c-40b0-a0d8-3d11be3973b8/nightly-lab/curl-ipks/libcurl_8.23.0-1_aarch64-3.10.ipk")
+FOREIGN_LIBCURL_SHA = "d5d3eca432e020efd92a3dc063bb5c4b2433190ce36680964451b9d76333eec1"
+
 BOOT_PATTERN = "Boot and Recovery Environment"
 
 
@@ -425,6 +440,161 @@ def phase_interrupt(mx):
     mx.preflight("PREFLIGHT_FINAL", "KAS preflight after interruption scenarios")
 
 
+CURL_DEP_CLOSURE = ("curl", "libcurl", "libopenssl", "libatomic", "zlib",
+                    "libnghttp2", "ca-bundle")
+
+
+def add_curl_packages(mirror_dir, cache_dir, base_url="https://bin.entware.net/mipselsf-k3.4/"):
+    """Extend the built mirror with the REAL feed entries of the curl
+    dependency closure (curl, libcurl, libopenssl, libatomic, zlib,
+    libnghttp2, ca-bundle), so a plain 'opkg install curl' exercises opkg's
+    own dependency resolution against the real metadata (unversioned
+    'Depends: ..., libcurl' included)."""
+    import gzip
+    import shutil as _sh
+    import urllib.request as _u
+    mirror_dir, cache_dir = Path(mirror_dir), Path(cache_dir)
+    base = base_url
+    req = _u.Request(base + "Packages.gz", headers={"User-Agent": "kas-night-lab/1"})
+    idx = gzip.decompress(_u.urlopen(req, timeout=90).read()).decode("utf8", "replace")
+    feed = mirror_dir / "entware"
+    index = feed / "Packages.gz"
+    blocks = gzip.decompress(index.read_bytes()).decode("utf8").rstrip("\n").split("\n\n") \
+        if index.exists() else []
+    for block in idx.split("\n\n"):
+        if not block.startswith("Package: "):
+            continue
+        fields = dict(l.split(": ", 1) for l in block.splitlines() if ": " in l)
+        if fields.get("Package") not in CURL_DEP_CLOSURE:
+            continue
+        dest = feed / fields["Filename"]
+        if not dest.exists():
+            url = base + fields["Filename"]
+            digest = fetch(url, fields["SHA256sum"], cache_dir / fields["Filename"])
+            _sh.copyfile(cache_dir / fields["Filename"], dest)
+        blocks.append("\n".join(k + ": " + v for k, v in fields.items()))
+    index.write_bytes(gzip.compress(("\n\n".join(blocks) + "\n\n").encode(), mtime=0))
+
+
+def phase_curlskew(mx):
+    # Positive baseline through opkg's own resolution (Depends on libcurl is
+    # unversioned in the real feed metadata — the root cause of #254).
+    mx.run("C1_INSTALL_ALIGNED", "opkg install curl resolves libcurl from the same index",
+           "/opt/bin/opkg update >/dev/null 2>&1; /opt/bin/opkg install curl",
+           {"rc": 0}, timeout=300)
+    mx.run("C2_ALIGNED_STATUS", "curl and libcurl versions aligned",
+           "/opt/bin/opkg status curl | /opt/bin/busybox grep '^Version';"
+           " /opt/bin/opkg status libcurl | /opt/bin/busybox grep '^Version'",
+           {"rc": 0}, timeout=30)
+    mx.run("C3_CURL_V_OK", "curl -V on the aligned pair",
+           "/opt/bin/curl -V", {"rc": 0, "contains": ["libcurl"]}, timeout=30)
+    mx.run("C4_LDBINDNOW_OK", "LD_BIND_NOW=1 curl -V on the aligned pair",
+           "LD_BIND_NOW=1 /opt/bin/curl -V", {"rc": 0}, timeout=30)
+    mx.run("C5_HTTP_FETCH", "curl HTTP transport against the local mirror",
+           "/opt/bin/curl -fsS -o /dev/null -w '%{http_code}\\n'"
+           " http://192.168.1.100/entware/Packages.gz",
+           {"rc": 0, "contains": ["200"]}, timeout=60)
+    mx.preflight("C6_PREFLIGHT_ALIGNED", "KAS preflight on aligned curl (documents the rc-2 baseline)")
+    # Skew: real curl 8.23 binary + synthetic 8.15-model library (real bytes,
+    # curl_multi_get_offt renamed out of .dynstr; control Version 8.15.0-2).
+    mx.run("C7_INSTALL_MODEL", "force-downgrade to the synthetic 8.15-model library",
+           "/opt/bin/opkg install --force-downgrade /opt/lab/libcurl-model.ipk",
+           {"rc": 0}, timeout=120)
+    mx.run("C8_SKEW_STATUS", "versions after the skew injection",
+           "/opt/bin/opkg status curl | /opt/bin/busybox grep '^Version';"
+           " /opt/bin/opkg status libcurl | /opt/bin/busybox grep '^Version'",
+           {"rc": 0}, timeout=30)
+    mx.run("C9_SKEW_CURL_V", "plain curl -V with skewed library (field signature)",
+           "/opt/bin/curl -V 2>&1 | head -2; printf 'CURL_V_RC_%s\\n' $((40+$?))",
+           {"contains": ["curl_multi_get_offt"]}, timeout=30)
+    mx.run("C10_SKEW_LDBINDNOW", "LD_BIND_NOW=1 curl -V with skewed library",
+           "LD_BIND_NOW=1 /opt/bin/curl -V 2>&1 | head -2; printf 'LDB_RC_%s\\n' $((40+$?))",
+           {"contains": ["curl_multi_get_offt"]}, timeout=30)
+    mx.preflight("C11_PREFLIGHT_SKEW", "KAS preflight while curl/libcurl skewed (detection gap?)")
+    # Recovery: real 8.23 libcurl back.
+    mx.run("C12_RECOVER", "opkg install /opt/lab/libcurl-real.ipk (recovery path)",
+           "/opt/bin/opkg install /opt/lab/libcurl-real.ipk", {"rc": 0}, timeout=120)
+    mx.run("C13_RECOVERED_V", "curl -V after recovery",
+           "/opt/bin/curl -V && LD_BIND_NOW=1 /opt/bin/curl -V",
+           {"rc": 0, "contains": ["libcurl"]}, timeout=30)
+    mx.preflight("C14_PREFLIGHT_RECOVERED", "KAS preflight after recovery")
+
+
+def phase_curlneg(mx):
+    mx.run("D1_INSTALL_ALIGNED", "opkg install curl (aligned baseline)",
+           "/opt/bin/opkg update >/dev/null 2>&1; /opt/bin/opkg install curl",
+           {"rc": 0}, timeout=300)
+    mx.run("D2_MISSING_LIBCURL", "opkg remove libcurl -> curl must fail loudly",
+           "/opt/bin/opkg remove --force-depends libcurl >/dev/null 2>&1;"
+           " /opt/bin/curl -V 2>&1 | head -2; printf 'MISS_RC_%s\\n' $((40+$?))", timeout=60)
+    mx.run("D3_RESTORE_LIBCURL", "opkg install libcurl restores the pair",
+           "/opt/bin/opkg install /opt/lab/libcurl-real.ipk",
+           {"rc": 0}, timeout=120)
+    mx.run("D4_WRONG_ABI", "foreign-ABI libcurl.so.4.8.0 overwrites the file (loader diagnostic)",
+           "/opt/bin/busybox cp /opt/lib/libcurl.so.4.8.0 /opt/lib/.libcurl-abi.bak;"
+           " /opt/bin/busybox cp /opt/lab/libcurl-foreign.so /opt/lib/libcurl.so.4.8.0;"
+           " /opt/bin/curl -V 2>&1 | head -2; printf 'ABI_RC_%s\\n' $((40+$?))", timeout=60)
+    mx.run("D5_RESTORE_ABI", "reinstall restores the correct ABI",
+           "/opt/bin/opkg install --force-reinstall /opt/lab/libcurl-real.ipk",
+           {"rc": 0}, timeout=120)
+    mx.run("D6_CORRUPT_LIB", "truncated libcurl.so.4.8.0 -> loader error, no false PASS",
+           "/opt/bin/busybox cp /opt/lib/libcurl.so.4.8.0 /opt/lib/.libcurl.bak;"
+           " /opt/bin/busybox sh -c 'n=$(/opt/bin/busybox wc -c < /opt/lib/libcurl.so.4.8.0);"
+           " /opt/bin/busybox head -c $((n/2)) /opt/lib/libcurl.so.4.8.0 > /opt/lib/.trunc &&"
+           " /opt/bin/busybox mv /opt/lib/.trunc /opt/lib/libcurl.so.4.8.0';"
+           " /opt/bin/curl -V 2>&1 | head -2; printf 'CORRUPT_RC_%s\\n' $((40+$?))", timeout=60)
+    mx.run("D7_RESTORE_CORRUPT", "reinstall restores the corrupted library",
+           "/opt/bin/opkg install --force-reinstall /opt/lab/libcurl-real.ipk",
+           {"rc": 0}, timeout=120)
+    mx.run("D8_DANGLING_SYMLINK", "dangling libcurl.so.4 symlink -> loader error",
+           "/opt/bin/busybox rm -f /opt/lib/libcurl.so.4;"
+           " /opt/bin/busybox ln -s /nonexistent-target /opt/lib/libcurl.so.4;"
+           " /opt/bin/curl -V 2>&1 | head -2; printf 'DANGLE_RC_%s\\n' $((40+$?))", timeout=60)
+    mx.run("D9_RESTORE_DANGLE", "reinstall restores the symlink",
+           "/opt/bin/opkg install --force-reinstall /opt/lab/libcurl-real.ipk",
+           {"rc": 0}, timeout=120)
+    mx.run("D10_LDD_MISSING", "curl works without ldd on PATH",
+           "/opt/bin/busybox mkdir -p /tmp/noldd;"
+           " /opt/bin/busybox ln -sf /opt/bin/curl /tmp/noldd/curl;"
+           " PATH=/tmp/noldd /tmp/noldd/curl -V 2>&1 | head -1;"
+           " printf 'LDD_RC_%s\\n' $((40+$?))", timeout=30)
+    mx.run("D11_PARTIAL_IPK", "truncated local IPK must be refused (no false install)",
+           "/opt/bin/busybox sh -c 'n=$(/opt/bin/busybox wc -c < /opt/lab/libcurl-real.ipk);"
+           " /opt/bin/busybox dd if=/opt/lab/libcurl-real.ipk"
+           " of=/opt/lab/libcurl-trunc.ipk bs=1 count=$((n*3/5)) 2>/dev/null';"
+           " /opt/bin/opkg install /opt/lab/libcurl-trunc.ipk;"
+           " printf 'PARTIAL_RC_%s\\n' $((40+$?));"
+           " /opt/bin/opkg status libcurl | /opt/bin/busybox grep '^Version'",
+           {"contains": ["Malformed package file", "8.23.0-1"]}, timeout=120)
+    mx.run("D12_FEED_DOWN", "opkg update with feed unreachable stays clean",
+           "/opt/bin/busybox sed -i 's|http://192.168.1.100/entware|http://192.168.1.100:9/entware|'"
+           " /opt/etc/opkg.conf; /opt/bin/opkg update; printf 'UPD_RC_%s\\n' $((40+$?));"
+           " /opt/bin/busybox sed -i 's|http://192.168.1.100:9/entware|http://192.168.1.100/entware|'"
+           " /opt/etc/opkg.conf", timeout=180)
+    mx.preflight("D13_PREFLIGHT_AFTER_NEGATIVES", "KAS preflight after the negative set (gap map)")
+    mx.run("D14_FINAL_STATE", "final aligned working state",
+           "/opt/bin/curl -V | head -1;"
+           " /opt/bin/opkg status curl | /opt/bin/busybox grep '^Version';"
+           " /opt/bin/opkg status libcurl | /opt/bin/busybox grep '^Version'",
+           {"rc": 0, "contains": ["8.23.0-1"]}, timeout=30)
+
+
+def extract_foreign_so():
+    """Real aarch64 libcurl.so.4.8.0 pulled out of the real foreign-ABI ipk
+    (used to overwrite the mipsel library by 'confused operator' simulation)."""
+    import io as _io
+    import tarfile as _tf
+    raw = FOREIGN_LIBCURL_PATH.read_bytes()
+    if hashlib.sha256(raw).hexdigest() != FOREIGN_LIBCURL_SHA:
+        raise ValueError("foreign libcurl ipk digest mismatch")
+    with _tf.open(fileobj=_io.BytesIO(raw), mode="r:*") as outer:
+        data = next(outer.extractfile(m).read() for m in outer.getmembers()
+                    if m.isfile() and m.name.removeprefix("./") == "data.tar.gz")
+    with _tf.open(fileobj=_io.BytesIO(data), mode="r:gz") as t:
+        return next(t.extractfile(m).read() for m in t.getmembers()
+                    if m.name.endswith("/opt/lib/libcurl.so.4.8.0"))
+
+
 def after_scenario_factory(args, recorder, phases):
     def after_scenario(monitor=None, console_dir=None, deadline=None, snapshot=None):
         guest = Guest(args.credentials_file, args.workspace, port=8022,
@@ -441,6 +611,17 @@ def after_scenario_factory(args, recorder, phases):
                 guest_put(guest, "/opt/lab/busybox-old.ipk", args.old_ipk_data)
                 guest.command("/opt/bin/busybox sha256sum /opt/lab/busybox-old.ipk"
                               " | /opt/bin/busybox grep -q %s" % OLD_IPK_SHA256)
+            if args.kind in ("curlskew", "curlneg"):
+                for guest_path, data, sha in (
+                        ("/opt/lab/libcurl-model.ipk", args.model_ipk_data, MODEL_IPK_SHA),
+                        ("/opt/lab/libcurl-real.ipk", args.libcurl_ipk_data, LIBCURL_IPK_SHA)):
+                    guest_put(guest, guest_path, data)
+                    guest.command("/opt/bin/busybox sha256sum %s"
+                                  " | /opt/bin/busybox grep -q %s" % (guest_path, sha))
+                if args.kind == "curlneg":
+                    guest_put(guest, "/opt/lab/libcurl-foreign.so",
+                              args.foreign_so_data)
+                    guest.command("/opt/bin/busybox test -s /opt/lab/libcurl-foreign.so")
             for phase in phases:
                 try:
                     phase(mx)
@@ -475,7 +656,8 @@ def main():
                     help="host path of kas-entware-preflight.sh")
     ap.add_argument("--preflight-sha256", required=True)
     ap.add_argument("--kind", required=True,
-                    choices=("fresh", "transition", "feedfail", "interrupt"))
+                    choices=("fresh", "transition", "feedfail", "interrupt",
+                             "curlskew", "curlneg"))
     ap.add_argument("--report-dir", required=True)
     ap.add_argument("--max-seconds", type=int, default=3000)
     ap.add_argument("--prep-only", action="store_true",
@@ -498,6 +680,13 @@ def main():
                          Path(args.cache_dir) / ("busybox_%s_mipsel-3.4.ipk" % OLD_IPK_VERSION))
     args.preflight_data = preflight_data
     args.old_ipk_data = old_ipk_data
+    args.model_ipk_data = MODEL_IPK_PATH.read_bytes()
+    if hashlib.sha256(args.model_ipk_data).hexdigest() != MODEL_IPK_SHA:
+        raise ValueError("synthetic libcurl model digest mismatch (fail closed)")
+    args.libcurl_ipk_data = fetch(LIBCURL_IPK_URL, LIBCURL_IPK_SHA,
+                                  Path(args.cache_dir) / "libcurl_8.23.0-1_mipsel-3.4.ipk")
+    if args.kind == "curlneg":
+        args.foreign_so_data = extract_foreign_so()
     lock = json.loads(LOCK.read_text(encoding="utf8"))
     pinned_bb = next(p for p in lock["packages"] if p["Package"] == "busybox")
 
@@ -505,6 +694,8 @@ def main():
     if not args.skip_build:
         build(str(image), str(mirror), str(args.cache_dir), args.credentials_file,
               arch="mipsel", lock_path=str(LOCK))
+        if args.kind in ("curlskew", "curlneg"):
+            add_curl_packages(mirror, args.cache_dir)
     if args.prep_only:
         print("PREP_ONLY_DONE (mirror and image built; network phase complete)",
               flush=True)
@@ -517,7 +708,8 @@ def main():
         "preflight_sha256": args.preflight_sha256,
     })
     phases = [{"fresh": phase_fresh, "transition": phase_transition,
-               "feedfail": phase_feedfail, "interrupt": phase_interrupt}[args.kind]]
+               "feedfail": phase_feedfail, "interrupt": phase_interrupt,
+               "curlskew": phase_curlskew, "curlneg": phase_curlneg}[args.kind]]
     scenario = workspace / "scenario.json"
     scenario.write_text(json.dumps({
         "name": "MT7621 Entware BusyBox matrix (%s): pristine NAND + fresh pinned bootstrap"
