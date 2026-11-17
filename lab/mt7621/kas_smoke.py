@@ -21,6 +21,9 @@ from lab.build_entware import add_packages, build
 from lab.mt7621.kas_base_deps import (
     OVERLAY_LOCK, REQUIRED_BASE, validated_kas_base_overlay,
 )
+from lab.mt7621.kas_mihomo_deps import (
+    MIHOMO_LOCK, MIHOMO_VERSION, validated_kas_mihomo_overlay,
+)
 from lab.mirror import Mirror
 from lab.run import run
 from lab.kas_mirror import load_sources
@@ -127,7 +130,9 @@ def guarded_refusal_proven(exit_code, category, component_gap, package_list, no_
 def write_public(path, kas_ref, phase, reason, exit_code=None, component_gap=None,
                  guard_verified=False, guarded_refusal_expected=False,
                  lab_exception_applied=False, guest_source_verified=False,
-                 kas_base_deps_feed=False, installed_base_packages=None):
+                 kas_base_deps_feed=False, installed_base_packages=None,
+                 kas_mihomo_feed=False, mihomo_package_installed=False,
+                 mihomo_binary_version_verified=False):
     """No guest output, passwords, paths, script bodies, or arbitrary diagnostics."""
     record = {"schema": "mt7621-kas-smoke-v1", "kas_ref": kas_ref,
               "phase": phase, "reason": reason, "kas_installed": phase == "PASS",
@@ -142,6 +147,9 @@ def write_public(path, kas_ref, phase, reason, exit_code=None, component_gap=Non
               "kas_base_deps_feed": bool(kas_base_deps_feed),
               "base_packages_installed": [x for x in REQUIRED_BASE
                                           if x in (installed_base_packages or ())],
+              "kas_mihomo_feed": bool(kas_mihomo_feed),
+              "mihomo_package_installed": bool(mihomo_package_installed),
+              "mihomo_binary_version_verified": bool(mihomo_binary_version_verified),
               "source_variant": ("DISPOSABLE_LAB_EXT_UTILS_EXCEPTION"
                                  if lab_exception_applied else "PINNED_UNMODIFIED")}
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -151,7 +159,7 @@ def write_public(path, kas_ref, phase, reason, exit_code=None, component_gap=Non
 
 def guest_probe(credentials, workspace, deadline, source, kas_ref, public,
                 guarded_refusal_expected=False, lab_ext_utils_exception=False,
-                kas_base_deps_feed=False):
+                kas_base_deps_feed=False, kas_mihomo_feed=False):
     """Trusted run.py post-scenario hook; VM remains alive for the whole probe."""
     from lab.guest import Guest  # lazy: unit tests do not require Paramiko
     guest = Guest(credentials, workspace, deadline=deadline)
@@ -161,6 +169,10 @@ def guest_probe(credentials, workspace, deadline, source, kas_ref, public,
     exception_applied = False
     guest_source_verified = False
     installed_base_packages = []
+    mihomo_package_installed = False
+    mihomo_binary_version_verified = False
+    if kas_mihomo_feed and not kas_base_deps_feed:
+        raise ValueError('Mihomo IPK lab overlay requires KAS base feed')
     if kas_base_deps_feed and not lab_ext_utils_exception:
         raise ValueError('KAS base extra packages only allowed with lab ext-utils exception')
     if guarded_refusal_expected and lab_ext_utils_exception:
@@ -236,6 +248,25 @@ def guest_probe(credentials, workspace, deadline, source, kas_ref, public,
                 if re.search(r"^" + re.escape(x) + r" - ", installed_now, re.M)]
             print("KAS MIPSEL BASE PACKAGES INSTALLED: %d/%d" %
                   (len(installed_base_packages), len(REQUIRED_BASE)), flush=True)
+            if kas_mihomo_feed:
+                mihomo_package_installed = bool(re.search(
+                    r"^mihomo - " + re.escape(MIHOMO_VERSION) + r"$",
+                    installed_now, re.M))
+                # Probe the REAL installed MIPSel ELF; opkg metadata alone is
+                # insufficient evidence that it executes under native NDMS.
+                # Only a fixed success boolean is published, never raw output.
+                if mihomo_package_installed:
+                    cmd = ("for p in /opt/sbin/mihomo /opt/bin/mihomo; do "
+                           "if [ -x \"$p\" ]; then \"$p\" -v; exit $?; fi; "
+                           "done; exit 127")
+                    ver_rc, ver_out, ver_err = guest.execute(cmd, timeout=75)
+                    mihomo_binary_version_verified = (ver_rc == 0 and
+                        re.search(r"(?i)\\bmihomo\\b", ver_out) is not None and
+                        re.search(r"(?<![0-9])v?1\\.19\\.33(?![0-9])", ver_out)
+                        is not None)
+                print("KAS MIPSEL MIHOMO: opkg=%s binary_version=%s" %
+                      (mihomo_package_installed, mihomo_binary_version_verified),
+                      flush=True)
         if category != "INSTALLER_COMPLETED":
             reason = category
             print("KAS MIPSEL INSTALL: " + category, flush=True)
@@ -272,7 +303,10 @@ def guest_probe(credentials, workspace, deadline, source, kas_ref, public,
                      lab_exception_applied=exception_applied,
                      guest_source_verified=guest_source_verified,
                      kas_base_deps_feed=kas_base_deps_feed,
-                     installed_base_packages=installed_base_packages)
+                     installed_base_packages=installed_base_packages,
+                     kas_mihomo_feed=kas_mihomo_feed,
+                     mihomo_package_installed=mihomo_package_installed,
+                     mihomo_binary_version_verified=mihomo_binary_version_verified)
 
 
 def main():
@@ -290,11 +324,15 @@ def main():
                     help="ONLY disposable Ported MT7621 QEMU: skip one KAS ext-utils guard")
     ap.add_argument("--kas-base-deps", action="store_true",
                     help="ONLY disposable lab exception: add 11 SHA256-pinned MIPSel base IPKs to mirror")
+    ap.add_argument("--kas-mihomo", action="store_true",
+                    help="ONLY disposable Ported 5.1.8 guest: pin native MIPSel Mihomo in KAS mirror")
     args = ap.parse_args()
     if args.expect_guarded_refusal and args.lab_ext_utils_exception:
         ap.error("lab exception and guarded refusal are mutually exclusive")
     if args.kas_base_deps and not args.lab_ext_utils_exception:
         ap.error("--kas-base-deps requires --lab-ext-utils-exception")
+    if args.kas_mihomo and not args.kas_base_deps:
+        ap.error("--kas-mihomo requires --kas-base-deps")
     if not PIN.fullmatch(args.kas_ref):
         ap.error("--kas-ref must be full 40-character SHA")
     source = load_sources(args.kas_dir, args.kas_ref)["install.sh"]
@@ -302,6 +340,8 @@ def main():
         ap.error("KAS installer header mismatch")
     if args.kas_base_deps:
         validated_kas_base_overlay(kas_ref=args.kas_ref)
+    if args.kas_mihomo:
+        validated_kas_mihomo_overlay(kas_ref=args.kas_ref)
     workspace = Path(args.workspace)
     workspace.mkdir(mode=0o700, exist_ok=False)
     creds = json.loads(Path(args.credentials_file).read_text(encoding="utf-8"))
@@ -315,6 +355,11 @@ def main():
         # lock or original production KAS; add_packages verifies every digest.
         add_packages(feed, workspace / "cache", OVERLAY_LOCK)
         print("KAS BASE MIPSEL MIRROR: 11 extra verified IPKs", flush=True)
+    if args.kas_mihomo:
+        # SHA256 verification executes on the host before any guest access;
+        # this adds exactly one official MIPSel soft-float package.
+        add_packages(feed, workspace / "cache", MIHOMO_LOCK)
+        print("KAS MIHOMO MIPSEL MIRROR: 1 extra verified IPK", flush=True)
     scenario = Path(__file__).resolve().parents[1] / "scenarios" / "ported-mt7621-entware-tz-skip.json"
     public = workspace / "report" / "kas-smoke.json"
     with Mirror(feed) as port:
@@ -329,7 +374,8 @@ def main():
                 workspace, ctx["deadline"], source, args.kas_ref, public,
                 guarded_refusal_expected=args.expect_guarded_refusal,
                 lab_ext_utils_exception=args.lab_ext_utils_exception,
-                kas_base_deps_feed=args.kas_base_deps)))
+                kas_base_deps_feed=args.kas_base_deps,
+                kas_mihomo_feed=args.kas_mihomo)))
 
 
 if __name__ == "__main__":
