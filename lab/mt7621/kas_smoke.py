@@ -123,7 +123,7 @@ def guarded_refusal_proven(exit_code, category, component_gap, package_list, no_
 
 def write_public(path, kas_ref, phase, reason, exit_code=None, component_gap=None,
                  guard_verified=False, guarded_refusal_expected=False,
-                 lab_exception_applied=False):
+                 lab_exception_applied=False, guest_source_verified=False):
     """No guest output, passwords, paths, script bodies, or arbitrary diagnostics."""
     record = {"schema": "mt7621-kas-smoke-v1", "kas_ref": kas_ref,
               "phase": phase, "reason": reason, "kas_installed": phase == "PASS",
@@ -134,6 +134,7 @@ def write_public(path, kas_ref, phase, reason, exit_code=None, component_gap=Non
                                    else "full_install"),
               "guard_contract_verified": guard_verified,
               "lab_ext_utils_exception_applied": bool(lab_exception_applied),
+              "guest_source_verified": bool(guest_source_verified),
               "source_variant": ("DISPOSABLE_LAB_EXT_UTILS_EXCEPTION"
                                  if lab_exception_applied else "PINNED_UNMODIFIED")}
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -150,6 +151,7 @@ def guest_probe(credentials, workspace, deadline, source, kas_ref, public,
     component_gap = None
     guard_verified = False
     exception_applied = False
+    guest_source_verified = False
     if guarded_refusal_expected and lab_ext_utils_exception:
         raise ValueError("lab exception is incompatible with guarded-refusal test")
     try:
@@ -203,6 +205,7 @@ def guest_probe(credentials, workspace, deadline, source, kas_ref, public,
                                  timeout=30).split()[0]
         if expected != observed:
             raise RuntimeError("pinned guest source digest mismatch")
+        guest_source_verified = True
         print("KAS MIPSEL SOURCE: pinned checkout transferred and verified", flush=True)
 
         # A real KAS installation attempt. No host-side mock or fake PASS.
@@ -246,7 +249,8 @@ def guest_probe(credentials, workspace, deadline, source, kas_ref, public,
         write_public(public, kas_ref, phase, reason, exit_code,
                      component_gap=component_gap, guard_verified=guard_verified,
                      guarded_refusal_expected=guarded_refusal_expected,
-                     lab_exception_applied=exception_applied)
+                     lab_exception_applied=exception_applied,
+                     guest_source_verified=guest_source_verified)
 
 
 def main():
