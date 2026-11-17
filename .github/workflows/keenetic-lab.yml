@@ -6,6 +6,8 @@ on:
   pull_request:
     paths:
       - "lab/**"
+      # Documentation-only lab edits must not build QEMU or boot guests.
+      - "!lab/**/*.md"
       - "qemu-patches/**"
       - "emulator.sh"
       - "presets/cudy-wr3000p-v1.ini"
