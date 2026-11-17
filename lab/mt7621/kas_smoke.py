@@ -176,6 +176,11 @@ FINAL_ERR_CATEGORIES = (
      "MAGITRICKLE_INSTALL_FAILED"),
     ("MagiTrickle start failed",
      "MAGITRICKLE_START_FAILED"),
+    # CI run 44162737407: the pinned installer aborts here after its own
+    # init-script start fails the pidof-based liveness confirmation; the
+    # earlier GitHub-mihomo WARN must not classify this as IPK_UNAVAILABLE.
+    ("Mihomo start/restart could not be confirmed.",
+     "MIHOMO_START_NOT_CONFIRMED"),
 )
 
 

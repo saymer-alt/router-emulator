@@ -311,6 +311,18 @@ class Mt7621KASGuestContracts(unittest.TestCase):
             "Failed to download MagiTrickle repository helper through curl/wget"),
             "MAGITRICKLE_HELPER_DOWNLOAD_FAILED")
 
+    def test_mihomo_service_start_failure_is_not_ipk_unavailable(self):
+        # Run 44162737407: the pinned installer aborted on its own mihomo
+        # start/restart confirmation while the earlier GitHub WARN text was
+        # still in the captured output; the legacy fallback mislabelled the
+        # terminal stage IPK_UNAVAILABLE. The pinned err literal now wins.
+        output = ("[WARN] GitHub Mihomo package unavailable, trying Entware feed "
+                  "fallback (last resort)...\n"
+                  "[ERROR] Mihomo start/restart could not be confirmed.\n")
+        self.assertEqual(classify_installer_failure(
+            1, output, "Mihomo start/restart could not be confirmed."),
+            "MIHOMO_START_NOT_CONFIRMED")
+
     def test_classifier_maps_every_pinned_final_err_literal(self):
         pairs = {
             "Mihomo install failed: GitHub package unavailable and Entware feed fallback failed":
@@ -329,6 +341,8 @@ class Mt7621KASGuestContracts(unittest.TestCase):
                 "MAGITRICKLE_INSTALL_FAILED",
             "MagiTrickle start failed":
                 "MAGITRICKLE_START_FAILED",
+            "Mihomo start/restart could not be confirmed.":
+                "MIHOMO_START_NOT_CONFIRMED",
         }
         for prefix, category in pairs.items():
             with self.subTest(prefix=prefix):
@@ -379,7 +393,8 @@ class Mt7621KASGuestContracts(unittest.TestCase):
                    "MAGITRICKLE_HELPER_SYNTAX_FAILED",
                    "MAGITRICKLE_HELPER_EXEC_FAILED",
                    "MAGITRICKLE_FEED_UPDATE_FAILED",
-                   "MAGITRICKLE_INSTALL_FAILED", "MAGITRICKLE_START_FAILED"}
+                   "MAGITRICKLE_INSTALL_FAILED", "MAGITRICKLE_START_FAILED",
+                   "MIHOMO_START_NOT_CONFIRMED"}
         probes = [
             (0, "[OK] Done", None), (1, "[ERROR] Failed to install mihomo",
                                      "Failed to install"),
