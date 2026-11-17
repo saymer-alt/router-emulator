@@ -69,6 +69,26 @@ The separate `MIPSEL_AUTOSTART` gate is not counted among the 19.
 | Stage C lifecycle | Real guest service restart **40/40**, persistence **47/47**, autonomous `rc.unslung` startup **59/59**: PASS ([#85](https://github.com/saymer-alt/router-emulator/pull/85), [#84](https://github.com/saymer-alt/router-emulator/pull/84), [#86](https://github.com/saymer-alt/router-emulator/pull/86)); tasks [#73](https://github.com/saymer-alt/router-emulator/issues/73), [#81](https://github.com/saymer-alt/router-emulator/issues/81) completed | Real power loss, spontaneous USB disconnection, wear, peripheral timing |
 | BusyBox 1.38 timezone probe | MIPSel-only **lab** skip of optional `wget` TZ GET: **33/33** no-SEGV Entware bootstrap ([#83](https://github.com/saymer-alt/router-emulator/pull/83)); upstream issue [#82](https://github.com/saymer-alt/router-emulator/issues/82) remains open | Fix to BusyBox timeout SIGSEGV, NDMS/RCI lock, or automatic timezone detection |
 | KAS on MT7621 Ported 5.1.8 | Exact **guarded refusal PASS** ([#90](https://github.com/saymer-alt/router-emulator/pull/90)), missing required `ext-utils`; **KAS installation BLOCKED** | KAS/Mihomo/MagiTrickle installed or functional |
+
+**One-time Ported-only exception experiment (not a supported KAS profile).** The
+original guest KAS smoke and pinned `install.sh` are retained verbatim. An
+explicit `--lab-ext-utils-exception` switch to `lab/mt7621/kas_smoke.py`
+creates an **in-memory disposable copy** of the pinned installer, changing
+exactly one `ext-utils` component condition. It is allowed only when the
+native NDMS inventory lacks **exactly** `ext-utils` and the already mounted
+external EXT4 `/opt` passes an additional write/read/delete probe.
+All other KAS component, RAM, Netfilter, ownership and safety gates remain
+unchanged. Original KAS source/production firmware are NEVER patched;
+the modified source is verified over private guest SSH and is not uploaded.
+The independent workflow `.github/workflows/mt7621-kas-ext-utils-lab.yml`
+reports `lab_ext_utils_exception_applied`, `guest_source_verified` and
+a sanitized KAS phase. `BLOCKED` is **not** KAS installed, and even
+`PASS` would only evidence an **unsupported disposable lab experiment**.
+Disabling firmware-native EXT4 checks/repair is **not** intended or permitted
+on physical Keenetic or in public KAS stable. The legacy negative
+`--expect-guarded-refusal` test remains unchanged and cannot run with
+the exception switch.
+
 | Candidate Ported 5.2 Beta 3 | QEMU boot/NDMS and CLI reached; **11/12** scenario steps, final `ext-utils` inventory marker absent ([#92](https://github.com/saymer-alt/router-emulator/pull/92), [run](https://github.com/saymer-alt/router-emulator/actions/runs/43872006396)) | KAS compatibility; current candidate is not evidence of `ext-utils` support |
 | Separate ARM64 Ported Netfilter flakiness | [#41](https://github.com/saymer-alt/router-emulator/issues/41): diagnostic categorization exists in `lab/kas_lifecycle.py`, causal regression investigation remains open | Proven root cause or MT7621-only failure |
 
