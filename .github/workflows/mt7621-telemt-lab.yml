@@ -1,0 +1,242 @@
+# Real TeleMT MIPSel pinned-IPK guest lab on ephemeral GitHub Ubuntu runners.
+# The two experimental IPKs are frozen CI artifacts of entware-go Draft PR #44
+# (Actions run 43742529964): they are never rebuilt, never taken from
+# latest, and verified against full SHA-256 + static IPK/ELF contract pins on
+# the runner BEFORE any guest work (fail closed).  Cross-repo artifact
+# download requires a token with actions:read on saymer-alt/entware-go,
+# configured as the repository secret TELEMT_IPK_TOKEN.  Without that token
+# the guest stage is intentionally skipped - no rebuild, no approximation,
+# no untrusted binaries.  No release, feed, tag or latest changes; no
+# physical routers.
+name: MT7621 TeleMT - hosted pinned-IPK guest lab
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/mt7621-telemt-lab.yml'
+      - 'lab/mt7621/telemt_lab.py'
+      - 'lab/test_mt7621_telemt.py'
+      - 'lab/scenarios/ported-mt7621-telemt.json'
+      - 'lab/mt7621/fixtures/S99telemtlab'
+      - 'lab/mt7621/fixtures/telemt-lab.toml'
+      - 'lab/mt7621/fixtures/broken-telemt.toml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mt7621-telemt-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  acquire-ipks:
+    name: Acquire pinned experimental IPKs (requires TELEMT_IPK_TOKEN)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      TELEMT_TOKEN: ${{ secrets.TELEMT_IPK_TOKEN }}
+    outputs:
+      acquired: ${{ steps.gate.outputs.acquired }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Gate on the pinned-artifact token
+        id: gate
+        if: env.TELEMT_TOKEN != ''
+        run: echo "acquired=true" >> "$GITHUB_OUTPUT"
+      - name: Download frozen MIPSel TeleMT Core artifact from entware-go
+        if: steps.gate.outputs.acquired == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: telemt-core-mipsel-experimental
+          repository: saymer-alt/entware-go
+          run-id: 43742529964
+          github-token: ${{ secrets.TELEMT_IPK_TOKEN }}
+          path: ${{ runner.temp }}/telemt-ipk
+
+      - name: Download frozen MIPSel Panel Lite artifact from entware-go
+        if: steps.gate.outputs.acquired == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: telemt-panel-lite-mipsel-experimental
+          repository: saymer-alt/entware-go
+          run-id: 43742529964
+          github-token: ${{ secrets.TELEMT_IPK_TOKEN }}
+          path: ${{ runner.temp }}/telemt-ipk
+
+      - name: Audit both immutable IPK pins and ABI before guest handoff
+        if: steps.gate.outputs.acquired == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m lab.mt7621.telemt_lab --audit-ipks --ipk-dir "$RUNNER_TEMP/telemt-ipk"
+
+      - name: Publish pinned IPK artifact for the guest job
+        if: steps.gate.outputs.acquired == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: telemt-ipk-pinned
+          path: ${{ runner.temp }}/telemt-ipk/*.ipk
+          if-no-files-found: error
+          retention-days: 1
+      - name: Explain the intentional skip (no token)
+        if: steps.gate.outputs.acquired != 'true'
+        shell: bash
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          ### TeleMT cloud guest stage intentionally NOT attempted
+          The repository secret `TELEMT_IPK_TOKEN` (actions:read on
+          saymer-alt/entware-go) is not configured, so the two frozen
+          experimental IPKs of entware-go run 43742529964 cannot be
+          downloaded and pinned-verified on the runner.  They are never
+          rebuilt and never approximated; the guest stage activates as soon
+          as the token exists.
+          EOF
+
+  real-guest-telemt:
+    name: Real MT7621 guest (telemt)
+    needs: acquire-ipks
+    if: needs.acquire-ipks.outputs.acquired == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Dependencies and offline contract tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends p7zip-full socat e2fsprogs openssl \
+            python3 python3-paramiko build-essential ninja-build meson pkg-config \
+            libglib2.0-dev libpixman-1-dev zlib1g-dev libslirp-dev libfdt-dev python3-venv
+          python3 -m unittest discover -s lab -p 'test*.py' -q
+
+      - name: Cache exact patched MIPSel QEMU
+        id: qemu-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ runner.temp }}/mt7621-qemu/qemu-system-mipsel
+            ${{ runner.temp }}/mt7621-qemu/qemu-mipsel.sha256
+          key: mipsel-ubuntu24-v10.1.0-${{ hashFiles('qemu-patches/*.patch', 'lab/mt7621/build_qemu_mipsel.sh') }}
+
+      - name: Build the native MT7621 QEMU target
+        if: steps.qemu-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash lab/mt7621/build_qemu_mipsel.sh "$RUNNER_TEMP/mt7621-qemu"
+
+      - name: Verify QEMU binary before guest execution
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256sum -c "$RUNNER_TEMP/mt7621-qemu/qemu-mipsel.sha256"
+          test -x "$RUNNER_TEMP/mt7621-qemu/qemu-system-mipsel"
+          echo "QEMU_BIN=$RUNNER_TEMP/mt7621-qemu/qemu-system-mipsel" >> "$GITHUB_ENV"
+
+      - name: Fetch only public, pinned Ported Xiaomi R3G assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          src="$RUNNER_TEMP/mt7621-public"
+          mkdir -p "$src"
+          curl -fL --retry 3 --connect-timeout 15 --max-time 300 \
+            -o "$src/breed.bin" 'https://breed.hackpascal.net/breed-mt7621-xiaomi-r3g.bin'
+          echo "05ebb31fd889b148022346179346d91c60a1b4518bdc4d8b9717a62aec638bed  $src/breed.bin" | sha256sum -c -
+          curl -fL --retry 3 --connect-timeout 15 --max-time 300 \
+            -o "$src/ported.bin" 'https://osvault.project-athens.com/osvault/Xiaomi%20R3G/Xiaomi-R3G_5.1.8.bin'
+          echo "05958b9786621ee014bb72551f6458d0672c93370cbce9aec3573c6bba038cb2  $src/ported.bin" | sha256sum -c -
+          curl -fL --retry 3 --connect-timeout 15 --max-time 300 \
+            -o "$src/Xiaomi-R3G.7z" 'https://osvault.project-athens.com/files/firmware/Xiaomi-R3G.7z'
+          echo "397e07a20c6a02911e8fd3be756d23c8  $src/Xiaomi-R3G.7z" | md5sum -c -
+          7z x -y -o"$src/unpacked" "$src/Xiaomi-R3G.7z" >/dev/null
+          python3 -m lab.mt7621.ci_assets --unpacked "$src/unpacked" --out "$src/verified"
+          rm -rf "$src/unpacked"
+
+      - name: Build disposable 128 MiB Ported NAND using pinned components
+        shell: bash
+        run: |
+          set -euo pipefail
+          src="$RUNNER_TEMP/mt7621-public"
+          python3 -m lab.mt7621.prepare_ported_mir3g \
+            --breed "$src/breed.bin" --firmware "$src/ported.bin" \
+            --uconfig "$src/verified/uconfig.bin" \
+            --ustate "$src/verified/ustate.bin" \
+            --eeprom "$src/verified/eeprom.bin" \
+            --out "$RUNNER_TEMP/mt7621-nand"
+
+      - name: Generate ephemeral synthetic guest credentials (never log)
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          python3 - "$RUNNER_TEMP/mt7621-credentials.json" <<'PY'
+          import json, pathlib, secrets, sys
+          pathlib.Path(sys.argv[1]).write_text(json.dumps({
+              "username": "root", "password": secrets.token_urlsafe(28)
+          }), encoding="utf-8")
+          PY
+
+      - name: Restore the pinned TeleMT IPKs
+        uses: actions/download-artifact@v4
+        with:
+          name: telemt-ipk-pinned
+          path: ${{ runner.temp }}/telemt-ipk
+
+      - name: Launch actual QEMU with the pinned TeleMT IPK scenario
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 lab/mt7621/telemt_lab.py \
+            --emulator-root . \
+            --nand-dir "$RUNNER_TEMP/mt7621-nand" \
+            --workspace "$RUNNER_TEMP/mt7621-workspace" \
+            --credentials-file "$RUNNER_TEMP/mt7621-credentials.json" \
+            --ipk-dir "$RUNNER_TEMP/telemt-ipk" \
+            --max-seconds 2100
+
+      - name: Report only safe action counts (no UART)
+        if: always()
+        shell: bash
+        run: |
+          python3 - "$RUNNER_TEMP" "$GITHUB_STEP_SUMMARY" <<'PY'
+          import json, pathlib, sys
+          root = pathlib.Path(sys.argv[1])
+          source = root/"mt7621-workspace"/"report"/"report.json"
+          with open(sys.argv[2], "a", encoding="utf-8") as out:
+              if source.is_file():
+                  obj = json.loads(source.read_text())
+                  rows = obj.get("steps", [])
+                  passed = sum(s.get("outcome") == "PASS" for s in rows)
+                  out.write(f"### MT7621 TeleMT guest: {obj.get('outcome')} "
+                            f"({passed}/{len(rows)} steps)\n")
+              else:
+                  out.write("### MT7621 TeleMT guest not reached: "
+                            "host-side preparation failed\n")
+          PY
+
+      - name: Publish sanitized JSON and JUnit only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mt7621-telemt-public-reports
+          path: |
+            ${{ runner.temp }}/mt7621-workspace/report/report.json
+            ${{ runner.temp }}/mt7621-workspace/report/junit.xml
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Remove all firmware, NAND, credentials, IPKs and private UART
+        if: always()
+        shell: bash
+        run: |
+          rm -rf "$RUNNER_TEMP/mt7621-public" "$RUNNER_TEMP/mt7621-nand" \
+            "$RUNNER_TEMP/mt7621-credentials.json" "$RUNNER_TEMP/mt7621-workspace" \
+            "$RUNNER_TEMP/telemt-ipk"
+          echo 'No private NAND, original firmware, experimental IPKs or full guest logs are uploaded.'

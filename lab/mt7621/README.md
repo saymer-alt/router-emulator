@@ -447,6 +447,111 @@ disposable probe service in the emulator (one boot-triggered live process
 per boot, generation-tracked).  It does not cover other Entware init
 scripts, service supervision/restart policies, or physical hardware.
 
+### The TeleMT MIPSel pinned-IPK guest cycle (2026-11-16, Issue #91 / PR #93): opkg install PASS, Core local run BLOCKED
+
+`lab/mt7621/telemt_lab.py` delivers the two frozen experimental TeleMT IPKs
+of entware-go Draft PR #44 (Actions run 43742529964, SHA-pinned, never
+rebuilt) through the loopback-only mirror, installs them with the guest's
+own native opkg, runs the PR #45 negative CLI contracts on the real guest
+ELF, then starts Core as a loopback-only daemon with a synthetic
+configuration.  Steps 0-32 of `lab/scenarios/ported-mt7621-telemt.json`
+are the committed tz-skip clean-Entware baseline verbatim (33/33), so every
+cycle re-proves the whole Entware foundation first.
+
+Three real guest cycles ran (2026-11-16).  Cycles 1-2 (first round) and
+cycle 3 (the instrumented diagnostic round) all PASS through the opkg/CLI
+stages: clean baseline, in-guest dual SHA verification of both IPKs and
+both installed ELFs against the full pins (the round-2 two-printf manifest
+erratum is fixed — ONE printf builds each checksum file, so the guest now
+really verifies BOTH artifacts), native `opkg install` of telemt 3.5.17-1
+and telemt-panel-lite 1.0.0~rc.4-1 with `opkg status` version checks,
+`healthcheck --mode=lab-probe-invalid` -> EXIT 2 with the exact upstream
+text, and the malformed-TOML `run` -> EXIT 1 + "unclosed table" with no
+panic, and `telemt start ...` exiting 0.
+
+Cycle 3 then FAILS at `DAEMON_PROC_ALIVE` — but this time the exact crash
+was captured first: the new FOREGROUND diagnostic step (commit c53237e)
+runs `telemt start --foreground` with stdio attached and dumps the capture
+to the UART before the real daemon start.  The child dies because
+**rand 0.10.2's ThreadRng cannot initialize — the Ported KeeneticOS kernel
+(`Linux version 4.9-ndm-5`) does not expose getrandom(2) (ENOSYS, os error
+89)**, while its `/dev/urandom` driver works ("random: crng init done").
+Both a tokio worker and the main thread panic at
+`rand-0.10.2/src/rngs/thread.rs:163` ~1.5 s after daemonize; stderr goes to
+/dev/null in daemon mode, so the tracing file log ends at the
+"Runtime generation channel closed before API bootstrap" warning and both
+previous cycles' BLOCKED was log-less.  The qemu-user ENOSYS panic
+documented below is the same failure class (there qemu-user does not
+emulate the MIPS getrandom syscall; here the guest kernel itself lacks it).
+The stage stays **BLOCKED**: the fix requires an upstream rand
+getrandom-ENOSYS fallback or a getrandom-capable kernel — neither is
+in scope for pinned IPKs and a pinned firmware; an LD_PRELOAD getrandom
+shim was considered and rejected as a C-ABI fake that would misrepresent
+the platform result.  Full evidence and analysis:
+`lab/mt7621/evidence/ported-mt7621-telemt-20261116/telemt-blocked-diagnosis.md`
+(report-diagnostic.json + junit-diagnostic.xml: 46 rows, 45 PASS, 1 FAIL,
+598.6 s).
+
+MIPSEL_TELEMT (`derive_telemt_gate`) stays outside GATES/NATIVE_GATES —
+the 19 core gates are unchanged, `apply_labels` refuses any `--set` for
+it, and it can only report from a validated scenario report (currently
+FAIL/NOT_TESTED paths, never an invented PASS).  The cloud guest stage
+(`mt7621-telemt-lab.yml`) activates as soon as the repository secret
+`TELEMT_IPK_TOKEN` (actions:read on saymer-alt/entware-go) exists; the
+acquisition job fails closed on any pin deviation and the guest job is
+intentionally skipped without the token — no rebuild, no approximation.
+
+Also documented for entware-go: under qemu-mipsel 10.2.1 the Core server
+path panics at rand 0.10.2 ThreadRng init (`Function not implemented`,
+os error 89) right after the orchestrator's buffer-budget line — the
+RNG-seeding syscall is unavailable under qemu-user, so the full server
+path cannot be probed host-side (PR #45 never started the server, so this
+was previously invisible).  The diagnostic guest cycle upgraded this from
+a qemu-user-only note to the real-platform root cause: the Ported 4.9-ndm-5
+kernel itself does not expose getrandom(2), so rand 0.10.2-based builds
+cannot start on KeeneticOS MT7621 at all.
+
+Honest scope: real native opkg installation of the experimental pinned
+IPKs on the Ported MT7621 guest is PROVEN (three cycles, dual in-guest SHA
+verification now included); the Core daemon startup inside KeeneticOS
+Ported is BLOCKED with a proven root cause (missing getrandom(2) on the
+4.9-ndm-5 kernel, rand 0.10.2 ThreadRng panic) that only an upstream or
+kernel-side fix can remove; the reboot/rc.unslung autostart stage of the
+same configuration is NOT_TESTED; Panel start/HTTP and the real Telegram
+upstream remain NOT_TESTED.
+
+### TeleMT getrandom-fallback cycle (2026-11-17, Issue #49 / PR #95): Core daemon VERIFIED — 74/74 PASS
+
+The getfb research branch supersedes the round-2 conclusion above: the
+in-guest kernel-fact probe proved the Ported `4.9-ndm-5` kernel **does**
+implement getrandom(2) (o32 syscall 4353 returns 32 bytes via the generic
+libc `syscall()` wrapper AND raw `asm("syscall")`), while **Entware's glibc
+2.27 `getrandom()` symbol is an ENOSYS stub** (built against kernel-3.4-era
+headers) — and that symbol is exactly what `rand 0.10.2` → getrandom 0.4.3 →
+`libc::getrandom` reaches.  The fix (entware-go Draft PR #50): three
+checksum-verified getrandom forks (0.4.3/0.3.4/0.2.17) whose backends
+dlsym-probe `getrandom`, land on the glibc stub's ENOSYS, and take upstream's
+reviewed `/dev/urandom` fallback (POLLIN readiness barrier, EINTR/partial
+handling, fail-closed) — routed ONLY for Linux/MIPS/gnu, fallback on ENOSYS
+only.  The new experimental Core IPK `telemt_3.5.17-2fb1_mipsel-3.4.ipk`
+(`2c8a84fb…`, ELF `d4ba4381…`, softfloat `/opt/lib/ld.so.1`, GLIBC ≤ 2.25)
+passed the full real-guest cycle on the separate branch/pins (Draft PR #95,
+issue #49 task 5): 74/74 PASS in 825.84 s — baseline 33/33, dual in-guest
+SHA of both IPKs and ELFs, native opkg, CLI contracts, kernel-fact probe,
+foreground diagnostic (fixed binary alive through the bounded window),
+daemon start, `DAEMON_PROC_ALIVE`, loopback `HEALTH_LIVE`
+(API `127.0.0.1:9091`, mtproxy `127.0.0.1:3443`), `/proc/$pid/exe` identity,
+listening sockets, 10 s stability, SIGTERM stop, restart, native reboot and
+rc.unslung autostart (`telemtlab-start gen=2` on the UART with full
+health/pid/single-instance/persisted-version proofs).  Evidence:
+`lab/mt7621/evidence/ported-mt7621-telemt-getfb-20261117/getfb-verification.md`.
+Second upstream finding (documented, not patched): `telemt stop` needs
+`pidfd_open(2)` (kernel ≥ 5.3) in `signal_pid_file()`, so it can never
+deliver SIGTERM on the 4.9 guest — the lab stop stage and the lab init
+fixture use the identical SIGTERM via plain `kill(2)` and verify the
+graceful tokio shutdown.  Telegram upstream and Panel HTTP remain
+NOT_TESTED; nothing merged, nothing released.
+
 ## Gate aggregation
 
 ```bash
