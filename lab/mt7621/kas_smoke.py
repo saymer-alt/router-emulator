@@ -183,7 +183,7 @@ def guest_probe(credentials, workspace, deadline, source, kas_ref, public,
             guest.command(
                 "umask 077; printf LAB_EXT4_RW_OK > /opt/lab/.kas-ext4-rw; "
                 "grep -q ' /opt ext4 rw' /proc/mounts && "
-                "test "$(cat /opt/lab/.kas-ext4-rw)" = LAB_EXT4_RW_OK && "
+                'test "$(cat /opt/lab/.kas-ext4-rw)" = LAB_EXT4_RW_OK && '
                 "rm -f /opt/lab/.kas-ext4-rw",
                 timeout=30)
             phase, reason = "BLOCKED", "LAB_SOURCE_PATCH_UNAVAILABLE"
