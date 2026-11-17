@@ -8,6 +8,7 @@ import unittest
 from lab.mt7621.kas_smoke import (
     classify_failure, write_public, missing_required_components,
     guarded_refusal_proven, lab_only_without_ext_utils_guard,
+    verified_mihomo_version,
     require_exact_lab_component_gap, LAB_EXT_UTILS_GUARD,
     LAB_EXT_UTILS_DISABLED,
 )
@@ -66,6 +67,21 @@ class Mt7621KASGuestContracts(unittest.TestCase):
             self.assertEqual(record["base_packages_installed"],
                              ["ca-bundle", "curl", "jq"])
             self.assertFalse(record["kas_installed"])
+
+    def test_real_mihomo_version_parser_rejects_false_or_malformed_proof(self):
+        self.assertTrue(verified_mihomo_version(
+            0, "Mihomo Meta v1.19.33 linux mipsle go1.26", ""))
+        self.assertTrue(verified_mihomo_version(
+            0, "", "Mihomo Meta v1.19.33 linux mipsle"))
+        for code, stdout, stderr in (
+                (1, "Mihomo Meta v1.19.33", ""),
+                (0, "Mihomo Meta v1.19.330", ""),
+                (0, "Mihomo Meta v1.19.34", ""),
+                (0, "another 1.19.33", ""),
+                (0, "literal \\bmihomo\\b v1.19.33", ""),
+                (127, "", "mihomo: not found")):
+            with self.subTest(code=code, stdout=stdout):
+                self.assertFalse(verified_mihomo_version(code, stdout, stderr))
 
     def test_mihomo_guest_evidence_fields_do_not_claim_kas_pass(self):
         with tempfile.TemporaryDirectory() as td:
