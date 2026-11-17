@@ -260,9 +260,10 @@ def guest_probe(credentials, workspace, deadline, source, kas_ref, public,
                            "if [ -x \"$p\" ]; then \"$p\" -v; exit $?; fi; "
                            "done; exit 127")
                     ver_rc, ver_out, ver_err = guest.execute(cmd, timeout=75)
+                    version_text = ver_out + "\n" + ver_err
                     mihomo_binary_version_verified = (ver_rc == 0 and
-                        re.search(r"(?i)\\bmihomo\\b", ver_out) is not None and
-                        re.search(r"(?<![0-9])v?1\\.19\\.33(?![0-9])", ver_out)
+                        re.search(r"(?i)\\bmihomo\\b", version_text) is not None and
+                        re.search(r"(?<![0-9])v?1\\.19\\.33(?![0-9])", version_text)
                         is not None)
                 print("KAS MIPSEL MIHOMO: opkg=%s binary_version=%s" %
                       (mihomo_package_installed, mihomo_binary_version_verified),
