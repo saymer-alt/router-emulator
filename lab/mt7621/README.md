@@ -175,6 +175,17 @@ gh workflow run mt7621-kas-ext-utils-lab.yml \
 
 `build.yml` `paths-ignore` on this branch now also lists the MT7621 KAS workflow files, so pushing these documentation/adapter edits cannot repeat the accidental Build/release trigger.
 
+#### The single authorized guest run: HTTPS stage PROVEN, KAS aborts at the mihomo service start (2026-11-17)
+
+Owner GO executed the adapter dispatch twice in practice: [run 44160249375](https://github.com/saymer-alt/router-emulator/actions/runs/44160249375) died **host-side before any guest started** — `validated_kas_mipsel_https_mirror` looked the plain-HTTP feed records up with scheme-ful 3-tuples while `KASMirror.http_routes` re-keys the route table to `(host, path)` pairs, so every lookup returned `None` ("lab mirror does not serve pinned mipsel-3.4 index"); commit `a88f3f1` fixes the lookup and adds an offline end-to-end regression that reproduces the exact CI failure on synthetic pins. [Run 44162737407](https://github.com/saymer-alt/router-emulator/actions/runs/44162737407) (dispatch input `https_mirror=true`, branch tip `a88f3f1`) is the one real guest execution; its sanitized `kas-smoke.json` artifact reports, on the disposable Ported 5.1.8 guest:
+
+* **Verified-TLS HTTPS stage: PROVEN** — `kas_https_{stage,dns_configured,clock_synced,ca_trust_applied,helper_tls_verified}` all true; the pinned `add_repo.sh` was fetched by the real installer **with certificate verification ON** against the disposable lab CA and accepted only after an in-guest SHA256 match.
+* **Pinned base IPKs 6/6** (`ca-bundle, curl, jq, iptables, nano, cron`); Mihomo 1.19.33-1 installed and the installed ELF executes: `mihomo -v` → RC=0, head marker `Mihomo Meta`, 90 B stdout — the run-44120337317 RC=2 is **not reproduced** in this configuration (both prior hypotheses remain formally unproven; the guest-runtime-incompatibility one is weakened).
+* **MagiTrickle via the real installer**: package + `S99magitrickle` init script present (the `MagiTrickle start failed` err never fired), but `magitrickled` was **not running** at the lab post-check (the installer's own `MT_RUNTIME_STOPPED` warn) — a regression against run 44120337317 (`daemon=True`); unexplained, candidate deltas are the HTTPS-stage DNS/clock environment and post-check timing.
+* **KAS terminally aborts** at the MIHOMO SERVICE STATE block: `pidof mihomo` finds no process 2 s after the init-script start, so the pinned literal `err "Mihomo start/restart could not be confirmed."` fires and the installer exits before its post-install self-check. The binary works standalone (`-v` RC=0) but **dies as a service** — the mechanism (config exit, `/dev/net/tun`, port conflict, …) is **not established** from the sanitized artifacts. Commit `0fb5f0c` adds the honest `MIHOMO_START_NOT_CONFIRMED` category (the legacy fallback had mislabelled this abort `IPK_UNAVAILABLE` from the earlier GitHub WARN).
+
+**Verdict: KAS remains BLOCKED — the terminating stage is pinned evidence, the service-death mechanism is not.** Next technical step (needs a new owner GO, not executed here): one instrumented guest run capturing the init-script start output/exit code, `ls -l /dev/net/tun`, `dmesg | tail`, mihomo log and `resolv.conf` right after the failed start. Virtual-boundary caveat unchanged: no physical Keenetic, reboot, USB, Wi-Fi or ISP coverage is claimed.
+
 ## Quick start (Linux x86_64, incl. WSL2)
 
 ```bash
