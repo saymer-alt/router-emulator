@@ -39,10 +39,11 @@ class Mt7621KASGuestContracts(unittest.TestCase):
                                         "exit_code", "component_inventory_seen",
                                         "missing_component_ids", "test_expectation",
                                         "guard_contract_verified", "lab_ext_utils_exception_applied",
-                                        "source_variant"})
+                                        "guest_source_verified", "source_variant"})
             self.assertFalse(rec["kas_installed"])
             self.assertEqual(rec["kas_ref"], ref)
             self.assertFalse(rec["lab_ext_utils_exception_applied"])
+            self.assertFalse(rec["guest_source_verified"])
             self.assertEqual(rec["source_variant"], "PINNED_UNMODIFIED")
 
     def test_lab_exception_changes_exactly_one_guard_condition(self):
@@ -87,6 +88,7 @@ class Mt7621KASGuestContracts(unittest.TestCase):
                          component_gap=["ext-utils"], lab_exception_applied=True)
             rec = json.loads(p.read_text())
             self.assertTrue(rec["lab_ext_utils_exception_applied"])
+            self.assertFalse(rec["guest_source_verified"])
             self.assertEqual(rec["source_variant"],
                              "DISPOSABLE_LAB_EXT_UTILS_EXCEPTION")
             self.assertFalse(rec["kas_installed"])
