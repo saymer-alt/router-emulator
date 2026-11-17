@@ -8,6 +8,7 @@ import unittest
 from lab.mt7621.kas_smoke import (
     classify_failure, write_public, missing_required_components,
     guarded_refusal_proven, lab_only_without_ext_utils_guard,
+    verified_mihomo_version,
     require_exact_lab_component_gap, LAB_EXT_UTILS_GUARD,
     LAB_EXT_UTILS_DISABLED,
 )
@@ -40,7 +41,9 @@ class Mt7621KASGuestContracts(unittest.TestCase):
                                         "missing_component_ids", "test_expectation",
                                         "guard_contract_verified", "lab_ext_utils_exception_applied",
                                         "guest_source_verified", "source_variant",
-                                        "kas_base_deps_feed", "base_packages_installed"})
+                                        "kas_base_deps_feed", "base_packages_installed",
+                                        "kas_mihomo_feed", "mihomo_package_installed",
+                                        "mihomo_binary_version_verified"})
             self.assertFalse(rec["kas_installed"])
             self.assertEqual(rec["kas_ref"], ref)
             self.assertFalse(rec["lab_ext_utils_exception_applied"])
@@ -48,6 +51,9 @@ class Mt7621KASGuestContracts(unittest.TestCase):
             self.assertEqual(rec["source_variant"], "PINNED_UNMODIFIED")
             self.assertFalse(rec["kas_base_deps_feed"])
             self.assertEqual(rec["base_packages_installed"], [])
+            self.assertFalse(rec["kas_mihomo_feed"])
+            self.assertFalse(rec["mihomo_package_installed"])
+            self.assertFalse(rec["mihomo_binary_version_verified"])
 
     def test_report_exposes_only_allowed_actual_base_install_ids(self):
         with tempfile.TemporaryDirectory() as td:
@@ -61,6 +67,45 @@ class Mt7621KASGuestContracts(unittest.TestCase):
             self.assertEqual(record["base_packages_installed"],
                              ["ca-bundle", "curl", "jq"])
             self.assertFalse(record["kas_installed"])
+
+    def test_real_mihomo_version_parser_rejects_false_or_malformed_proof(self):
+        self.assertTrue(verified_mihomo_version(
+            0, "Mihomo Meta v1.19.33 linux mipsle go1.26", ""))
+        self.assertTrue(verified_mihomo_version(
+            0, "", "Mihomo Meta v1.19.33 linux mipsle"))
+        for code, stdout, stderr in (
+                (1, "Mihomo Meta v1.19.33", ""),
+                (0, "Mihomo Meta v1.19.330", ""),
+                (0, "Mihomo Meta v1.19.34", ""),
+                (0, "another 1.19.33", ""),
+                (0, "literal mihomox v1.19.33", ""),
+                (127, "", "mihomo: not found")):
+            with self.subTest(code=code, stdout=stdout):
+                self.assertFalse(verified_mihomo_version(code, stdout, stderr))
+
+    def test_mihomo_guest_evidence_fields_do_not_claim_kas_pass(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "mihomo.json"
+            write_public(path, "a" * 40, "BLOCKED", "IPK_UNAVAILABLE", 1,
+                         lab_exception_applied=True, kas_base_deps_feed=True,
+                         kas_mihomo_feed=True, mihomo_package_installed=True,
+                         mihomo_binary_version_verified=True)
+            data = json.loads(path.read_text())
+            self.assertTrue(data["kas_mihomo_feed"])
+            self.assertTrue(data["mihomo_package_installed"])
+            self.assertTrue(data["mihomo_binary_version_verified"])
+            self.assertFalse(data["kas_installed"])
+            self.assertEqual(data["reason"], "IPK_UNAVAILABLE")
+
+    def test_mihomo_not_installed_is_not_inferred_from_local_mirror(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "mihomo.json"
+            write_public(path, "a" * 40, "BLOCKED", "INSTALLER_NOT_COMPLETED",
+                         kas_mihomo_feed=True)
+            data = json.loads(path.read_text())
+            self.assertTrue(data["kas_mihomo_feed"])
+            self.assertFalse(data["mihomo_package_installed"])
+            self.assertFalse(data["mihomo_binary_version_verified"])
 
     def test_lab_exception_changes_exactly_one_guard_condition(self):
         # Synthetic source contains other active component and storage checks.

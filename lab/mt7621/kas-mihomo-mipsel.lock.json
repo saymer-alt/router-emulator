@@ -1,0 +1,19 @@
+{
+  "schema": "mt7621-kas-mihomo-mipsel-v1",
+  "for_kas_ref": "2fcd16089374604e10c201c6cd5a805fba3b100d",
+  "origin": "https://bin.entware.net/mipselsf-k3.4/",
+  "expected_package_version": "1.19.33-1",
+  "packages": [
+    {
+      "Package": "mihomo",
+      "Version": "1.19.33-1",
+      "Depends": "ca-bundle",
+      "Architecture": "mipsel-3.4",
+      "Filename": "mihomo_1.19.33-1_mipsel-3.4.ipk",
+      "Size": "20301332",
+      "SHA256sum": "3f37931cafa0ff08d99a718a0aba171ae4c1dea390a51d557a9baf77aad5f087",
+      "feed": "entware",
+      "url": "https://bin.entware.net/mipselsf-k3.4/mihomo_1.19.33-1_mipsel-3.4.ipk"
+    }
+  ]
+}
