@@ -17,7 +17,10 @@ from pathlib import Path
 import re
 from types import SimpleNamespace
 
-from lab.build_entware import build
+from lab.build_entware import add_packages, build
+from lab.mt7621.kas_base_deps import (
+    OVERLAY_LOCK, REQUIRED_BASE, validated_kas_base_overlay,
+)
 from lab.mirror import Mirror
 from lab.run import run
 from lab.kas_mirror import load_sources
@@ -123,7 +126,8 @@ def guarded_refusal_proven(exit_code, category, component_gap, package_list, no_
 
 def write_public(path, kas_ref, phase, reason, exit_code=None, component_gap=None,
                  guard_verified=False, guarded_refusal_expected=False,
-                 lab_exception_applied=False, guest_source_verified=False):
+                 lab_exception_applied=False, guest_source_verified=False,
+                 kas_base_deps_feed=False, installed_base_packages=None):
     """No guest output, passwords, paths, script bodies, or arbitrary diagnostics."""
     record = {"schema": "mt7621-kas-smoke-v1", "kas_ref": kas_ref,
               "phase": phase, "reason": reason, "kas_installed": phase == "PASS",
@@ -135,6 +139,9 @@ def write_public(path, kas_ref, phase, reason, exit_code=None, component_gap=Non
               "guard_contract_verified": guard_verified,
               "lab_ext_utils_exception_applied": bool(lab_exception_applied),
               "guest_source_verified": bool(guest_source_verified),
+              "kas_base_deps_feed": bool(kas_base_deps_feed),
+              "base_packages_installed": [x for x in REQUIRED_BASE
+                                          if x in (installed_base_packages or ())],
               "source_variant": ("DISPOSABLE_LAB_EXT_UTILS_EXCEPTION"
                                  if lab_exception_applied else "PINNED_UNMODIFIED")}
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -143,7 +150,8 @@ def write_public(path, kas_ref, phase, reason, exit_code=None, component_gap=Non
 
 
 def guest_probe(credentials, workspace, deadline, source, kas_ref, public,
-                guarded_refusal_expected=False, lab_ext_utils_exception=False):
+                guarded_refusal_expected=False, lab_ext_utils_exception=False,
+                kas_base_deps_feed=False):
     """Trusted run.py post-scenario hook; VM remains alive for the whole probe."""
     from lab.guest import Guest  # lazy: unit tests do not require Paramiko
     guest = Guest(credentials, workspace, deadline=deadline)
@@ -152,6 +160,9 @@ def guest_probe(credentials, workspace, deadline, source, kas_ref, public,
     guard_verified = False
     exception_applied = False
     guest_source_verified = False
+    installed_base_packages = []
+    if kas_base_deps_feed and not lab_ext_utils_exception:
+        raise ValueError('KAS base extra packages only allowed with lab ext-utils exception')
     if guarded_refusal_expected and lab_ext_utils_exception:
         raise ValueError("lab exception is incompatible with guarded-refusal test")
     try:
@@ -217,6 +228,14 @@ def guest_probe(credentials, workspace, deadline, source, kas_ref, public,
                    " sh /opt/lab/install.sh disk")
         exit_code, stdout, stderr = guest.execute(command, timeout=300)
         category = classify_failure(exit_code, stdout + "\n" + stderr)
+        if kas_base_deps_feed:
+            # Query actual guest package database, never trust the mirror index
+            # as evidence that KAS installed a package. Publish allowlisted IDs.
+            installed_now = guest.command("/opt/bin/opkg list-installed", timeout=45)
+            installed_base_packages = [x for x in REQUIRED_BASE
+                if re.search(r"^" + re.escape(x) + r" - ", installed_now, re.M)]
+            print("KAS MIPSEL BASE PACKAGES INSTALLED: %d/%d" %
+                  (len(installed_base_packages), len(REQUIRED_BASE)), flush=True)
         if category != "INSTALLER_COMPLETED":
             reason = category
             print("KAS MIPSEL INSTALL: " + category, flush=True)
@@ -235,7 +254,8 @@ def guest_probe(credentials, workspace, deadline, source, kas_ref, public,
         if guarded_refusal_expected:
             reason = "UNEXPECTED_INSTALLER_SUCCESS_IN_GUARD_TEST"
             raise RuntimeError("guard expected but KAS installer succeeded")
-        installed = guest.command("/opt/bin/opkg list-installed", timeout=45)
+        installed = (installed_now if kas_base_deps_feed else
+                     guest.command("/opt/bin/opkg list-installed", timeout=45))
         if not all(name + " - " in installed for name in ("mihomo", "magitrickle")):
             reason = "INSTALLED_PACKAGES_MISSING"
             raise RuntimeError("KAS package postcondition failed")
@@ -250,7 +270,9 @@ def guest_probe(credentials, workspace, deadline, source, kas_ref, public,
                      component_gap=component_gap, guard_verified=guard_verified,
                      guarded_refusal_expected=guarded_refusal_expected,
                      lab_exception_applied=exception_applied,
-                     guest_source_verified=guest_source_verified)
+                     guest_source_verified=guest_source_verified,
+                     kas_base_deps_feed=kas_base_deps_feed,
+                     installed_base_packages=installed_base_packages)
 
 
 def main():
@@ -266,14 +288,20 @@ def main():
                     help="negative test ONLY: exact ext-utils refusal, no KAS packages/state")
     ap.add_argument("--lab-ext-utils-exception", action="store_true",
                     help="ONLY disposable Ported MT7621 QEMU: skip one KAS ext-utils guard")
+    ap.add_argument("--kas-base-deps", action="store_true",
+                    help="ONLY disposable lab exception: add 11 SHA256-pinned MIPSel base IPKs to mirror")
     args = ap.parse_args()
     if args.expect_guarded_refusal and args.lab_ext_utils_exception:
         ap.error("lab exception and guarded refusal are mutually exclusive")
+    if args.kas_base_deps and not args.lab_ext_utils_exception:
+        ap.error("--kas-base-deps requires --lab-ext-utils-exception")
     if not PIN.fullmatch(args.kas_ref):
         ap.error("--kas-ref must be full 40-character SHA")
     source = load_sources(args.kas_dir, args.kas_ref)["install.sh"]
     if not source.startswith(b"#!/bin/sh"):
         ap.error("KAS installer header mismatch")
+    if args.kas_base_deps:
+        validated_kas_base_overlay(kas_ref=args.kas_ref)
     workspace = Path(args.workspace)
     workspace.mkdir(mode=0o700, exist_ok=False)
     creds = json.loads(Path(args.credentials_file).read_text(encoding="utf-8"))
@@ -282,6 +310,11 @@ def main():
     image, feed = workspace / "opt.img", workspace / "mirror"
     build(image, feed, workspace / "cache", args.credentials_file,
           arch="mipsel", lock_path=LOCK)
+    if args.kas_base_deps:
+        # Only the disposable mirror is extended, not the proven bootstrap
+        # lock or original production KAS; add_packages verifies every digest.
+        add_packages(feed, workspace / "cache", OVERLAY_LOCK)
+        print("KAS BASE MIPSEL MIRROR: 11 extra verified IPKs", flush=True)
     scenario = Path(__file__).resolve().parents[1] / "scenarios" / "ported-mt7621-entware-tz-skip.json"
     public = workspace / "report" / "kas-smoke.json"
     with Mirror(feed) as port:
@@ -295,7 +328,8 @@ def main():
             after_scenario=lambda **ctx: guest_probe(args.credentials_file,
                 workspace, ctx["deadline"], source, args.kas_ref, public,
                 guarded_refusal_expected=args.expect_guarded_refusal,
-                lab_ext_utils_exception=args.lab_ext_utils_exception)))
+                lab_ext_utils_exception=args.lab_ext_utils_exception,
+                kas_base_deps_feed=args.kas_base_deps)))
 
 
 if __name__ == "__main__":
