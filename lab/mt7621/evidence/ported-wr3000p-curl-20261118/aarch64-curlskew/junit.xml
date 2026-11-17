@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<testsuite name="curlskew" tests="14">
+  <testcase name="C1_INSTALL_ALIGNED" classname="busybox-matrix.curlskew" status="PASS"></testcase>
+  <testcase name="C2_ALIGNED_STATUS" classname="busybox-matrix.curlskew" status="PASS"></testcase>
+  <testcase name="C3_CURL_V_OK" classname="busybox-matrix.curlskew" status="PASS"></testcase>
+  <testcase name="C4_LDBINDNOW_OK" classname="busybox-matrix.curlskew" status="PASS"></testcase>
+  <testcase name="C5_HTTP_FETCH" classname="busybox-matrix.curlskew" status="PASS"></testcase>
+  <testcase name="C6_PREFLIGHT_ALIGNED" classname="busybox-matrix.curlskew" status="OBSERVED"></testcase>
+  <testcase name="C7_INSTALL_MODEL" classname="busybox-matrix.curlskew" status="PASS"></testcase>
+  <testcase name="C8_SKEW_STATUS" classname="busybox-matrix.curlskew" status="PASS"></testcase>
+  <testcase name="C9_SKEW_CURL_V" classname="busybox-matrix.curlskew" status="PASS"></testcase>
+  <testcase name="C10_SKEW_LDBINDNOW" classname="busybox-matrix.curlskew" status="PASS"></testcase>
+  <testcase name="C11_PREFLIGHT_SKEW" classname="busybox-matrix.curlskew" status="OBSERVED"></testcase>
+  <testcase name="C12_RECOVER" classname="busybox-matrix.curlskew" status="PASS"></testcase>
+  <testcase name="C13_RECOVERED_V" classname="busybox-matrix.curlskew" status="PASS"></testcase>
+  <testcase name="C14_PREFLIGHT_RECOVERED" classname="busybox-matrix.curlskew" status="OBSERVED"></testcase>
+</testsuite>

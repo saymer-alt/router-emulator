@@ -1,0 +1,147 @@
+{
+  "kind": "curlskew",
+  "meta": {
+    "arch": "mipsel-3.4",
+    "preset": "xiaomi-mi-router-3g-breed",
+    "pinned_bootstrap_busybox": "1.38.0-5",
+    "old_ipk": {
+      "url": "https://test.entware.net/mipselsf-k3.4/busybox_1.38.0-3_mipsel-3.4.ipk",
+      "version": "1.38.0-3",
+      "sha256": "29954f847e9442fc30cebf6bc7dd17a1fc1d391c2fd037c6df582a30c0e40645"
+    },
+    "preflight_sha256": "defb91a0fa819f06d6dcc6651704b183d45a6bf638f831167da2cb5c3132378e"
+  },
+  "entries": [
+    {
+      "id": "C1_INSTALL_ALIGNED",
+      "label": "opkg install curl resolves libcurl from the same index",
+      "command": "/opt/bin/opkg update >/dev/null 2>&1; /opt/bin/opkg install curl",
+      "rc": 0,
+      "status": "PASS",
+      "reasons": [],
+      "output_tail": "Installing curl (8.23.0-1) to root...\nDownloading http://192.168.1.100/entware/curl_8.23.0-1_mipsel-3.4.ipk\nInstalling zlib (2.3.3-2) to root...\nDownloading http://192.168.1.100/entware/zlib_2.3.3-2_mipsel-3.4.ipk\nInstalling libatomic (8.4.0-12) to root...\nDownloading http://192.168.1.100/entware/libatomic_8.4.0-12_mipsel-3.4.ipk\nInstalling libopenssl (3.5.9-3) to root...\nDownloading http://192.168.1.100/entware/libopenssl_3.5.9-3_mipsel-3.4.ipk\nInstalling libnghttp2 (1.70.0-1) to root...\nDownloading http://192.168.1.100/entware/libnghttp2_1.70.0-1_mipsel-3.4.ipk\nInstalling ca-bundle (20260816-2) to root...\nDownloading http://192.168.1.100/entware/ca-bundle_20260816-2_all.ipk\nInstalling libcurl (8.23.0-1) to root...\nDownloading http://192.168.1.100/entware/libcurl_8.23.0-1_mipsel-3.4.ipk\nConfiguring libatomic.\nConfiguring zlib.\nConfiguring libopenssl.\nConfiguring libnghttp2.\nConfiguring ca-bundle.\nConfiguring libcurl.\nConfiguring curl."
+    },
+    {
+      "id": "C2_ALIGNED_STATUS",
+      "label": "curl and libcurl versions aligned",
+      "command": "/opt/bin/opkg status curl | /opt/bin/busybox grep '^Version'; /opt/bin/opkg status libcurl | /opt/bin/busybox grep '^Version'",
+      "rc": 0,
+      "status": "PASS",
+      "reasons": [],
+      "output_tail": "Version: 8.23.0-1\nVersion: 8.23.0-1"
+    },
+    {
+      "id": "C3_CURL_V_OK",
+      "label": "curl -V on the aligned pair",
+      "command": "/opt/bin/curl -V",
+      "rc": 0,
+      "status": "PASS",
+      "reasons": [],
+      "output_tail": "curl 8.23.0 (mipsel-openwrt-linux-gnu) libcurl/8.23.0 OpenSSL/3.5.9 zlib/1.3.1.zlib-ng nghttp2/1.70.0\nRelease-Date: 2026-10-14\nProtocols: file ftp ftps http https imap imaps mqtt mqtts pop3 pop3s rtsp smtp smtps tftp\nFeatures: alt-svc HSTS HTTP2 HTTPS-proxy IPv6 Largefile libz SSL threadsafe"
+    },
+    {
+      "id": "C4_LDBINDNOW_OK",
+      "label": "LD_BIND_NOW=1 curl -V on the aligned pair",
+      "command": "LD_BIND_NOW=1 /opt/bin/curl -V",
+      "rc": 0,
+      "status": "PASS",
+      "reasons": [],
+      "output_tail": "curl 8.23.0 (mipsel-openwrt-linux-gnu) libcurl/8.23.0 OpenSSL/3.5.9 zlib/1.3.1.zlib-ng nghttp2/1.70.0\nRelease-Date: 2026-10-14\nProtocols: file ftp ftps http https imap imaps mqtt mqtts pop3 pop3s rtsp smtp smtps tftp\nFeatures: alt-svc HSTS HTTP2 HTTPS-proxy IPv6 Largefile libz SSL threadsafe"
+    },
+    {
+      "id": "C5_HTTP_FETCH",
+      "label": "curl HTTP transport against the local mirror",
+      "command": "/opt/bin/curl -fsS -o /dev/null -w '%{http_code}\\n' http://192.168.1.100/entware/Packages.gz",
+      "rc": 0,
+      "status": "PASS",
+      "reasons": [],
+      "output_tail": "200"
+    },
+    {
+      "id": "C6_PREFLIGHT_ALIGNED",
+      "label": "KAS preflight on aligned curl (documents the rc-2 baseline)",
+      "command": "/opt/bin/busybox sh /opt/lab/preflight.sh > /opt/lab/preflight-out.txt 2>&1; printf 'PREFLIGHT_RC=%s\\n' \"$?\"; /opt/bin/busybox tail -40 /opt/lab/preflight-out.txt",
+      "rc": 0,
+      "status": "OBSERVED",
+      "reasons": [],
+      "output_tail": "PREFLIGHT_RC=2\nPASS: busybox-binary: /opt/bin/busybox present and executes\nPASS: opt-sh: /opt/bin/sh present and executes\nPASS: applet-chmod: /opt/bin/chmod resolves to an executable file\nPASS: applet-ln: /opt/bin/ln resolves to an executable file\nPASS: applet-rm: /opt/bin/rm resolves to an executable file\nPASS: applet-cp: /opt/bin/cp resolves to an executable file\nPASS: applet-mv: /opt/bin/mv resolves to an executable file\nPASS: applet-ls: /opt/bin/ls resolves to an executable file\nPASS: applet-cat: /opt/bin/cat resolves to an executable file\nPASS: applet-grep: /opt/bin/grep resolves to an executable file\nPASS: applet-sed: /opt/bin/sed resolves to an executable file\nPASS: applet-awk: /opt/bin/awk resolves to an executable file\nPASS: applet-wget: /opt/bin/wget resolves to an executable file\nWARN: wget-capability: /opt/bin/wget points at busybox: the BusyBox wget applet has no HTTPS support, https feeds will fail with 'wget returned 1' (Entware #887)\nUNKNOWN: opkg-view: opkg did not report busybox as 'install ok installed'; the package database may be damaged or mid-transaction",
+      "preflight_rc": 2
+    },
+    {
+      "id": "C7_INSTALL_MODEL",
+      "label": "force-downgrade to the synthetic 8.15-model library",
+      "command": "/opt/bin/opkg install --force-downgrade /opt/lab/libcurl-model.ipk",
+      "rc": 0,
+      "status": "PASS",
+      "reasons": [],
+      "output_tail": "Downgrading libcurl on root from 8.23.0-1 to 8.15.0-2...\nConfiguring libcurl."
+    },
+    {
+      "id": "C8_SKEW_STATUS",
+      "label": "versions after the skew injection",
+      "command": "/opt/bin/opkg status curl | /opt/bin/busybox grep '^Version'; /opt/bin/opkg status libcurl | /opt/bin/busybox grep '^Version'",
+      "rc": 0,
+      "status": "PASS",
+      "reasons": [],
+      "output_tail": "Version: 8.23.0-1\nVersion: 8.15.0-2"
+    },
+    {
+      "id": "C9_SKEW_CURL_V",
+      "label": "plain curl -V with skewed library (field signature)",
+      "command": "/opt/bin/curl -V 2>&1 | head -2; printf 'CURL_V_RC_%s\\n' $((40+$?))",
+      "rc": 0,
+      "status": "FAIL",
+      "reasons": [
+        "missing 'curl_multi_get_offt'"
+      ],
+      "output_tail": "curl 8.23.0 (mipsel-openwrt-linux-gnu) libcurl/8.23.0 OpenSSL/3.5.9 zlib/1.3.1.zlib-ng nghttp2/1.70.0\nRelease-Date: 2026-10-14\nCURL_V_RC_40"
+    },
+    {
+      "id": "C10_SKEW_LDBINDNOW",
+      "label": "LD_BIND_NOW=1 curl -V with skewed library",
+      "command": "LD_BIND_NOW=1 /opt/bin/curl -V 2>&1 | head -2; printf 'LDB_RC_%s\\n' $((40+$?))",
+      "rc": 0,
+      "status": "PASS",
+      "reasons": [],
+      "output_tail": "/opt/bin/curl: symbol lookup error: /opt/bin/curl: undefined symbol: curl_multi_get_offt\nLDB_RC_40"
+    },
+    {
+      "id": "C11_PREFLIGHT_SKEW",
+      "label": "KAS preflight while curl/libcurl skewed (detection gap?)",
+      "command": "/opt/bin/busybox sh /opt/lab/preflight.sh > /opt/lab/preflight-out.txt 2>&1; printf 'PREFLIGHT_RC=%s\\n' \"$?\"; /opt/bin/busybox tail -40 /opt/lab/preflight-out.txt",
+      "rc": 0,
+      "status": "OBSERVED",
+      "reasons": [],
+      "output_tail": "PREFLIGHT_RC=2\nPASS: busybox-binary: /opt/bin/busybox present and executes\nPASS: opt-sh: /opt/bin/sh present and executes\nPASS: applet-chmod: /opt/bin/chmod resolves to an executable file\nPASS: applet-ln: /opt/bin/ln resolves to an executable file\nPASS: applet-rm: /opt/bin/rm resolves to an executable file\nPASS: applet-cp: /opt/bin/cp resolves to an executable file\nPASS: applet-mv: /opt/bin/mv resolves to an executable file\nPASS: applet-ls: /opt/bin/ls resolves to an executable file\nPASS: applet-cat: /opt/bin/cat resolves to an executable file\nPASS: applet-grep: /opt/bin/grep resolves to an executable file\nPASS: applet-sed: /opt/bin/sed resolves to an executable file\nPASS: applet-awk: /opt/bin/awk resolves to an executable file\nPASS: applet-wget: /opt/bin/wget resolves to an executable file\nWARN: wget-capability: /opt/bin/wget points at busybox: the BusyBox wget applet has no HTTPS support, https feeds will fail with 'wget returned 1' (Entware #887)\nUNKNOWN: opkg-view: opkg did not report busybox as 'install ok installed'; the package database may be damaged or mid-transaction",
+      "preflight_rc": 2
+    },
+    {
+      "id": "C12_RECOVER",
+      "label": "opkg install /opt/lab/libcurl-real.ipk (recovery path)",
+      "command": "/opt/bin/opkg install /opt/lab/libcurl-real.ipk",
+      "rc": 0,
+      "status": "PASS",
+      "reasons": [],
+      "output_tail": "Upgrading libcurl on root from 8.15.0-2 to 8.23.0-1...\nDownloading http://192.168.1.100/entware/libcurl_8.23.0-1_mipsel-3.4.ipk\nConfiguring libcurl."
+    },
+    {
+      "id": "C13_RECOVERED_V",
+      "label": "curl -V after recovery",
+      "command": "/opt/bin/curl -V && LD_BIND_NOW=1 /opt/bin/curl -V",
+      "rc": 0,
+      "status": "PASS",
+      "reasons": [],
+      "output_tail": "curl 8.23.0 (mipsel-openwrt-linux-gnu) libcurl/8.23.0 OpenSSL/3.5.9 zlib/1.3.1.zlib-ng nghttp2/1.70.0\nRelease-Date: 2026-10-14\nProtocols: file ftp ftps http https imap imaps mqtt mqtts pop3 pop3s rtsp smtp smtps tftp\nFeatures: alt-svc HSTS HTTP2 HTTPS-proxy IPv6 Largefile libz SSL threadsafe\ncurl 8.23.0 (mipsel-openwrt-linux-gnu) libcurl/8.23.0 OpenSSL/3.5.9 zlib/1.3.1.zlib-ng nghttp2/1.70.0\nRelease-Date: 2026-10-14\nProtocols: file ftp ftps http https imap imaps mqtt mqtts pop3 pop3s rtsp smtp smtps tftp\nFeatures: alt-svc HSTS HTTP2 HTTPS-proxy IPv6 Largefile libz SSL threadsafe"
+    },
+    {
+      "id": "C14_PREFLIGHT_RECOVERED",
+      "label": "KAS preflight after recovery",
+      "command": "/opt/bin/busybox sh /opt/lab/preflight.sh > /opt/lab/preflight-out.txt 2>&1; printf 'PREFLIGHT_RC=%s\\n' \"$?\"; /opt/bin/busybox tail -40 /opt/lab/preflight-out.txt",
+      "rc": 0,
+      "status": "OBSERVED",
+      "reasons": [],
+      "output_tail": "PREFLIGHT_RC=2\nPASS: busybox-binary: /opt/bin/busybox present and executes\nPASS: opt-sh: /opt/bin/sh present and executes\nPASS: applet-chmod: /opt/bin/chmod resolves to an executable file\nPASS: applet-ln: /opt/bin/ln resolves to an executable file\nPASS: applet-rm: /opt/bin/rm resolves to an executable file\nPASS: applet-cp: /opt/bin/cp resolves to an executable file\nPASS: applet-mv: /opt/bin/mv resolves to an executable file\nPASS: applet-ls: /opt/bin/ls resolves to an executable file\nPASS: applet-cat: /opt/bin/cat resolves to an executable file\nPASS: applet-grep: /opt/bin/grep resolves to an executable file\nPASS: applet-sed: /opt/bin/sed resolves to an executable file\nPASS: applet-awk: /opt/bin/awk resolves to an executable file\nPASS: applet-wget: /opt/bin/wget resolves to an executable file\nWARN: wget-capability: /opt/bin/wget points at busybox: the BusyBox wget applet has no HTTPS support, https feeds will fail with 'wget returned 1' (Entware #887)\nUNKNOWN: opkg-view: opkg did not report busybox as 'install ok installed'; the package database may be damaged or mid-transaction",
+      "preflight_rc": 2
+    }
+  ]
+}

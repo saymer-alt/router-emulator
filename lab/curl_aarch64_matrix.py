@@ -83,7 +83,7 @@ def after_scenario_factory(args, recorder, phases):
             guest.command("mkdir -p /opt/lab")
             guest_put(guest, "/opt/lab/preflight.sh", args.preflight_data)
             guest.command("/opt/bin/busybox sha256sum /opt/lab/preflight.sh"
-                          " | /opt/bin/busybox grep -q %s" % args.preflight_sha)
+                          " | /opt/bin/busybox grep -q %s" % args.preflight_sha256)
             for guest_path, data, sha in (
                     ("/opt/lab/libcurl-model.ipk", args.model_ipk_data, MODEL_IPK_SHA),
                     ("/opt/lab/libcurl-real.ipk", args.libcurl_ipk_data, LIBCURL_IPK_SHA)):
@@ -132,6 +132,7 @@ def main():
     workspace.mkdir(mode=0o700, exist_ok=args.skip_build)
     credentials = json.loads(Path(args.credentials_file).read_text(encoding="utf8"))
 
+    Path(args.cache_dir).mkdir(parents=True, exist_ok=True)
     preflight_data = Path(args.preflight_file).read_bytes()
     if hashlib.sha256(preflight_data).hexdigest() != args.preflight_sha256:
         raise ValueError("preflight digest mismatch (fail closed)")
