@@ -6,10 +6,11 @@ import tempfile
 import unittest
 
 from lab.mt7621.kas_smoke import (
-    classify_failure, write_public, missing_required_components,
-    guarded_refusal_proven, lab_only_without_ext_utils_guard,
-    verified_mihomo_version, matched_installer_error,
-    mihomo_output_categories, mihomo_output_marker,
+    classify_failure, classify_installer_failure, write_public,
+    missing_required_components, guarded_refusal_proven,
+    lab_only_without_ext_utils_guard, verified_mihomo_version,
+    matched_installer_error, mihomo_output_categories, mihomo_output_marker,
+    mihomo_head_marker, MIHOMO_HEAD_MARKER_VALUES,
     require_exact_lab_component_gap, LAB_EXT_UTILS_GUARD,
     LAB_EXT_UTILS_DISABLED,
 )
@@ -51,8 +52,14 @@ class Mt7621KASGuestContracts(unittest.TestCase):
                                         "kas_magitrickle_feed",
                                         "socat_package_installed", "magitrickle_package_installed",
                                         "magitrickle_daemon_running",
-                                        "magitrickle_init_script_present"})
-            self.assertEqual(rec["schema"], "mt7621-kas-smoke-v2")
+                                        "magitrickle_init_script_present",
+                                        "mihomo_output_head_marker",
+                                        "mihomo_stdout_size", "mihomo_stderr_size",
+                                        "kas_https_stage", "kas_https_dns_configured",
+                                        "kas_https_clock_synced",
+                                        "kas_https_ca_trust_applied",
+                                        "kas_https_helper_tls_verified"})
+            self.assertEqual(rec["schema"], "mt7621-kas-smoke-v3")
             self.assertFalse(rec["kas_installed"])
             self.assertEqual(rec["kas_ref"], ref)
             self.assertFalse(rec["lab_ext_utils_exception_applied"])
@@ -74,6 +81,14 @@ class Mt7621KASGuestContracts(unittest.TestCase):
             self.assertFalse(rec["magitrickle_package_installed"])
             self.assertFalse(rec["magitrickle_daemon_running"])
             self.assertFalse(rec["magitrickle_init_script_present"])
+            self.assertIsNone(rec["mihomo_output_head_marker"])
+            self.assertIsNone(rec["mihomo_stdout_size"])
+            self.assertIsNone(rec["mihomo_stderr_size"])
+            self.assertFalse(rec["kas_https_stage"])
+            self.assertFalse(rec["kas_https_dns_configured"])
+            self.assertFalse(rec["kas_https_clock_synced"])
+            self.assertFalse(rec["kas_https_ca_trust_applied"])
+            self.assertFalse(rec["kas_https_helper_tls_verified"])
 
     def test_report_exposes_only_allowed_actual_base_install_ids(self):
         with tempfile.TemporaryDirectory() as td:
@@ -257,3 +272,124 @@ class Mt7621KASGuestContracts(unittest.TestCase):
             "", "fatal error: unexpected signal"), "fatal error:")
         self.assertIsNone(mihomo_output_marker("", "completely unrelated"))
         self.assertIsNone(mihomo_output_marker(None, None))
+
+    def test_mihomo_head_marker_matches_only_pinned_constants(self):
+        self.assertEqual(mihomo_head_marker(
+            "Mihomo Meta 1.19.33 linux mipsle"), "Mihomo Meta")
+        self.assertEqual(mihomo_head_marker(
+            "panic: should never be called\n\ngoroutine 1 [running]:"),
+            "panic: should never be called")
+        self.assertEqual(mihomo_head_marker(
+            "panic: runtime error: invalid memory address"), "panic:")
+        self.assertEqual(mihomo_head_marker(
+            "fatal error: unexpected signal"), "fatal error:")
+        self.assertEqual(mihomo_head_marker(
+            "runtime: out of memory: cannot allocate"), "runtime:")
+        self.assertEqual(mihomo_head_marker(
+            "futexwakeup addr=0x1006 returned -38"), "futexwakeup addr=")
+        self.assertEqual(mihomo_head_marker(
+            "goroutine 1 [running]:\nmain.main()"), "goroutine")
+        self.assertIsNone(mihomo_head_marker("completely unrelated"))
+        self.assertIsNone(mihomo_head_marker(None))
+
+    def test_head_marker_values_are_stripped_constants(self):
+        self.assertIn("panic:", MIHOMO_HEAD_MARKER_VALUES)
+        self.assertIn("Mihomo Meta", MIHOMO_HEAD_MARKER_VALUES)
+        self.assertTrue(all(value == value.strip()
+                            for value in MIHOMO_HEAD_MARKER_VALUES))
+
+    def test_final_err_wins_over_early_mihomo_warn(self):
+        # Run 44120337317: the early GitHub Mihomo WARN printed before the
+        # successful Entware fallback made the legacy classifier report
+        # IPK_UNAVAILABLE although the installer died later on the MagiTrickle
+        # HTTPS helper. The final pinned err literal must decide the category.
+        output = ("[WARN] Mihomo install from the downloaded GitHub package failed\n"
+                  "[WARN] GitHub Mihomo package unavailable; Entware fallback used\n"
+                  "[ERROR] Failed to download MagiTrickle repository helper through curl/wget\n")
+        self.assertEqual(classify_installer_failure(
+            1, output,
+            "Failed to download MagiTrickle repository helper through curl/wget"),
+            "MAGITRICKLE_HELPER_DOWNLOAD_FAILED")
+
+    def test_classifier_maps_every_pinned_final_err_literal(self):
+        pairs = {
+            "Mihomo install failed: GitHub package unavailable and Entware feed fallback failed":
+                "MIHOMO_INSTALL_FAILED",
+            "Mihomo package installation completed but no executable canonical binary was found":
+                "MIHOMO_BINARY_MISSING",
+            "Downloaded MagiTrickle repository helper failed shell syntax validation":
+                "MAGITRICKLE_HELPER_SYNTAX_FAILED",
+            "Failed to add MagiTrickle package repository":
+                "MAGITRICKLE_HELPER_EXEC_FAILED",
+            "opkg update after changing the MagiTrickle repository failed":
+                "MAGITRICKLE_FEED_UPDATE_FAILED",
+            "MagiTrickle package is not present after installation":
+                "MAGITRICKLE_INSTALL_FAILED",
+            "MagiTrickle init script missing after installation":
+                "MAGITRICKLE_INSTALL_FAILED",
+            "MagiTrickle start failed":
+                "MAGITRICKLE_START_FAILED",
+        }
+        for prefix, category in pairs.items():
+            with self.subTest(prefix=prefix):
+                self.assertEqual(classify_installer_failure(
+                    1, "[ERROR] " + prefix, prefix), category)
+
+    def test_failed_to_install_is_disambiguated_by_pinned_package_names(self):
+        self.assertEqual(classify_installer_failure(
+            1, "[ERROR] Failed to install magitrickle", "Failed to install"),
+            "MAGITRICKLE_INSTALL_FAILED")
+        self.assertEqual(classify_installer_failure(
+            1, "[ERROR] Failed to install mihomo", "Failed to install"),
+            "MIHOMO_INSTALL_FAILED")
+        # Base deps (pkg_ensure) keep the legacy category.
+        self.assertEqual(classify_installer_failure(
+            1, "[ERROR] Failed to install curl", "Failed to install"),
+            "IPK_UNAVAILABLE")
+        # A guest-echoed installer-like line for an unknown package never
+        # mints a new category.
+        self.assertEqual(classify_installer_failure(
+            1, "[ERROR] Failed to install untrusted", "Failed to install"),
+            "IPK_UNAVAILABLE")
+
+    def test_early_warn_without_final_err_keeps_legacy_category(self):
+        # The exact WARN literal from the pinned installer (line 1904) that
+        # the legacy classifier mapped to IPK_UNAVAILABLE.
+        self.assertEqual(classify_installer_failure(
+            1, "[WARN] GitHub Mihomo package unavailable, trying Entware feed "
+               "fallback (last resort)...", None), "IPK_UNAVAILABLE")
+        self.assertEqual(classify_installer_failure(
+            1, "opkg update failed", None), "OPKG_FEED_UNAVAILABLE")
+        self.assertEqual(classify_installer_failure(
+            1, "unrelated output", None), "INSTALLER_EXIT_NONZERO")
+
+    def test_success_with_early_warn_is_completed(self):
+        self.assertEqual(classify_installer_failure(
+            0, "[WARN] Mihomo install from the downloaded GitHub package failed\n"
+               "=== Keenetic Auto Setup ===\n[OK] Done", None),
+            "INSTALLER_COMPLETED")
+
+    def test_classifier_never_returns_unpinned_values(self):
+        allowed = {"INSTALLER_COMPLETED", "KEENETICOS_COMPONENTS_MISSING",
+                   "OPKG_FEED_UNAVAILABLE", "IPK_UNAVAILABLE",
+                   "MIPSEL_ABI_UNSUPPORTED", "PINNED_ASSET_UNAVAILABLE",
+                   "SUCCESS_MARKER_MISSING", "INSTALLER_EXIT_NONZERO",
+                   "MIHOMO_INSTALL_FAILED", "MIHOMO_BINARY_MISSING",
+                   "MAGITRICKLE_HELPER_DOWNLOAD_FAILED",
+                   "MAGITRICKLE_HELPER_SYNTAX_FAILED",
+                   "MAGITRICKLE_HELPER_EXEC_FAILED",
+                   "MAGITRICKLE_FEED_UPDATE_FAILED",
+                   "MAGITRICKLE_INSTALL_FAILED", "MAGITRICKLE_START_FAILED"}
+        probes = [
+            (0, "[OK] Done", None), (1, "[ERROR] Failed to install mihomo",
+                                     "Failed to install"),
+            (1, "[ERROR] MagiTrickle start failed", "MagiTrickle start failed"),
+            (1, "[WARN] GitHub Mihomo package unavailable", None),
+            (1, "architecture cannot be supported", None),
+            (0, "no marker", None), (1, "", ""),
+            (1, "download failed for unknown thing", None),
+        ]
+        for code, output, prefix in probes:
+            with self.subTest(code=code, output=output):
+                self.assertIn(classify_installer_failure(code, output, prefix),
+                              allowed)

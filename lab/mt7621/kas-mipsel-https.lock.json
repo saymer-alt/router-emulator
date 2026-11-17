@@ -1,0 +1,37 @@
+{
+  "schema": "mt7621-kas-mipsel-https-v1",
+  "for_kas_ref": "2fcd16089374604e10c201c6cd5a805fba3b100d",
+  "guest_arch": "mipsel",
+  "helper_route": {
+    "url": "https://bin.magitrickle.dev/packages/add_repo.sh",
+    "fetch_url": "https://bin.magitrickle.dev/packages/add_repo.sh",
+    "filename": "magitrickle-add-repo.sh",
+    "sha256": "23a3a5ed92da77b79a2795ad16a7769787e8c5121023599f07c3bfcd58a9e766"
+  },
+  "feed_records": [
+    {
+      "url": "http://bin.magitrickle.dev/packages/entware/mipsel-3.4/Packages.gz",
+      "fetch_url": "https://bin.magitrickle.dev/packages/entware/mipsel-3.4/Packages.gz",
+      "filename": "magitrickle-mipsel-3.4-Packages.gz",
+      "sha256": "c977c9e3d65551ae1ba8809a9532518b4389269063694f219f97655ce506337f"
+    },
+    {
+      "url": "http://bin.magitrickle.dev/packages/entware/mipsel-3.4_kn/Packages.gz",
+      "fetch_url": "https://bin.magitrickle.dev/packages/entware/mipsel-3.4_kn/Packages.gz",
+      "filename": "magitrickle-mipsel-3.4_kn-Packages.gz",
+      "sha256": "3dbd51f1ff78bdf7ca53b663aa6d125f36e57afd3e8bd8006e463e97aca8da6d"
+    },
+    {
+      "url": "http://bin.magitrickle.dev/packages/entware/mipsel-3.4/magitrickle_0.8.2-1_entware_mipsel-3.4.ipk",
+      "fetch_url": "https://bin.magitrickle.dev/packages/entware/mipsel-3.4/magitrickle_0.8.2-1_entware_mipsel-3.4.ipk",
+      "filename": "magitrickle_0.8.2-1_entware_mipsel-3.4.ipk",
+      "sha256": "35dd3ae42cce54ba4952f9f579782bb7e174dd58efece19fa26e17491b75c5ac"
+    },
+    {
+      "url": "http://bin.magitrickle.dev/packages/entware/mipsel-3.4_kn/magitrickle_0.8.2-1_entware_mipsel-3.4_kn.ipk",
+      "fetch_url": "https://bin.magitrickle.dev/packages/entware/mipsel-3.4_kn/magitrickle_0.8.2-1_entware_mipsel-3.4_kn.ipk",
+      "filename": "magitrickle_0.8.2-1_entware_mipsel-3.4_kn.ipk",
+      "sha256": "5a10083cc063731536d8c7820c008348e99a16cf821534f51f1a415f50421c0e"
+    }
+  ]
+}

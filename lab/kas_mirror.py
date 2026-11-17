@@ -40,10 +40,10 @@ def load_sources(repository, revision):
     return sources
 
 
-def assets(cache):
-    lock = json.loads(Path(__file__).with_name('kas-assets.lock.json').read_text())
+def assets_from_records(records, cache):
+    """Route table for an explicit record list; digests fail closed."""
     routes = {}
-    for record in lock['assets']:
+    for record in records:
         if 'fixture' in record:
             data = Path(__file__).parent.joinpath(record['fixture']).read_bytes()
         else:
@@ -79,10 +79,22 @@ def assets(cache):
     return routes
 
 
+def assets(cache):
+    """Default route table: the shared pinned KAS asset lock (aarch64 lab)."""
+    lock = json.loads(Path(__file__).with_name('kas-assets.lock.json').read_text())
+    return assets_from_records(lock['assets'], cache)
+
+
 class KASMirror:
-    def __init__(self, repository, revision, private, cache):
+    def __init__(self, repository, revision, private, cache, asset_records=None):
         self.sources = load_sources(repository, revision)
-        self.routes = assets(cache)
+        # asset_records=None keeps the shared aarch64 lock behavior byte-for-
+        # byte; other flows (e.g. the MIPSel KAS stage) pass an explicit
+        # record list so they neither fetch nor serve foreign-arch assets.
+        if asset_records is None:
+            self.routes = assets(cache)
+        else:
+            self.routes = assets_from_records(asset_records, cache)
         for path, data in self.sources.items():
             self.routes[('https', DOMAINS[0], '/saymer-alt/keenetic-auto-setup/' + revision + '/' + path)] = data
             self.routes[('https', DOMAINS[1], '/repos/saymer-alt/keenetic-auto-setup/contents/' + path + '?ref=' + revision)] = data

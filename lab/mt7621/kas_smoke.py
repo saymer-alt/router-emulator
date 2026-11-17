@@ -11,8 +11,11 @@ throwaway in-memory copy after guest EXT4 and component checks; this mode
 is NEVER suitable for real routers or for production KAS acceptance.
 """
 import argparse
+import calendar
 import hashlib
 import json
+import time
+from contextlib import ExitStack
 from pathlib import Path
 import re
 from types import SimpleNamespace
@@ -27,6 +30,9 @@ from lab.mt7621.kas_magitrickle_deps import (
 )
 from lab.mt7621.kas_mihomo_deps import (
     MIHOMO_LOCK, MIHOMO_VERSION, validated_kas_mihomo_overlay,
+)
+from lab.mt7621.kas_mipsel_https import (
+    HELPER_SHA256, validated_kas_mipsel_https_mirror,
 )
 from lab.mirror import Mirror
 from lab.run import run
@@ -146,6 +152,56 @@ def matched_installer_error(output, source):
     return best
 
 
+FINAL_ERR_CATEGORIES = (
+    # err() literals from the pinned installer mapped to the operation that
+    # actually terminated it. matched_installer_error() returns the longest
+    # constant prefix, so the final err literal always wins over the earlier
+    # WARN lines (e.g. the GitHub Mihomo warning printed before a successful
+    # Entware fallback install). All categories are fixed enum values.
+    ("Mihomo install failed: GitHub package unavailable and Entware feed fallback failed",
+     "MIHOMO_INSTALL_FAILED"),
+    ("Mihomo package installation completed but no executable canonical binary was found",
+     "MIHOMO_BINARY_MISSING"),
+    ("Failed to download MagiTrickle repository helper through curl/wget",
+     "MAGITRICKLE_HELPER_DOWNLOAD_FAILED"),
+    ("Downloaded MagiTrickle repository helper failed shell syntax validation",
+     "MAGITRICKLE_HELPER_SYNTAX_FAILED"),
+    ("Failed to add MagiTrickle package repository",
+     "MAGITRICKLE_HELPER_EXEC_FAILED"),
+    ("opkg update after changing the MagiTrickle repository failed",
+     "MAGITRICKLE_FEED_UPDATE_FAILED"),
+    ("MagiTrickle package is not present after installation",
+     "MAGITRICKLE_INSTALL_FAILED"),
+    ("MagiTrickle init script missing after installation",
+     "MAGITRICKLE_INSTALL_FAILED"),
+    ("MagiTrickle start failed",
+     "MAGITRICKLE_START_FAILED"),
+)
+
+
+def classify_installer_failure(code, output, err_prefix):
+    """Classify by the terminating pinned err(), not by an earlier WARN.
+
+    Legacy heuristic categories remain the fallback when no pinned err
+    literal matched, so existing behaviors (guarded refusal, feed failure)
+    are preserved unchanged.
+    """
+    if code == 0 and "[OK] Done" in output:
+        return "INSTALLER_COMPLETED"
+    if err_prefix == "Failed to install":
+        # pkg_ensure emits "Failed to install $_pkg"; only the fixed KAS
+        # package names may complete the pinned literal in guest output.
+        if re.search(r"\[ERROR\] Failed to install magitrickle\b", output):
+            return "MAGITRICKLE_INSTALL_FAILED"
+        if re.search(r"\[ERROR\] Failed to install mihomo\b", output):
+            return "MIHOMO_INSTALL_FAILED"
+        return "IPK_UNAVAILABLE"
+    for prefix, category in FINAL_ERR_CATEGORIES:
+        if err_prefix == prefix:
+            return category
+    return classify_failure(code, output)
+
+
 MIHOMO_OUTPUT_MARKERS = (
     # Genuine version banner (printed on the -v success path).
     "Mihomo Meta",
@@ -184,6 +240,42 @@ def mihomo_output_categories(stdout, stderr):
             re.search(r"(?<![0-9])v?1\.19\.33(?![0-9])", output) is not None)
 
 
+MIHOMO_HEAD_MARKERS = (
+    # Success banner head (the -v fast path).
+    "Mihomo Meta",
+    # mihomo resolver tripwire panic (its specific message first).
+    "panic: should never be called",
+    # Go flag parse failure.
+    "flag provided but not defined",
+    # Generic Go panic header.
+    "panic: ",
+    # Go runtime throw header.
+    "fatal error: ",
+    # Go runtime message (e.g. "runtime: out of memory").
+    "runtime: ",
+    # Go futexwakeup failure path (prints before its deliberate fault).
+    "futexwakeup addr=",
+    # Bare goroutine dump: the crash header was not in the captured head.
+    "goroutine ",
+)
+MIHOMO_HEAD_MARKER_VALUES = tuple(marker.rstrip() for marker in MIHOMO_HEAD_MARKERS)
+
+
+def mihomo_head_marker(head_text):
+    """Classify the first captured bytes against pinned constants only.
+
+    The SSH rings keep only the tail of long output, so the crash header is
+    read from a bounded head capture instead. The raw head never leaves the
+    private log; only a fixed enum constant is published.
+    """
+    if not isinstance(head_text, str):
+        return None
+    for marker in MIHOMO_HEAD_MARKERS:
+        if marker in head_text:
+            return marker.rstrip()
+    return None
+
+
 def verified_mihomo_version(exit_code, stdout, stderr):
     """Only genuine native binary -v success for the pinned Mihomo version."""
     if exit_code != 0:
@@ -215,14 +307,21 @@ def write_public(path, kas_ref, phase, reason, exit_code=None, component_gap=Non
                  socat_package_installed=False,
                  magitrickle_package_installed=False,
                  magitrickle_daemon_running=False,
-                 magitrickle_init_script_present=False):
+                 magitrickle_init_script_present=False,
+                 mihomo_output_head_marker=None,
+                 mihomo_stdout_size=None, mihomo_stderr_size=None,
+                 kas_https_stage=False, kas_https_dns_configured=False,
+                 kas_https_clock_synced=False,
+                 kas_https_ca_trust_applied=False,
+                 kas_https_helper_tls_verified=False):
     """No guest output, passwords, paths, script bodies, or arbitrary diagnostics.
 
     installer_error_prefix is a constant prefix extracted from the pinned KAS
-    source itself; every other field is a boolean, a fixed path bucket or an
-    integer exit code observed from allowlisted probes.
+    source itself; mihomo_output_head_marker is a constant from the pinned
+    upstream output enum; every other field is a boolean, a fixed path bucket
+    or an integer exit code / byte count observed from allowlisted probes.
     """
-    record = {"schema": "mt7621-kas-smoke-v2", "kas_ref": kas_ref,
+    record = {"schema": "mt7621-kas-smoke-v3", "kas_ref": kas_ref,
               "phase": phase, "reason": reason, "kas_installed": phase == "PASS",
               "exit_code": exit_code if isinstance(exit_code, int) else None,
               "component_inventory_seen": component_gap is not None,
@@ -258,6 +357,18 @@ def write_public(path, kas_ref, phase, reason, exit_code=None, component_gap=Non
               "magitrickle_package_installed": bool(magitrickle_package_installed),
               "magitrickle_daemon_running": bool(magitrickle_daemon_running),
               "magitrickle_init_script_present": bool(magitrickle_init_script_present),
+              "mihomo_output_head_marker": (mihomo_output_head_marker
+                                            if mihomo_output_head_marker in
+                                            MIHOMO_HEAD_MARKER_VALUES else None),
+              "mihomo_stdout_size": (mihomo_stdout_size
+                                     if isinstance(mihomo_stdout_size, int) else None),
+              "mihomo_stderr_size": (mihomo_stderr_size
+                                     if isinstance(mihomo_stderr_size, int) else None),
+              "kas_https_stage": bool(kas_https_stage),
+              "kas_https_dns_configured": bool(kas_https_dns_configured),
+              "kas_https_clock_synced": bool(kas_https_clock_synced),
+              "kas_https_ca_trust_applied": bool(kas_https_ca_trust_applied),
+              "kas_https_helper_tls_verified": bool(kas_https_helper_tls_verified),
               "source_variant": ("DISPOSABLE_LAB_EXT_UTILS_EXCEPTION"
                                  if lab_exception_applied else "PINNED_UNMODIFIED")}
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -268,7 +379,8 @@ def write_public(path, kas_ref, phase, reason, exit_code=None, component_gap=Non
 def guest_probe(credentials, workspace, deadline, source, kas_ref, public,
                 guarded_refusal_expected=False, lab_ext_utils_exception=False,
                 kas_base_deps_feed=False, kas_mihomo_feed=False,
-                kas_magitrickle_feed=False):
+                kas_magitrickle_feed=False, kas_https_mirror=False,
+                https_ca=None):
     """Trusted run.py post-scenario hook; VM remains alive for the whole probe."""
     from lab.guest import Guest  # lazy: unit tests do not require Paramiko
     guest = Guest(credentials, workspace, deadline=deadline)
@@ -290,6 +402,13 @@ def guest_probe(credentials, workspace, deadline, source, kas_ref, public,
     magitrickle_package_installed = False
     magitrickle_daemon_running = False
     magitrickle_init_script_present = False
+    mihomo_output_head_marker_value = None
+    mihomo_stdout_size = None
+    mihomo_stderr_size = None
+    kas_https_dns_configured = False
+    kas_https_clock_synced = False
+    kas_https_ca_trust_applied = False
+    kas_https_helper_tls_verified = False
     if kas_magitrickle_feed and not kas_mihomo_feed:
         raise ValueError("MagiTrickle IPK lab overlay requires the Mihomo feed")
     if kas_mihomo_feed and not kas_base_deps_feed:
@@ -298,6 +417,11 @@ def guest_probe(credentials, workspace, deadline, source, kas_ref, public,
         raise ValueError('KAS base extra packages only allowed with lab ext-utils exception')
     if guarded_refusal_expected and lab_ext_utils_exception:
         raise ValueError("lab exception is incompatible with guarded-refusal test")
+    if kas_https_mirror and not kas_magitrickle_feed:
+        raise ValueError("HTTPS mirror stage requires the MagiTrickle feed")
+    if kas_https_mirror and (not isinstance(https_ca, bytes)
+                             or not https_ca.startswith(b"-----BEGIN CERTIFICATE-----")):
+        raise ValueError("HTTPS mirror stage requires the disposable lab CA certificate")
     try:
         guest.connect(120)
         phase, reason = "BLOCKED", "ENTWARE_PREFLIGHT_UNAVAILABLE"
@@ -352,6 +476,54 @@ def guest_probe(credentials, workspace, deadline, source, kas_ref, public,
         guest_source_verified = True
         print("KAS MIPSEL SOURCE: pinned checkout transferred and verified", flush=True)
 
+        if kas_https_mirror:
+            # Disposable-guest trust setup for the REAL KAS HTTPS stage. The
+            # pinned feed delivers the same ca-bundle and curl the installer
+            # itself installs, the disposable lab CA is appended to the
+            # guest's bundle (TLS verification stays fully ON: no -k, no
+            # insecure flag, no KAS source change), and bin.magitrickle.dev
+            # resolves only through the lab loopback mapping.
+            phase, reason = "BLOCKED", "HTTPS_STAGE_SETUP_FAILED"
+            guest.command('/bin/ndmc -c "service dns-proxy"', timeout=30)
+            guest.command('/bin/ndmc -c "ip host bin.magitrickle.dev 192.168.1.100"',
+                          timeout=30)
+            config = guest.command('/bin/ndmc -c "show running-config"', timeout=45)
+            kas_https_dns_configured = re.search(
+                r"(?m)^ip host bin\.magitrickle\.dev 192\.168\.1\.100$",
+                config) is not None
+            guest.command("/opt/bin/opkg update", timeout=180)
+            guest.command("/opt/bin/opkg install ca-bundle curl", timeout=240)
+            stamp = guest.command(
+                "curl -fSs --connect-timeout 2 --max-time 5 "
+                "http://192.168.1.100/lab/clock", timeout=30).strip()
+            if re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", stamp):
+                guest.command("date -s '" + stamp + "'", timeout=30)
+                epoch_out = guest.command("date -u +%s", timeout=30).strip()
+                if epoch_out.isdigit():
+                    expected = calendar.timegm(time.strptime(
+                        stamp, "%Y-%m-%d %H:%M:%S"))
+                    kas_https_clock_synced = abs(int(epoch_out) - expected) <= 5
+            guest.command("umask 077; cat > /opt/lab/ca.pem; chmod 600 /opt/lab/ca.pem",
+                          timeout=60, input_data=https_ca)
+            ca_digest = guest.command("/opt/bin/busybox sha256sum /opt/lab/ca.pem",
+                                      timeout=30).split()[0]
+            if ca_digest != hashlib.sha256(https_ca).hexdigest():
+                raise RuntimeError("lab CA transfer digest mismatch")
+            bundle = "/opt/etc/ssl/certs/ca-certificates.crt"
+            bundle_size = int(guest.command("wc -c < " + bundle, timeout=30))
+            guest.command("cat /opt/lab/ca.pem >> " + bundle, timeout=30)
+            kas_https_ca_trust_applied = int(guest.command(
+                "wc -c < " + bundle, timeout=30)) == bundle_size + len(https_ca)
+            helper_digest = guest.command(
+                "curl -fSs --max-time 20 "
+                "https://bin.magitrickle.dev/packages/add_repo.sh | sha256sum",
+                timeout=60).split()[0]
+            kas_https_helper_tls_verified = helper_digest == HELPER_SHA256
+            print("KAS MIPSEL HTTPS STAGE: dns=%s clock=%s ca=%s tls=%s" %
+                  (kas_https_dns_configured, kas_https_clock_synced,
+                   kas_https_ca_trust_applied, kas_https_helper_tls_verified),
+                  flush=True)
+
         # A real KAS installation attempt. No host-side mock or fake PASS.
         # The guest has an offline WAN and a pinned 25-IPK local feed. Current
         # Ported images may not have all production KeeneticOS components.
@@ -360,9 +532,10 @@ def guest_probe(credentials, workspace, deadline, source, kas_ref, public,
                    " PATH=/opt/bin:/opt/sbin:/bin:/sbin:/usr/bin:/usr/sbin" +
                    " sh /opt/lab/install.sh disk")
         exit_code, stdout, stderr = guest.execute(command, timeout=300)
-        category = classify_failure(exit_code, stdout + "\n" + stderr)
-        installer_error_prefix = matched_installer_error(stdout + "\n" + stderr,
-                                                         source)
+        combined = stdout + "\n" + stderr
+        installer_error_prefix = matched_installer_error(combined, source)
+        category = classify_installer_failure(exit_code, combined,
+                                              installer_error_prefix)
         if installer_error_prefix:
             print("KAS INSTALLER ERR PREFIX MATCHED (pinned source constant)",
                   flush=True)
@@ -393,17 +566,45 @@ def guest_probe(credentials, workspace, deadline, source, kas_ref, public,
                         else "none")
                     if mihomo_binary_path != "none":
                         binary = path_out.splitlines()[0].strip()
-                        ver_rc, ver_out, ver_err = guest.execute(
-                            binary + " -v", timeout=75)
-                        mihomo_probe_exit_code = ver_rc
-                        (mihomo_output_has_name,
-                         mihomo_output_has_version) = mihomo_output_categories(
-                            ver_out, ver_err)
+                        # Full -v capture lives in the disposable guest tmpfs:
+                        # the SSH rings keep only the tail (64 KiB stderr) and
+                        # can discard a crash header. Publish only the exit
+                        # code, byte counts and pinned constants; the files
+                        # never leave the private SSH log and are removed.
+                        rc_out = guest.command(
+                            "rm -f /tmp/.mihomo-v.out /tmp/.mihomo-v.err; "
+                            + binary + " -v >/tmp/.mihomo-v.out "
+                            "2>/tmp/.mihomo-v.err; printf 'rc=%s\\n' \"$?\"",
+                            timeout=90).strip()
+                        match = re.fullmatch(r"rc=(\d+)", rc_out)
+                        if match:
+                            mihomo_probe_exit_code = int(match.group(1))
+                        sizes = [row.strip() for row in guest.command(
+                            "wc -c < /tmp/.mihomo-v.out; wc -c < /tmp/.mihomo-v.err",
+                            timeout=30).splitlines()]
+                        if len(sizes) == 2 and all(row.isdigit() for row in sizes):
+                            mihomo_stdout_size = int(sizes[0])
+                            mihomo_stderr_size = int(sizes[1])
+                        head_out = guest.command(
+                            "cat /tmp/.mihomo-v.out /tmp/.mihomo-v.err "
+                            "2>/dev/null | head -c 240", timeout=30)
+                        mihomo_output_head_marker_value = mihomo_head_marker(
+                            head_out)
                         mihomo_output_marker_value = mihomo_output_marker(
-                            ver_out, ver_err)
+                            head_out, "")
+                        mihomo_output_has_name = "NAME_OK" in guest.command(
+                            "grep -iq mihomo /tmp/.mihomo-v.out /tmp/.mihomo-v.err "
+                            "2>/dev/null && printf NAME_OK", timeout=30)
+                        mihomo_output_has_version = "VER_OK" in guest.command(
+                            "grep -Fq '1.19.33' /tmp/.mihomo-v.out /tmp/.mihomo-v.err "
+                            "2>/dev/null && printf VER_OK", timeout=30)
                         mihomo_binary_version_verified = (
-                            ver_rc == 0 and mihomo_output_has_name
+                            mihomo_probe_exit_code == 0
+                            and mihomo_output_has_name
                             and mihomo_output_has_version)
+                        guest.command(
+                            "rm -f /tmp/.mihomo-v.out /tmp/.mihomo-v.err",
+                            timeout=30)
                 print("KAS MIPSEL MIHOMO: opkg=%s binary_version=%s probe_rc=%s "
                       "path=%s name=%s version=%s marker=%s" %
                       (mihomo_package_installed, mihomo_binary_version_verified,
@@ -411,7 +612,7 @@ def guest_probe(credentials, workspace, deadline, source, kas_ref, public,
                        mihomo_output_has_name, mihomo_output_has_version,
                        mihomo_output_marker_value),
                       flush=True)
-            if kas_magitrickle_feed:
+            if kas_magitrickle_feed and not kas_https_mirror:
                 # Lab-direct pinned-dependency probe. The real installer's
                 # MagiTrickle stage downloads an HTTPS helper this offline
                 # guest cannot reach; installing the two SHA256-pinned IPKs
@@ -420,6 +621,16 @@ def guest_probe(credentials, workspace, deadline, source, kas_ref, public,
                 install_rc, _install_out, _install_err = guest.execute(
                     "/opt/bin/opkg install socat; "
                     "/opt/bin/opkg install magitrickle", timeout=240)
+                print("KAS MIPSEL MAGITRICKLE LAB-DIRECT: opkg install rc=%s" %
+                      install_rc, flush=True)
+            elif kas_magitrickle_feed:
+                # HTTPS mode: the real installer runs its own verified
+                # MagiTrickle stage (pinned helper download, feed add, opkg
+                # install, init start); the checks below observe its actual
+                # outcomes only.
+                print("KAS MIPSEL MAGITRICKLE VIA KAS: real installer stage",
+                      flush=True)
+            if kas_magitrickle_feed:
                 installed_now = guest.command("/opt/bin/opkg list-installed",
                                               timeout=45)
                 socat_package_installed = bool(re.search(
@@ -428,10 +639,9 @@ def guest_probe(credentials, workspace, deadline, source, kas_ref, public,
                 magitrickle_package_installed = bool(re.search(
                     r"^magitrickle - " + re.escape(MAGITRICKLE_VERSION) + r"$",
                     installed_now, re.M))
-                print("KAS MIPSEL MAGITRICKLE LAB-DIRECT: opkg install rc=%s "
-                      "socat=%s magitrickle=%s" %
-                      (install_rc, socat_package_installed,
-                       magitrickle_package_installed), flush=True)
+                print("KAS MIPSEL MAGITRICKLE STATE: socat=%s magitrickle=%s" %
+                      (socat_package_installed, magitrickle_package_installed),
+                      flush=True)
                 if magitrickle_package_installed:
                     init_out = guest.command(
                         "test -x /opt/etc/init.d/S99magitrickle && "
@@ -501,7 +711,15 @@ def guest_probe(credentials, workspace, deadline, source, kas_ref, public,
                      socat_package_installed=socat_package_installed,
                      magitrickle_package_installed=magitrickle_package_installed,
                      magitrickle_daemon_running=magitrickle_daemon_running,
-                     magitrickle_init_script_present=magitrickle_init_script_present)
+                     magitrickle_init_script_present=magitrickle_init_script_present,
+                     mihomo_output_head_marker=mihomo_output_head_marker_value,
+                     mihomo_stdout_size=mihomo_stdout_size,
+                     mihomo_stderr_size=mihomo_stderr_size,
+                     kas_https_stage=kas_https_mirror,
+                     kas_https_dns_configured=kas_https_dns_configured,
+                     kas_https_clock_synced=kas_https_clock_synced,
+                     kas_https_ca_trust_applied=kas_https_ca_trust_applied,
+                     kas_https_helper_tls_verified=kas_https_helper_tls_verified)
 
 
 def main():
@@ -523,6 +741,8 @@ def main():
                     help="ONLY disposable Ported 5.1.8 guest: pin native MIPSel Mihomo in KAS mirror")
     ap.add_argument("--kas-magitrickle", action="store_true",
                     help="ONLY disposable Ported 5.1.8 guest: pin socat+MagiTrickle IPKs and lab-probe native execution")
+    ap.add_argument("--kas-https-mirror", action="store_true",
+                    help="ONLY disposable Ported 5.1.8 guest: serve the pinned MagiTrickle HTTPS helper and feeds through the disposable lab CA mirror so the real KAS MagiTrickle stage runs unmodified")
     args = ap.parse_args()
     if args.expect_guarded_refusal and args.lab_ext_utils_exception:
         ap.error("lab exception and guarded refusal are mutually exclusive")
@@ -532,6 +752,8 @@ def main():
         ap.error("--kas-mihomo requires --kas-base-deps")
     if args.kas_magitrickle and not args.kas_mihomo:
         ap.error("--kas-magitrickle requires --kas-mihomo")
+    if args.kas_https_mirror and not args.kas_magitrickle:
+        ap.error("--kas-https-mirror requires --kas-magitrickle")
     if not PIN.fullmatch(args.kas_ref):
         ap.error("--kas-ref must be full 40-character SHA")
     source = load_sources(args.kas_dir, args.kas_ref)["install.sh"]
@@ -567,15 +789,29 @@ def main():
         # 25+11+1 locks or any production KAS source.
         add_magitrickle_packages(feed, workspace / "cache")
         print("KAS MAGITRICKLE MIPSEL MIRROR: 2 extra verified IPKs", flush=True)
+    tls_mirror = None
+    https_ca = None
+    if args.kas_https_mirror:
+        # Exactly five pinned records (HTTPS helper + both mipsel feed
+        # indexes and IPKs); the disposable lab CA private key never leaves
+        # the workspace and the shared aarch64 asset lock stays untouched.
+        tls_mirror = validated_kas_mipsel_https_mirror(
+            args.kas_dir, args.kas_ref, workspace, workspace / "cache")
+        https_ca = (tls_mirror.private / "ca.pem").read_bytes()
+        print("KAS MIPSEL HTTPS MIRROR: pinned helper and mipsel feed routes verified",
+              flush=True)
     scenario = Path(__file__).resolve().parents[1] / "scenarios" / "ported-mt7621-entware-tz-skip.json"
     public = workspace / "report" / "kas-smoke.json"
-    with Mirror(feed) as port:
+    with ExitStack() as stack:
+        port = stack.enter_context(Mirror(
+            feed, extra_routes=(tls_mirror.http_routes if tls_mirror else None)))
+        tls_port = stack.enter_context(tls_mirror) if tls_mirror else None
         return run(SimpleNamespace(
             scenario=scenario, emulator_root=args.emulator_root,
             nand_dir=args.nand_dir, output_dir=workspace / "report",
             max_seconds=args.max_seconds, preset="xiaomi-mi-router-3g-breed",
             lan_forwards="8080:80;8022:222;8023:23", opt_image=str(image),
-            archive_image=None, mirror_port=port,
+            archive_image=None, mirror_port=port, mirror_tls_port=tls_port,
             credentials_file=args.credentials_file,
             after_scenario=lambda **ctx: guest_probe(args.credentials_file,
                 workspace, ctx["deadline"], source, args.kas_ref, public,
@@ -583,7 +819,9 @@ def main():
                 lab_ext_utils_exception=args.lab_ext_utils_exception,
                 kas_base_deps_feed=args.kas_base_deps,
                 kas_mihomo_feed=args.kas_mihomo,
-                kas_magitrickle_feed=args.kas_magitrickle)))
+                kas_magitrickle_feed=args.kas_magitrickle,
+                kas_https_mirror=args.kas_https_mirror,
+                https_ca=https_ca)))
 
 
 if __name__ == "__main__":

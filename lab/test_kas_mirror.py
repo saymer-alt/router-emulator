@@ -99,6 +99,70 @@ class KASDependencyFetchTests(unittest.TestCase):
                 thread.join(timeout=3)
 
 
+class KASMirrorAssetRecordsTests(unittest.TestCase):
+    """Explicit record lists replace the shared aarch64 lock (MIPSel flow)."""
+
+    def _fixture_repo(self, root):
+        source = root / 'source'
+        source.mkdir()
+        (source / 'install.sh').write_bytes(b'#!/bin/sh\nprintf source-only\n')
+        subprocess.run(['git', 'init', '-q', str(source)], check=True, capture_output=True)
+        subprocess.run(['git', '-C', str(source), 'add', 'install.sh'], check=True)
+        subprocess.run(['git', '-C', str(source), '-c', 'user.name=fixture',
+                        '-c', 'user.email=fixture@invalid', 'commit', '-qm', 'fixture'],
+                       check=True, capture_output=True)
+        return source, subprocess.check_output(
+            ['git', '-C', str(source), 'rev-parse', 'HEAD']).decode().strip()
+
+    def test_explicit_records_serve_pinned_bytes_and_reject_tamper(self):
+        if not shutil.which('openssl'):
+            self.skipTest('OpenSSL required for isolated TLS contract')
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, revision = self._fixture_repo(root)
+            payload = b'pinned-helper-bytes'
+            record = {'url': 'https://bin.magitrickle.dev/packages/add_repo.sh',
+                      'fetch_url': 'https://bin.magitrickle.dev/packages/add_repo.sh',
+                      'filename': 'helper.sh',
+                      'sha256': hashlib.sha256(payload).hexdigest()}
+            cache = root / 'cache'
+            cache.mkdir()
+            (cache / 'helper.sh').write_bytes(payload)
+            mirror = KASMirror(source, revision, root, cache,
+                               asset_records=[record])
+            self.assertEqual(mirror.routes[
+                ('https', 'bin.magitrickle.dev', '/packages/add_repo.sh')], payload)
+            self.assertEqual(mirror.http_routes, {})
+            with mirror as port:
+                context = ssl.create_default_context(cafile=str(mirror.private / 'ca.pem'))
+                with socket.create_connection(('127.0.0.1', port), timeout=5) as raw:
+                    with context.wrap_socket(raw, server_hostname='bin.magitrickle.dev') as conn:
+                        conn.sendall(b'GET /packages/add_repo.sh HTTP/1.0\r\n'
+                                     b'Host: bin.magitrickle.dev\r\n\r\n')
+                        response = b''
+                        while True:
+                            chunk = conn.recv(4096)
+                            if not chunk:
+                                break
+                            response += chunk
+                        self.assertTrue(response.endswith(payload))
+            (cache / 'helper.sh').write_bytes(b'tampered')
+            with self.assertRaises(ValueError):
+                KASMirror(source, revision, root, cache, asset_records=[record])
+
+    def test_fixture_records_route_without_network(self):
+        fixture = Path(__file__).with_name('fixtures') / 'entware-go-release.json'
+        data = fixture.read_bytes()
+        record = {'url': 'http://bin.magitrickle.dev/packages/entware/'
+                         'mipsel-3.4_kn/Packages.gz',
+                  'fixture': 'fixtures/entware-go-release.json',
+                  'filename': 'index.gz',
+                  'sha256': hashlib.sha256(data).hexdigest()}
+        routes = kas_mirror_module.assets_from_records([record], 'cache-ignored')
+        self.assertEqual(routes[('http', 'bin.magitrickle.dev',
+                                 '/packages/entware/mipsel-3.4_kn/Packages.gz')], data)
+
+
 class KASDeliveryTests(unittest.TestCase):
     def test_committed_sources_remain_data_and_tls_checks_hostname(self):
         if not shutil.which('openssl'):

@@ -168,7 +168,7 @@ jobs:
           if not p.is_file():
               raise SystemExit("LAB_PROBE_NOT_REACHED: sanitized report missing")
           r = json.loads(p.read_text())
-          if r.get("schema") != "mt7621-kas-smoke-v2":
+          if r.get("schema") != "mt7621-kas-smoke-v3":
               raise SystemExit("REPORT_SCHEMA_DRIFT")
           if (r.get("source_variant") != "DISPOSABLE_LAB_EXT_UTILS_EXCEPTION"
                   or r.get("lab_ext_utils_exception_applied") is not True
@@ -200,10 +200,11 @@ jobs:
               raise SystemExit("LAB_BLOCKED_MISLABELLED")
           with open(sys.argv[2], "a", encoding="utf8") as out:
               out.write("### Ported 5.1.8: socat 1.8.1.1-1 + MagiTrickle 0.8.2-1 opkg INSTALLED, init script present, daemon running\n")
-              out.write("Mihomo 1.19.33-1: opkg=%s, ELF -v verified=%s (probe_rc=%s, path=%s, output_marker=%s)\n" % (
+              out.write("Mihomo 1.19.33-1: opkg=%s, ELF -v verified=%s (probe_rc=%s, path=%s, output_marker=%s, head=%s, stdout=%s, stderr=%s)\n" % (
                   r.get("mihomo_package_installed"), r.get("mihomo_binary_version_verified"),
                   r.get("mihomo_probe_exit_code"), r.get("mihomo_binary_path"),
-                  r.get("mihomo_output_marker")))
+                  r.get("mihomo_output_marker"), r.get("mihomo_output_head_marker"),
+                  r.get("mihomo_stdout_size"), r.get("mihomo_stderr_size")))
               if r.get("mihomo_binary_version_verified") is not True:
                   out.write("WARNING: MIPSEL_MIHOMO_ELF_UNPROVEN (diagnostic above; not KAS PASS)\n")
               out.write("KAS experimental installer phase: %s; category: %s\n" % (phase, reason))
