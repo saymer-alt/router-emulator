@@ -78,7 +78,7 @@ class Mt7621KASGuestContracts(unittest.TestCase):
                 (0, "Mihomo Meta v1.19.330", ""),
                 (0, "Mihomo Meta v1.19.34", ""),
                 (0, "another 1.19.33", ""),
-                (0, "literal \\bmihomo\\b v1.19.33", ""),
+                (0, "literal mihomox v1.19.33", ""),
                 (127, "", "mihomo: not found")):
             with self.subTest(code=code, stdout=stdout):
                 self.assertFalse(verified_mihomo_version(code, stdout, stderr))
