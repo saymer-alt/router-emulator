@@ -1,0 +1,31 @@
+{
+  "schema": "mt7621-kas-magitrickle-mipsel-v1",
+  "for_kas_ref": "2fcd16089374604e10c201c6cd5a805fba3b100d",
+  "magitrickle_origin": "https://bin.magitrickle.dev/packages/entware/mipsel-3.4_kn/",
+  "expected_magitrickle_version": "0.8.2-1",
+  "expected_socat_version": "1.8.1.1-1",
+  "packages": [
+    {
+      "Package": "socat",
+      "Version": "1.8.1.1-1",
+      "Depends": "libc, libssp, librt, libpthread, libopenssl",
+      "Architecture": "mipsel-3.4",
+      "Filename": "socat_1.8.1.1-1_mipsel-3.4.ipk",
+      "Size": "147555",
+      "SHA256sum": "5ea29a5a92f8cf6e777d9fe50aee028a15e8814ff6f63986c53ece5c780f6b2a",
+      "feed": "entware",
+      "url": "https://bin.entware.net/mipselsf-k3.4/socat_1.8.1.1-1_mipsel-3.4.ipk"
+    },
+    {
+      "Package": "magitrickle",
+      "Version": "0.8.2-1",
+      "Depends": "libc, iptables, socat",
+      "Architecture": "mipsel-3.4_kn",
+      "Filename": "magitrickle_0.8.2-1_entware_mipsel-3.4_kn.ipk",
+      "Size": "2418259",
+      "SHA256sum": "5a10083cc063731536d8c7820c008348e99a16cf821534f51f1a415f50421c0e",
+      "feed": "entware",
+      "url": "https://bin.magitrickle.dev/packages/entware/mipsel-3.4_kn/magitrickle_0.8.2-1_entware_mipsel-3.4_kn.ipk"
+    }
+  ]
+}

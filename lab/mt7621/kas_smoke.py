@@ -21,6 +21,10 @@ from lab.build_entware import add_packages, build
 from lab.mt7621.kas_base_deps import (
     OVERLAY_LOCK, REQUIRED_BASE, validated_kas_base_overlay,
 )
+from lab.mt7621.kas_magitrickle_deps import (
+    MAGITRICKLE_VERSION, SOCAT_VERSION, add_magitrickle_packages,
+    validated_kas_magitrickle_overlay,
+)
 from lab.mt7621.kas_mihomo_deps import (
     MIHOMO_LOCK, MIHOMO_VERSION, validated_kas_mihomo_overlay,
 )
@@ -117,13 +121,46 @@ def classify_failure(code, output):
     return "INSTALLER_EXIT_NONZERO"
 
 
+ERR_LITERAL = re.compile(r'\berr\s+"((?:[^"\\]|\\.)*)"')
+
+
+def matched_installer_error(output, source):
+    """Identify the pinned KAS err() message that fired, from its own source.
+
+    err() exits the installer immediately, so guest output holds at most one
+    [ERROR] message. Only constant prefixes extracted from the pinned
+    installer bytes are ever returned (variable tails are dropped); raw guest
+    output is never published. Longest constant prefix wins so a short
+    literal can never shadow the exact one that fired.
+    """
+    if not isinstance(output, str):
+        return None
+    low = output.lower()
+    best = None
+    for literal in ERR_LITERAL.findall(source.decode("utf-8", "replace")):
+        prefix = literal.split("$", 1)[0].strip()
+        if len(prefix) < 12:
+            continue
+        if prefix.lower() in low and (best is None or len(prefix) > len(best)):
+            best = prefix
+    return best
+
+
+def mihomo_output_categories(stdout, stderr):
+    """Fixed booleans about Mihomo -v output; never the raw guest text."""
+    if not isinstance(stdout, str) or not isinstance(stderr, str):
+        return (False, False)
+    output = stdout + "\n" + stderr
+    return (re.search(r"\bmihomo\b", output, re.I) is not None,
+            re.search(r"(?<![0-9])v?1\.19\.33(?![0-9])", output) is not None)
+
+
 def verified_mihomo_version(exit_code, stdout, stderr):
     """Only genuine native binary -v success for the pinned Mihomo version."""
-    if exit_code != 0 or not isinstance(stdout, str) or not isinstance(stderr, str):
+    if exit_code != 0:
         return False
-    output = stdout + "\n" + stderr
-    return (re.search(r"\bmihomo\b", output, re.I) is not None
-            and re.search(r"(?<![0-9])v?1\.19\.33(?![0-9])", output) is not None)
+    has_name, has_version = mihomo_output_categories(stdout, stderr)
+    return has_name and has_version
 
 
 def guarded_refusal_proven(exit_code, category, component_gap, package_list, no_ownership):
@@ -141,9 +178,21 @@ def write_public(path, kas_ref, phase, reason, exit_code=None, component_gap=Non
                  lab_exception_applied=False, guest_source_verified=False,
                  kas_base_deps_feed=False, installed_base_packages=None,
                  kas_mihomo_feed=False, mihomo_package_installed=False,
-                 mihomo_binary_version_verified=False):
-    """No guest output, passwords, paths, script bodies, or arbitrary diagnostics."""
-    record = {"schema": "mt7621-kas-smoke-v1", "kas_ref": kas_ref,
+                 mihomo_binary_version_verified=False,
+                 installer_error_prefix=None, mihomo_binary_path="none",
+                 mihomo_probe_exit_code=None, mihomo_output_has_name=False,
+                 mihomo_output_has_version=False, kas_magitrickle_feed=False,
+                 socat_package_installed=False,
+                 magitrickle_package_installed=False,
+                 magitrickle_daemon_running=False,
+                 magitrickle_init_script_present=False):
+    """No guest output, passwords, paths, script bodies, or arbitrary diagnostics.
+
+    installer_error_prefix is a constant prefix extracted from the pinned KAS
+    source itself; every other field is a boolean, a fixed path bucket or an
+    integer exit code observed from allowlisted probes.
+    """
+    record = {"schema": "mt7621-kas-smoke-v2", "kas_ref": kas_ref,
               "phase": phase, "reason": reason, "kas_installed": phase == "PASS",
               "exit_code": exit_code if isinstance(exit_code, int) else None,
               "component_inventory_seen": component_gap is not None,
@@ -159,6 +208,23 @@ def write_public(path, kas_ref, phase, reason, exit_code=None, component_gap=Non
               "kas_mihomo_feed": bool(kas_mihomo_feed),
               "mihomo_package_installed": bool(mihomo_package_installed),
               "mihomo_binary_version_verified": bool(mihomo_binary_version_verified),
+              "installer_error_prefix": (installer_error_prefix[:120]
+                                         if isinstance(installer_error_prefix, str)
+                                         else None),
+              "mihomo_binary_path": (mihomo_binary_path
+                                     if mihomo_binary_path in ("none", "opt-sbin",
+                                                               "opt-bin")
+                                     else "none"),
+              "mihomo_probe_exit_code": (mihomo_probe_exit_code
+                                         if isinstance(mihomo_probe_exit_code, int)
+                                         else None),
+              "mihomo_output_has_name": bool(mihomo_output_has_name),
+              "mihomo_output_has_version": bool(mihomo_output_has_version),
+              "kas_magitrickle_feed": bool(kas_magitrickle_feed),
+              "socat_package_installed": bool(socat_package_installed),
+              "magitrickle_package_installed": bool(magitrickle_package_installed),
+              "magitrickle_daemon_running": bool(magitrickle_daemon_running),
+              "magitrickle_init_script_present": bool(magitrickle_init_script_present),
               "source_variant": ("DISPOSABLE_LAB_EXT_UTILS_EXCEPTION"
                                  if lab_exception_applied else "PINNED_UNMODIFIED")}
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -168,7 +234,8 @@ def write_public(path, kas_ref, phase, reason, exit_code=None, component_gap=Non
 
 def guest_probe(credentials, workspace, deadline, source, kas_ref, public,
                 guarded_refusal_expected=False, lab_ext_utils_exception=False,
-                kas_base_deps_feed=False, kas_mihomo_feed=False):
+                kas_base_deps_feed=False, kas_mihomo_feed=False,
+                kas_magitrickle_feed=False):
     """Trusted run.py post-scenario hook; VM remains alive for the whole probe."""
     from lab.guest import Guest  # lazy: unit tests do not require Paramiko
     guest = Guest(credentials, workspace, deadline=deadline)
@@ -180,6 +247,17 @@ def guest_probe(credentials, workspace, deadline, source, kas_ref, public,
     installed_base_packages = []
     mihomo_package_installed = False
     mihomo_binary_version_verified = False
+    installer_error_prefix = None
+    mihomo_binary_path = "none"
+    mihomo_probe_exit_code = None
+    mihomo_output_has_name = False
+    mihomo_output_has_version = False
+    socat_package_installed = False
+    magitrickle_package_installed = False
+    magitrickle_daemon_running = False
+    magitrickle_init_script_present = False
+    if kas_magitrickle_feed and not kas_mihomo_feed:
+        raise ValueError("MagiTrickle IPK lab overlay requires the Mihomo feed")
     if kas_mihomo_feed and not kas_base_deps_feed:
         raise ValueError('Mihomo IPK lab overlay requires KAS base feed')
     if kas_base_deps_feed and not lab_ext_utils_exception:
@@ -249,6 +327,11 @@ def guest_probe(credentials, workspace, deadline, source, kas_ref, public,
                    " sh /opt/lab/install.sh disk")
         exit_code, stdout, stderr = guest.execute(command, timeout=300)
         category = classify_failure(exit_code, stdout + "\n" + stderr)
+        installer_error_prefix = matched_installer_error(stdout + "\n" + stderr,
+                                                         source)
+        if installer_error_prefix:
+            print("KAS INSTALLER ERR PREFIX MATCHED (pinned source constant)",
+                  flush=True)
         if kas_base_deps_feed:
             # Query actual guest package database, never trust the mirror index
             # as evidence that KAS installed a package. Publish allowlisted IDs.
@@ -263,17 +346,74 @@ def guest_probe(credentials, workspace, deadline, source, kas_ref, public,
                     installed_now, re.M))
                 # Probe the REAL installed MIPSel ELF; opkg metadata alone is
                 # insufficient evidence that it executes under native NDMS.
-                # Only a fixed success boolean is published, never raw output.
+                # Publish only fixed booleans, a path bucket and the exit code;
+                # raw guest output stays private.
                 if mihomo_package_installed:
-                    cmd = ("for p in /opt/sbin/mihomo /opt/bin/mihomo; do "
-                           "if [ -x \"$p\" ]; then \"$p\" -v; exit $?; fi; "
-                           "done; exit 127")
-                    ver_rc, ver_out, ver_err = guest.execute(cmd, timeout=75)
-                    mihomo_binary_version_verified = verified_mihomo_version(
-                        ver_rc, ver_out, ver_err)
-                print("KAS MIPSEL MIHOMO: opkg=%s binary_version=%s" %
-                      (mihomo_package_installed, mihomo_binary_version_verified),
+                    path_out = guest.command(
+                        "for p in /opt/sbin/mihomo /opt/bin/mihomo; do "
+                        "if [ -x \"$p\" ]; then echo \"$p\"; break; fi; done",
+                        timeout=30).strip()
+                    mihomo_binary_path = (
+                        "opt-sbin" if "/opt/sbin/mihomo" in path_out
+                        else "opt-bin" if "/opt/bin/mihomo" in path_out
+                        else "none")
+                    if mihomo_binary_path != "none":
+                        binary = path_out.splitlines()[0].strip()
+                        ver_rc, ver_out, ver_err = guest.execute(
+                            binary + " -v", timeout=75)
+                        mihomo_probe_exit_code = ver_rc
+                        (mihomo_output_has_name,
+                         mihomo_output_has_version) = mihomo_output_categories(
+                            ver_out, ver_err)
+                        mihomo_binary_version_verified = (
+                            ver_rc == 0 and mihomo_output_has_name
+                            and mihomo_output_has_version)
+                print("KAS MIPSEL MIHOMO: opkg=%s binary_version=%s probe_rc=%s "
+                      "path=%s name=%s version=%s" %
+                      (mihomo_package_installed, mihomo_binary_version_verified,
+                       mihomo_probe_exit_code, mihomo_binary_path,
+                       mihomo_output_has_name, mihomo_output_has_version),
                       flush=True)
+            if kas_magitrickle_feed:
+                # Lab-direct pinned-dependency probe. The real installer's
+                # MagiTrickle stage downloads an HTTPS helper this offline
+                # guest cannot reach; installing the two SHA256-pinned IPKs
+                # directly proves the NEXT KAS dependency executes natively.
+                # This is NOT KAS installer acceptance and never a KAS PASS.
+                install_rc, _install_out, _install_err = guest.execute(
+                    "/opt/bin/opkg install socat; "
+                    "/opt/bin/opkg install magitrickle", timeout=240)
+                installed_now = guest.command("/opt/bin/opkg list-installed",
+                                              timeout=45)
+                socat_package_installed = bool(re.search(
+                    r"^socat - " + re.escape(SOCAT_VERSION) + r"$",
+                    installed_now, re.M))
+                magitrickle_package_installed = bool(re.search(
+                    r"^magitrickle - " + re.escape(MAGITRICKLE_VERSION) + r"$",
+                    installed_now, re.M))
+                print("KAS MIPSEL MAGITRICKLE LAB-DIRECT: opkg install rc=%s "
+                      "socat=%s magitrickle=%s" %
+                      (install_rc, socat_package_installed,
+                       magitrickle_package_installed), flush=True)
+                if magitrickle_package_installed:
+                    init_out = guest.command(
+                        "test -x /opt/etc/init.d/S99magitrickle && "
+                        "printf '%s\\n' MT_INIT_OK", timeout=30)
+                    magitrickle_init_script_present = "MT_INIT_OK" in init_out
+                    # The package postinst starts S99magitrickle; a live pidof
+                    # proves the UPX-packed MIPSel ELF decompresses and runs
+                    # natively. Retry briefly: the init script defers startup
+                    # in a background loop until guest uptime exceeds 300s.
+                    for _attempt in range(3):
+                        pid_out = guest.command(
+                            "pidof magitrickled || true", timeout=30)
+                        magitrickle_daemon_running = bool(pid_out.strip())
+                        if magitrickle_daemon_running:
+                            break
+                        guest.command("sleep 5", timeout=30)
+                    print("KAS MIPSEL MAGITRICKLE RUNTIME: daemon=%s init=%s" %
+                          (magitrickle_daemon_running,
+                           magitrickle_init_script_present), flush=True)
         if category != "INSTALLER_COMPLETED":
             reason = category
             print("KAS MIPSEL INSTALL: " + category, flush=True)
@@ -313,7 +453,17 @@ def guest_probe(credentials, workspace, deadline, source, kas_ref, public,
                      installed_base_packages=installed_base_packages,
                      kas_mihomo_feed=kas_mihomo_feed,
                      mihomo_package_installed=mihomo_package_installed,
-                     mihomo_binary_version_verified=mihomo_binary_version_verified)
+                     mihomo_binary_version_verified=mihomo_binary_version_verified,
+                     installer_error_prefix=installer_error_prefix,
+                     mihomo_binary_path=mihomo_binary_path,
+                     mihomo_probe_exit_code=mihomo_probe_exit_code,
+                     mihomo_output_has_name=mihomo_output_has_name,
+                     mihomo_output_has_version=mihomo_output_has_version,
+                     kas_magitrickle_feed=kas_magitrickle_feed,
+                     socat_package_installed=socat_package_installed,
+                     magitrickle_package_installed=magitrickle_package_installed,
+                     magitrickle_daemon_running=magitrickle_daemon_running,
+                     magitrickle_init_script_present=magitrickle_init_script_present)
 
 
 def main():
@@ -333,6 +483,8 @@ def main():
                     help="ONLY disposable lab exception: add 11 SHA256-pinned MIPSel base IPKs to mirror")
     ap.add_argument("--kas-mihomo", action="store_true",
                     help="ONLY disposable Ported 5.1.8 guest: pin native MIPSel Mihomo in KAS mirror")
+    ap.add_argument("--kas-magitrickle", action="store_true",
+                    help="ONLY disposable Ported 5.1.8 guest: pin socat+MagiTrickle IPKs and lab-probe native execution")
     args = ap.parse_args()
     if args.expect_guarded_refusal and args.lab_ext_utils_exception:
         ap.error("lab exception and guarded refusal are mutually exclusive")
@@ -340,6 +492,8 @@ def main():
         ap.error("--kas-base-deps requires --lab-ext-utils-exception")
     if args.kas_mihomo and not args.kas_base_deps:
         ap.error("--kas-mihomo requires --kas-base-deps")
+    if args.kas_magitrickle and not args.kas_mihomo:
+        ap.error("--kas-magitrickle requires --kas-mihomo")
     if not PIN.fullmatch(args.kas_ref):
         ap.error("--kas-ref must be full 40-character SHA")
     source = load_sources(args.kas_dir, args.kas_ref)["install.sh"]
@@ -349,6 +503,8 @@ def main():
         validated_kas_base_overlay(kas_ref=args.kas_ref)
     if args.kas_mihomo:
         validated_kas_mihomo_overlay(kas_ref=args.kas_ref)
+    if args.kas_magitrickle:
+        validated_kas_magitrickle_overlay(kas_ref=args.kas_ref)
     workspace = Path(args.workspace)
     workspace.mkdir(mode=0o700, exist_ok=False)
     creds = json.loads(Path(args.credentials_file).read_text(encoding="utf-8"))
@@ -367,6 +523,12 @@ def main():
         # this adds exactly one official MIPSel soft-float package.
         add_packages(feed, workspace / "cache", MIHOMO_LOCK)
         print("KAS MIHOMO MIPSEL MIRROR: 1 extra verified IPK", flush=True)
+    if args.kas_magitrickle:
+        # Both overlay IPKs are digest-verified on the host before the guest
+        # runs; this extends only the disposable lab mirror, not the proven
+        # 25+11+1 locks or any production KAS source.
+        add_magitrickle_packages(feed, workspace / "cache")
+        print("KAS MAGITRICKLE MIPSEL MIRROR: 2 extra verified IPKs", flush=True)
     scenario = Path(__file__).resolve().parents[1] / "scenarios" / "ported-mt7621-entware-tz-skip.json"
     public = workspace / "report" / "kas-smoke.json"
     with Mirror(feed) as port:
@@ -382,7 +544,8 @@ def main():
                 guarded_refusal_expected=args.expect_guarded_refusal,
                 lab_ext_utils_exception=args.lab_ext_utils_exception,
                 kas_base_deps_feed=args.kas_base_deps,
-                kas_mihomo_feed=args.kas_mihomo)))
+                kas_mihomo_feed=args.kas_mihomo,
+                kas_magitrickle_feed=args.kas_magitrickle)))
 
 
 if __name__ == "__main__":
