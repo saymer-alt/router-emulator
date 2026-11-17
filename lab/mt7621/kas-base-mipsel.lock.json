@@ -1,0 +1,136 @@
+{
+  "schema": "mt7621-kas-base-mipsel-v1",
+  "for_kas_ref": "2fcd16089374604e10c201c6cd5a805fba3b100d",
+  "origin": "https://bin.entware.net/mipselsf-k3.4/",
+  "required_base": [
+    "ca-bundle",
+    "curl",
+    "jq",
+    "iptables",
+    "nano",
+    "cron"
+  ],
+  "packages": [
+    {
+      "Package": "ca-bundle",
+      "Version": "20260816-2",
+      "Depends": "libc, libssp, librt, libpthread",
+      "Architecture": "all",
+      "Filename": "ca-bundle_20260816-2_all.ipk",
+      "Size": "107102",
+      "SHA256sum": "2b59fb803ede1b9bf4638d5522f469cb6e5a82da564331cf818bd69b7544372a",
+      "feed": "entware",
+      "url": "https://bin.entware.net/mipselsf-k3.4/ca-bundle_20260816-2_all.ipk"
+    },
+    {
+      "Package": "cron",
+      "Version": "4.1-7",
+      "Depends": "libc, libssp, librt, libpthread",
+      "Architecture": "mipsel-3.4",
+      "Filename": "cron_4.1-7_mipsel-3.4.ipk",
+      "Size": "35137",
+      "SHA256sum": "52ce965280a6e842705c9aa5079d22dba2768d64528f1ad36089d9a7d94d5758",
+      "feed": "entware",
+      "url": "https://bin.entware.net/mipselsf-k3.4/cron_4.1-7_mipsel-3.4.ipk"
+    },
+    {
+      "Package": "curl",
+      "Version": "8.23.0-1",
+      "Depends": "libc, libssp, librt, libpthread, libcurl",
+      "Architecture": "mipsel-3.4",
+      "Filename": "curl_8.23.0-1_mipsel-3.4.ipk",
+      "Size": "89287",
+      "SHA256sum": "4b821e371d7efae77c35bd4dbd16cffa201db820d99ed8c4b270f77c9ba72fac",
+      "feed": "entware",
+      "url": "https://bin.entware.net/mipselsf-k3.4/curl_8.23.0-1_mipsel-3.4.ipk"
+    },
+    {
+      "Package": "iptables",
+      "Version": "1.4.21-5",
+      "Depends": "libc, libssp, librt, libpthread",
+      "Architecture": "mipsel-3.4",
+      "Filename": "iptables_1.4.21-5_mipsel-3.4.ipk",
+      "Size": "163806",
+      "SHA256sum": "5dae17618426003d301da534112c99a7c4893a11ba2852d841d12a031e2914d6",
+      "feed": "entware",
+      "url": "https://bin.entware.net/mipselsf-k3.4/iptables_1.4.21-5_mipsel-3.4.ipk"
+    },
+    {
+      "Package": "jq",
+      "Version": "1.8.2-1",
+      "Depends": "libc, libssp, librt, libpthread",
+      "Architecture": "mipsel-3.4",
+      "Filename": "jq_1.8.2-1_mipsel-3.4.ipk",
+      "Size": "196838",
+      "SHA256sum": "37d2b4d09a4e15edad68bc6d76a2a4db88a8051e1976baaace72824b0f4801b6",
+      "feed": "entware",
+      "url": "https://bin.entware.net/mipselsf-k3.4/jq_1.8.2-1_mipsel-3.4.ipk"
+    },
+    {
+      "Package": "libatomic",
+      "Version": "8.4.0-12",
+      "Depends": "libgcc",
+      "Architecture": "mipsel-3.4",
+      "Filename": "libatomic_8.4.0-12_mipsel-3.4.ipk",
+      "Size": "7131",
+      "SHA256sum": "acaf79117b6195761f01b7188ed69bd3253580060b0bd5e4062a476290a26a5b",
+      "feed": "entware",
+      "url": "https://bin.entware.net/mipselsf-k3.4/libatomic_8.4.0-12_mipsel-3.4.ipk"
+    },
+    {
+      "Package": "libcurl",
+      "Version": "8.23.0-1",
+      "Depends": "libc, libssp, librt, libpthread, libopenssl, zlib, libnghttp2, ca-bundle",
+      "Architecture": "mipsel-3.4",
+      "Filename": "libcurl_8.23.0-1_mipsel-3.4.ipk",
+      "Size": "333035",
+      "SHA256sum": "f2f5f3cfd08413806c7970305d3aa4f52a3bd828c6d06fc99ac58896eb5510c4",
+      "feed": "entware",
+      "url": "https://bin.entware.net/mipselsf-k3.4/libcurl_8.23.0-1_mipsel-3.4.ipk"
+    },
+    {
+      "Package": "libnghttp2",
+      "Version": "1.70.0-1",
+      "Depends": "libc, libssp, librt, libpthread",
+      "Architecture": "mipsel-3.4",
+      "Filename": "libnghttp2_1.70.0-1_mipsel-3.4.ipk",
+      "Size": "72097",
+      "SHA256sum": "fd99dc2db4591b4ea914e1b36549fe66020a37fd504a3f4846d5df7f45b3eee6",
+      "feed": "entware",
+      "url": "https://bin.entware.net/mipselsf-k3.4/libnghttp2_1.70.0-1_mipsel-3.4.ipk"
+    },
+    {
+      "Package": "libopenssl",
+      "Version": "3.5.9-3",
+      "Depends": "libc, libssp, librt, libpthread, zlib, libatomic",
+      "Architecture": "mipsel-3.4",
+      "Filename": "libopenssl_3.5.9-3_mipsel-3.4.ipk",
+      "Size": "1996994",
+      "SHA256sum": "5f76eedfbe09c52405040fc8abb3834a8728a6337620a09d773c3fbfe9f2c078",
+      "feed": "entware",
+      "url": "https://bin.entware.net/mipselsf-k3.4/libopenssl_3.5.9-3_mipsel-3.4.ipk"
+    },
+    {
+      "Package": "nano",
+      "Version": "9.3-3",
+      "Depends": "libc, libssp, librt, libpthread, libncursesw",
+      "Architecture": "mipsel-3.4",
+      "Filename": "nano_9.3-3_mipsel-3.4.ipk",
+      "Size": "151091",
+      "SHA256sum": "db4b014ce5a1b3ad549d55bee55773c22c3075c6778aa0759680cd5886da1e6c",
+      "feed": "entware",
+      "url": "https://bin.entware.net/mipselsf-k3.4/nano_9.3-3_mipsel-3.4.ipk"
+    },
+    {
+      "Package": "zlib",
+      "Version": "2.3.3-2",
+      "Depends": "libc, libssp, librt, libpthread",
+      "Architecture": "mipsel-3.4",
+      "Filename": "zlib_2.3.3-2_mipsel-3.4.ipk",
+      "Size": "72248",
+      "SHA256sum": "5afa0b5ebce8a20c36158eb16f9f2f241fba80c526ac79d6b3a051b42a452723",
+      "feed": "entware",
+      "url": "https://bin.entware.net/mipselsf-k3.4/zlib_2.3.3-2_mipsel-3.4.ipk"
+    }
+  ]
+}

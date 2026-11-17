@@ -39,12 +39,28 @@ class Mt7621KASGuestContracts(unittest.TestCase):
                                         "exit_code", "component_inventory_seen",
                                         "missing_component_ids", "test_expectation",
                                         "guard_contract_verified", "lab_ext_utils_exception_applied",
-                                        "guest_source_verified", "source_variant"})
+                                        "guest_source_verified", "source_variant",
+                                        "kas_base_deps_feed", "base_packages_installed"})
             self.assertFalse(rec["kas_installed"])
             self.assertEqual(rec["kas_ref"], ref)
             self.assertFalse(rec["lab_ext_utils_exception_applied"])
             self.assertFalse(rec["guest_source_verified"])
             self.assertEqual(rec["source_variant"], "PINNED_UNMODIFIED")
+            self.assertFalse(rec["kas_base_deps_feed"])
+            self.assertEqual(rec["base_packages_installed"], [])
+
+    def test_report_exposes_only_allowed_actual_base_install_ids(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "kas.json"
+            write_public(path, "a" * 40, "BLOCKED", "PINNED_ASSET_UNAVAILABLE", 1,
+                         kas_base_deps_feed=True,
+                         installed_base_packages=["jq", "curl", "untrusted-field",
+                                                  "ca-bundle", "jq"])
+            record = json.loads(path.read_text())
+            self.assertTrue(record["kas_base_deps_feed"])
+            self.assertEqual(record["base_packages_installed"],
+                             ["ca-bundle", "curl", "jq"])
+            self.assertFalse(record["kas_installed"])
 
     def test_lab_exception_changes_exactly_one_guard_condition(self):
         # Synthetic source contains other active component and storage checks.
