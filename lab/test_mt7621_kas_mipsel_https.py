@@ -4,8 +4,10 @@ No network access: every case validates the pinned lock bytes and the
 index/IPK consistency logic that gates the disposable lab TLS mirror.
 """
 import gzip
+import hashlib
 import json
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -133,3 +135,89 @@ class MipselFeedIndexTests(unittest.TestCase):
     def test_not_gzip_is_denied(self):
         with self.assertRaises(Exception):
             validated_feed_index(b"not gzip", "mipsel-3.4")
+
+
+class MipselValidatedMirrorTests(unittest.TestCase):
+    """Offline end-to-end regression for CI run 44160249375.
+
+    The validated mirror looked its plain-HTTP feed records up with
+    scheme-ful 3-tuples while KASMirror.http_routes re-keys the route table
+    to (host, path) pairs, so every lookup returned None and the run died
+    before any guest started. Synthetic pins (fixture-backed assets, a
+    throwaway KAS git repo, a disposable CA) exercise the real production
+    function without network access.
+    """
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        self.kas_dir = self.root / "kas"
+        self.kas_dir.mkdir()
+        (self.kas_dir / "install.sh").write_bytes(b"#!/bin/sh\nsynthetic\n")
+        for command in (
+            ["git", "init", "-q"],
+            ["git", "add", "install.sh"],
+            ["git", "-c", "user.email=lab@test", "-c", "user.name=lab",
+             "commit", "-q", "-m", "synthetic KAS"],
+        ):
+            subprocess.run(command, cwd=self.kas_dir, check=True,
+                           capture_output=True)
+        self.kas_ref = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=self.kas_dir, text=True).strip()
+        (self.root / "private").mkdir()
+
+    def test_validated_mirror_serves_pinned_records_by_host_path(self):
+        helper_bytes = b"#!/bin/sh\necho packages/entware/ > magitrickle.conf\n"
+        fixture = self.root / "add_repo.sh"
+        fixture.write_bytes(helper_bytes)
+        records = [{
+            "url": HELPER_URL,
+            "fetch_url": HELPER_URL,
+            "filename": "add_repo.sh",
+            "sha256": hashlib.sha256(helper_bytes).hexdigest(),
+            "fixture": str(fixture),
+        }]
+        feeds = {}
+        for arch, pins in FEEDS.items():
+            index_bytes = synthetic_index(arch)
+            ipk_bytes = b"synthetic-ipk-" + arch.encode()
+            index_path = self.root / (arch + "-Packages.gz")
+            index_path.write_bytes(index_bytes)
+            ipk_path = self.root / (arch + "-ipk")
+            ipk_path.write_bytes(ipk_bytes)
+            feeds[arch] = dict(pins,
+                               index_sha256=hashlib.sha256(index_bytes).hexdigest(),
+                               ipk_sha256=hashlib.sha256(ipk_bytes).hexdigest())
+            records.append({
+                "url": "http://" + pins["index_route"][1] + pins["index_route"][2],
+                "fetch_url": "https://" + pins["index_route"][1] + pins["index_route"][2],
+                "filename": "Packages.gz",
+                "sha256": hashlib.sha256(index_bytes).hexdigest(),
+                "fixture": str(index_path),
+            })
+            records.append({
+                "url": "http://" + pins["index_route"][1] + "/packages/entware/"
+                       + arch + "/" + pins["ipk_filename"],
+                "fetch_url": "https://" + pins["index_route"][1] + "/packages/entware/"
+                             + arch + "/" + pins["ipk_filename"],
+                "filename": pins["ipk_filename"],
+                "sha256": hashlib.sha256(ipk_bytes).hexdigest(),
+                "fixture": str(ipk_path),
+            })
+        with patch.object(mipsel_https_module, "HELPER_SHA256",
+                          hashlib.sha256(helper_bytes).hexdigest()), \
+                patch.object(mipsel_https_module, "FEEDS", feeds), \
+                patch.object(mipsel_https_module,
+                             "validated_kas_mipsel_https_lock",
+                             lambda: records):
+            mirror = mipsel_https_module.validated_kas_mipsel_https_mirror(
+                self.kas_dir, self.kas_ref, self.root / "private",
+                self.root / "cache")
+        for arch, pins in feeds.items():
+            # The serving contract the validation must look up against:
+            # (host, path) pairs, never scheme-ful tuples.
+            self.assertIn(pins["index_route"][1:], mirror.http_routes)
+            self.assertIn((pins["index_route"][1],
+                           "/packages/entware/" + arch + "/"
+                           + pins["ipk_filename"]), mirror.http_routes)

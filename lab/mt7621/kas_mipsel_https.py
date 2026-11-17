@@ -148,12 +148,15 @@ def validated_kas_mipsel_https_mirror(kas_dir, kas_ref, private, cache):
         raise ValueError("pinned MagiTrickle helper content drift")
     http_routes = mirror.http_routes
     for arch, pins in FEEDS.items():
-        index_bytes = http_routes.get(pins["index_route"])
+        # http_routes re-keys the route table to (host, path) pairs; a
+        # scheme-ful lookup never matches and fails closed before any guest
+        # starts (CI run 44160249375 died on exactly that).
+        index_bytes = http_routes.get(pins["index_route"][1:])
         if index_bytes is None or hashlib.sha256(index_bytes).hexdigest() \
                 != pins["index_sha256"]:
             raise ValueError("lab mirror does not serve pinned %s index" % arch)
         validated_feed_index(index_bytes, arch)
-        ipk_route = (pins["index_route"][0], pins["index_route"][1],
+        ipk_route = (pins["index_route"][1],
                      "/packages/entware/" + arch + "/" + pins["ipk_filename"])
         ipk_bytes = http_routes.get(ipk_route)
         if ipk_bytes is None or hashlib.sha256(ipk_bytes).hexdigest() \
