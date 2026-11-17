@@ -241,10 +241,10 @@ class LifecycleDataTests(unittest.TestCase):
         import lab.kas_lifecycle as lifecycle
 
         clock = [100.0]
-        rules = ('-P _CUST_BYPASS_WA_ ACCEPT\\n'
-                 '-A _CUST_BYPASS_WA_ -j MARK --set-xmark 0x2000/0xffffffff\\n'
-                 '-A _CUST_BYPASS_WA_ -j CONNMARK --save-mark\\n'
-                 '-A _CUST_BYPASS_WA_ -j RETURN\\n')
+        rules = ('-P _CUST_BYPASS_WA_ ACCEPT\n'
+                 '-A _CUST_BYPASS_WA_ -j MARK --set-xmark 0x2000/0xffffffff\n'
+                 '-A _CUST_BYPASS_WA_ -j CONNMARK --save-mark\n'
+                 '-A _CUST_BYPASS_WA_ -j RETURN\n')
 
         class Guest:
             def __init__(self):
@@ -255,8 +255,8 @@ class LifecycleDataTests(unittest.TestCase):
                 if command.endswith('_CUST_BYPASS_WA_'):
                     clock[0] += 7.25
                     return 0, rules, ''
-                return (0, '-P PREROUTING ACCEPT\\n'
-                        '-A PREROUTING -m mark --mark 0x0 -j _CUST_BYPASS_WA_\\n', '')
+                return (0, '-P PREROUTING ACCEPT\n'
+                        '-A PREROUTING -m mark --mark 0x0 -j _CUST_BYPASS_WA_\n', '')
 
         guest = Guest()
         with mock.patch.object(lifecycle.time, 'monotonic', side_effect=lambda: clock[0]):
@@ -278,11 +278,11 @@ class LifecycleDataTests(unittest.TestCase):
             def execute(self, command, timeout=30):
                 self.calls.append((command, timeout))
                 clock[0] += 4.0
-                return 0, '-P _CUST_BYPASS_WA_ ACCEPT\\n', ''
+                return 0, '-P _CUST_BYPASS_WA_ ACCEPT\n', ''
 
         guest = Guest()
         output = io.StringIO()
-        with mock.patch.object(lifecycle.time, 'monotonic', side_effect=lambda: clock[0]), \\
+        with mock.patch.object(lifecycle.time, 'monotonic', side_effect=lambda: clock[0]), \
              redirect_stdout(output):
             with self.assertRaises(ContractFailure) as result:
                 lifecycle.wait_netfilter_settled(guest, budget=3)
@@ -306,8 +306,8 @@ class LifecycleDataTests(unittest.TestCase):
             sleeps.append(seconds)
             clock[0] += seconds
 
-        with mock.patch.object(lifecycle.time, 'monotonic', side_effect=lambda: clock[0]), \\
-             mock.patch.object(lifecycle.time, 'sleep', side_effect=advance), \\
+        with mock.patch.object(lifecycle.time, 'monotonic', side_effect=lambda: clock[0]), \
+             mock.patch.object(lifecycle.time, 'sleep', side_effect=advance), \
              redirect_stdout(io.StringIO()):
             with self.assertRaises(ContractFailure):
                 lifecycle.wait_netfilter_settled(Guest(), budget=1.5)
