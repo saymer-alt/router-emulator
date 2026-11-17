@@ -7,7 +7,7 @@ existing upstream `mt7621-router` machine (`qemu-system-mipsel`, patches
 rules.  No new emulator was written; this directory only adds a build script,
 a Ported NAND assembler and gate aggregation for the MT7621 preset family.
 
-## What is proven (2026-11-15, see the gate table below)
+## What is proven (evidence reconciled 2026-11-17)
 
 | Gate | Status | Evidence |
 |---|---|---|
@@ -55,6 +55,28 @@ NDMS HTTP answer).
 **Native MIPSel ELF execution inside KeeneticOS is evidenced by the NDMS
 daemons (ndm, telnetd, dropbear, Deadwood) starting and answering; it is
 *not* an Entware check and must not be counted as one.**
+
+## Capability boundaries and outstanding lab work (2026-11-17)
+
+This is a reconciliation of **existing evidence**, not a new QEMU run.
+The 19/19 count above is **conditional on the full matching report set**
+(evidence-derived PASS, not a global assertion about every CI invocation).
+The separate `MIPSEL_AUTOSTART` gate is not counted among the 19.
+
+| Domain | Evidence-based result | What it does **not** prove |
+|---|---|---|
+| Ported 5.1.8 / MT7621 | 4-VPE boot, native NDMS CLI, loopback HTTP, MIPSel Entware/opkg, native reboot and QEMU reset: PASS ([#75](https://github.com/saymer-alt/router-emulator/pull/75), [#80](https://github.com/saymer-alt/router-emulator/pull/80), [#87](https://github.com/saymer-alt/router-emulator/pull/87), [#88](https://github.com/saymer-alt/router-emulator/pull/88)) | Original KeeneticOS or physical MT7621 hardware acceptance |
+| Stage C lifecycle | Real guest service restart **40/40**, persistence **47/47**, autonomous `rc.unslung` startup **59/59**: PASS ([#85](https://github.com/saymer-alt/router-emulator/pull/85), [#84](https://github.com/saymer-alt/router-emulator/pull/84), [#86](https://github.com/saymer-alt/router-emulator/pull/86)); tasks [#73](https://github.com/saymer-alt/router-emulator/issues/73), [#81](https://github.com/saymer-alt/router-emulator/issues/81) completed | Real power loss, spontaneous USB disconnection, wear, peripheral timing |
+| BusyBox 1.38 timezone probe | MIPSel-only **lab** skip of optional `wget` TZ GET: **33/33** no-SEGV Entware bootstrap ([#83](https://github.com/saymer-alt/router-emulator/pull/83)); upstream issue [#82](https://github.com/saymer-alt/router-emulator/issues/82) remains open | Fix to BusyBox timeout SIGSEGV, NDMS/RCI lock, or automatic timezone detection |
+| KAS on MT7621 Ported 5.1.8 | Exact **guarded refusal PASS** ([#90](https://github.com/saymer-alt/router-emulator/pull/90)), missing required `ext-utils`; **KAS installation BLOCKED** | KAS/Mihomo/MagiTrickle installed or functional |
+| Candidate Ported 5.2 Beta 3 | QEMU boot/NDMS and CLI reached; **11/12** scenario steps, final `ext-utils` inventory marker absent ([#92](https://github.com/saymer-alt/router-emulator/pull/92), [run](https://github.com/saymer-alt/router-emulator/actions/runs/43872006396)) | KAS compatibility; current candidate is not evidence of `ext-utils` support |
+| Separate ARM64 Ported Netfilter flakiness | [#41](https://github.com/saymer-alt/router-emulator/issues/41): diagnostic categorization exists in `lab/kas_lifecycle.py`, causal regression investigation remains open | Proven root cause or MT7621-only failure |
+
+**Scope boundary:** These are lab and independently reported guest results.
+Do not treat green host unit tests as live guest acceptance. No private UART,
+NAND, firmware or credentials should be published; the guest is WAN-offline and
+host forwards are loopback-only. TeleMT product development has its own task
+stream and is not changed by this documentation update.
 
 ## Quick start (Linux x86_64, incl. WSL2)
 
@@ -378,13 +400,12 @@ by `derive_persistence_gate` from the real report — no manual gate override.
 
 Sanitized evidence: `lab/mt7621/evidence/ported-mt7621-entware-persistence-20261115/`.
 
-Honest scope: **actual `rc.unslung` service autostart is still NOT_TESTED.**
+Historical scope of the **2026-11-15 persistence-only PR #84**: actual `rc.unslung` service autostart was **NOT_TESTED in that 47-step cycle**. A later independent test in merged PR #86 verified real autostart (59/59 PASS, 2026-11-16); see the next section.
 The log shows ndm applying the setting once per boot (`configured init
 script: /opt/etc/init.d/rc.unslung` ×3), but no 47-step probe observes a
 live Entware service after boot 2 or boot 3 — the bash/opkg checks prove
-package and data persistence, not autostart. Issue #81 needs a separate
-cycle with a persistent init script writing a boot marker (or a live
-service probe) right after `system ready` to measure it directly.
+package and data persistence, not autostart. That separate acceptance was subsequently completed by PR #86 with a persistent
+init-script marker and real process liveness checks after both reboot modes.
 Keep NAND, firmware, root credentials and the full UART private. Do not
 substitute standard GitHub CI (which tests scenario contracts but does
 not execute this private guest) for Stage C acceptance.
