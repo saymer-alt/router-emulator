@@ -117,6 +117,15 @@ def classify_failure(code, output):
     return "INSTALLER_EXIT_NONZERO"
 
 
+def verified_mihomo_version(exit_code, stdout, stderr):
+    """Only genuine native binary -v success for the pinned Mihomo version."""
+    if exit_code != 0 or not isinstance(stdout, str) or not isinstance(stderr, str):
+        return False
+    output = stdout + "\n" + stderr
+    return (re.search(r"\bmihomo\b", output, re.I) is not None
+            and re.search(r"(?<![0-9])v?1\.19\.33(?![0-9])", output) is not None)
+
+
 def guarded_refusal_proven(exit_code, category, component_gap, package_list, no_ownership):
     """Actual exit 1, exactly ext-utils missing, no owned KAS packages/state."""
     if exit_code != 1 or category != "KEENETICOS_COMPONENTS_MISSING":
@@ -260,11 +269,8 @@ def guest_probe(credentials, workspace, deadline, source, kas_ref, public,
                            "if [ -x \"$p\" ]; then \"$p\" -v; exit $?; fi; "
                            "done; exit 127")
                     ver_rc, ver_out, ver_err = guest.execute(cmd, timeout=75)
-                    version_text = ver_out + "\n" + ver_err
-                    mihomo_binary_version_verified = (ver_rc == 0 and
-                        re.search(r"(?i)\\bmihomo\\b", version_text) is not None and
-                        re.search(r"(?<![0-9])v?1\\.19\\.33(?![0-9])", version_text)
-                        is not None)
+                    mihomo_binary_version_verified = verified_mihomo_version(
+                        ver_rc, ver_out, ver_err)
                 print("KAS MIPSEL MIHOMO: opkg=%s binary_version=%s" %
                       (mihomo_package_installed, mihomo_binary_version_verified),
                       flush=True)
