@@ -469,12 +469,60 @@ class RebootPhaseMarkerTests(unittest.TestCase):
                                              'services_restored_after_reboot')
 
     def test_regular_reboot_has_no_foreign_markers(self):
-        result, out, _, _, _, evidence, _ = self._run(
+        result, out, _, monitor, guest, evidence, _ = self._run(
             None, [{'safe': True}, {'safe': True}])
         self.assertTrue(result)
         self.assertNotIn('FOREIGN_REBOOT_', out)
+        expected = ('BASELINE_REBOOT_PRE_CONTRACT',
+                    'BASELINE_REBOOT_RESET_SENT',
+                    'BASELINE_REBOOT_POST_CONTRACT')
+        for marker in expected:
+            self.assertEqual(out.count(marker), 1)
+        self.assertLess(out.index(expected[0]), out.index(expected[1]))
+        self.assertLess(out.index(expected[1]), out.index(expected[2]))
+        monitor.assert_called_once_with('test-monitor', 'system_reset')
+        guest.connect.assert_called_once_with(300)
         evidence.set.assert_called_once_with('KAS_REBOOT', 'PASS',
                                              'services_restored_after_reboot')
+
+    def test_baseline_pre_reset_contract_failure_never_sends_reset(self):
+        from lab import kas_lifecycle as lifecycle
+        guest = mock.Mock()
+        evidence = mock.Mock()
+        out = io.StringIO()
+        with mock.patch.object(lifecycle, 'contract',
+                               side_effect=RuntimeError('PRIVATE-GUEST-DETAIL')), \
+             mock.patch.object(lifecycle, 'send_monitor') as monitor, \
+             redirect_stdout(out):
+            with self.assertRaisesRegex(RuntimeError, 'PRIVATE-GUEST-DETAIL'):
+                lifecycle.reboot(guest, None, evidence,
+                                 {'monitor': 'monitor'}, None)
+        self.assertIn('BASELINE_REBOOT_PRE_CONTRACT', out.getvalue())
+        self.assertNotIn('BASELINE_REBOOT_RESET_SENT', out.getvalue())
+        self.assertNotIn('BASELINE_REBOOT_POST_CONTRACT', out.getvalue())
+        self.assertNotIn('PRIVATE', out.getvalue())
+        self.assertNotIn('FOREIGN_REBOOT_', out.getvalue())
+        monitor.assert_not_called()
+        guest.close.assert_not_called()
+
+    def test_baseline_post_reset_contract_failure_marks_exact_phase(self):
+        from lab import kas_lifecycle as lifecycle
+        guest = mock.Mock()
+        evidence = mock.Mock()
+        out = io.StringIO()
+        with mock.patch.object(lifecycle, 'contract', side_effect=[
+                {'safe': True}, RuntimeError('PRIVATE-POST-DETAIL')]), \
+             mock.patch.object(lifecycle, 'send_monitor') as monitor, \
+             mock.patch.object(lifecycle.time, 'sleep'), \
+             redirect_stdout(out):
+            with self.assertRaisesRegex(RuntimeError, 'PRIVATE-POST-DETAIL'):
+                lifecycle.reboot(guest, None, evidence,
+                                 {'monitor': 'monitor'}, None)
+        self.assertEqual(out.getvalue().count('BASELINE_REBOOT_'), 3)
+        self.assertNotIn('PRIVATE', out.getvalue())
+        self.assertNotIn('FOREIGN_REBOOT_', out.getvalue())
+        monitor.assert_called_once_with('monitor', 'system_reset')
+        guest.connect.assert_called_once_with(300)
 
     def test_pre_reset_contract_failure_only_pre_marker(self):
         from lab import kas_lifecycle as lifecycle
