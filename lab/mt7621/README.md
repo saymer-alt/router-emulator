@@ -217,13 +217,28 @@ delayed observation**, not automatic KAS PASS; `under_300 + stopped` for
 MagiTrickle is **not** proof that its deferred-start service is defective.
 Five-second sleep is not a 300-second MagiTrickle acceptance test.
 
+**Memory-safe Mihomo binary probe policy (added 18.11):** on the full
+`--kas-https-mirror` path a new `mihomo -v` process is allowed only when
+**both** snapshots explicitly report `mihomo_process=stopped` and
+`mihomo_port_7890=not_listening`. Any `running`, listener or `unknown`
+blocks this extra Go process to avoid guest resource pressure after KAS
+may have started its own daemon. The historical Mihomo-only/non-HTTPS
+experiment retains its original `-v` verification. The public JSON includes
+only the fixed enum `mihomo_version_probe_policy`: `not_reached`,
+`legacy_probe`, `safe_to_probe`, `skipped_runtime_possible`. A deliberate
+skip leaves `mihomo_binary_version_verified=false` and is **not** interpreted
+as a failed binary, an installed KAS or a working SOCKS5 proxy. The optional
+two-phase diagnostic and version policy are displayed in the existing
+GitHub Actions step summary using allowlisted values only.
+
 No raw configs, logs, process listings, credentials, addresses, or UART are
 included in reports. Host-only contract tests cover snapshot ordering,
-read-only behavior, timeout and private-data sanitization; **not yet run in CI**.
+read-only behavior, timeout, privacy filtering, `mihomo -v` guarded
+execution and policy sanitization; **not yet run in CI**.
 No new QEMU run has been performed for these changes; no KAS PASS is claimed.
 
 **Next step** (separate explicitly authorized guest run): inspect the two
-service snapshots before further ELF probes. If Mihomo remains stopped, collect
+service snapshots and the decision to skip or execute an extra ELF probe. If Mihomo remains stopped, collect
 only bounded/private init start exit code, YAML validity classification,
 `/dev/net/tun`, Mihomo log and `resolv.conf` to distinguish a crash from
 missing capabilities. Virtual-boundary caveat remains: no physical Keenetic,
