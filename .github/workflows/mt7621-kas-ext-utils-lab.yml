@@ -24,6 +24,10 @@ on:
         description: 'Verified-TLS KAS MagiTrickle stage (lab adapter, this branch only)'
         type: boolean
         default: false
+      preflight_only:
+        description: 'Host-only unit tests and pinned KAS contract; skip QEMU, firmware and guest'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -74,7 +78,15 @@ jobs:
           print("KAS_LAB_PATCH_CONTRACT_PASS: exactly one conditional, original unmodified")
           PY
 
+      - name: Host-only preflight summary (no QEMU)
+        if: ${{ inputs.preflight_only }}
+        shell: bash
+        run: |
+          echo "### MT7621 preflight-only: unit tests and pinned-source guard PASS" >> "$GITHUB_STEP_SUMMARY"
+          echo "QEMU, firmware downloads, guest Entware, Mihomo runtime and KAS installation: NOT_TESTED" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Cache exact patched MIPSel QEMU
+        if: ${{ !inputs.preflight_only }}
         id: qemu-cache
         uses: actions/cache@v4
         with:
@@ -84,13 +96,14 @@ jobs:
           key: mipsel-ubuntu24-v10.1.0-${{ hashFiles('qemu-patches/*.patch', 'lab/mt7621/build_qemu_mipsel.sh') }}
 
       - name: Build the native MT7621 QEMU target
-        if: steps.qemu-cache.outputs.cache-hit != 'true'
+        if: ${{ !inputs.preflight_only && steps.qemu-cache.outputs.cache-hit != 'true' }}
         shell: bash
         run: |
           set -euo pipefail
           bash lab/mt7621/build_qemu_mipsel.sh "$RUNNER_TEMP/mt7621-qemu"
 
       - name: Verify QEMU binary before guest execution
+        if: ${{ !inputs.preflight_only }}
         shell: bash
         run: |
           set -euo pipefail
@@ -99,6 +112,7 @@ jobs:
           echo "QEMU_BIN=$RUNNER_TEMP/mt7621-qemu/qemu-system-mipsel" >> "$GITHUB_ENV"
 
       - name: Fetch only public, pinned Ported Xiaomi R3G assets
+        if: ${{ !inputs.preflight_only }}
         shell: bash
         run: |
           set -euo pipefail
@@ -119,6 +133,7 @@ jobs:
           rm -rf "$src/unpacked"
 
       - name: Build disposable 128 MiB Ported NAND using pinned components
+        if: ${{ !inputs.preflight_only }}
         shell: bash
         run: |
           set -euo pipefail
@@ -131,6 +146,7 @@ jobs:
             --out "$RUNNER_TEMP/mt7621-nand"
 
       - name: Generate ephemeral synthetic guest credentials (never log)
+        if: ${{ !inputs.preflight_only }}
         shell: bash
         run: |
           set -euo pipefail
@@ -143,6 +159,7 @@ jobs:
           PY
 
       - name: Run real MIPSel Entware then attempt pinned KAS LAB-COPY install in guest
+        if: ${{ !inputs.preflight_only }}
         id: experiment
         continue-on-error: true
         shell: bash
@@ -165,7 +182,7 @@ jobs:
             $flags
 
       - name: Evaluate isolated lab experiment evidence (BLOCKED is not KAS PASS)
-        if: always()
+        if: ${{ always() && !inputs.preflight_only }}
         shell: bash
         env:
           HTTPS_MIRROR: ${{ inputs.https_mirror }}
@@ -279,7 +296,7 @@ jobs:
           PY
 
       - name: Report only safe action counts (no UART)
-        if: always()
+        if: ${{ always() && !inputs.preflight_only }}
         shell: bash
         run: |
           python3 - "$RUNNER_TEMP" "$GITHUB_STEP_SUMMARY" <<'PY'
@@ -305,7 +322,7 @@ jobs:
           PY
 
       - name: Publish sanitized JSON and JUnit only
-        if: always()
+        if: ${{ always() && !inputs.preflight_only }}
         uses: actions/upload-artifact@v4
         with:
           name: mt7621-kas-lab-ext-utils-only-public-reports
