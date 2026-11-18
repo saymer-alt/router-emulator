@@ -62,6 +62,46 @@ py -3 lab/networkhelm_rci_probe.py --url http://127.0.0.1:8080
 
 Выходные коды: **0** PASS, **1** FAIL, **2** BLOCKED. Статус `PASS` относится **только** к этому read-only RCI smoke и никогда автоматически не закрывает issue #110.
 
+
+## Автоматическая связка с реальным QEMU/Ported (новое)
+
+Добавлен [`lab/networkhelm_qemu_smoke.py`](../lab/networkhelm_qemu_smoke.py): он вызывает **существующий** `lab.run.run` со сценарием `lab/scenarios/ported-mt7621-cli.json` и подключает read-only проверку через уже предусмотренный в раннере `after_scenario` hook.
+
+**Поведение:** в disposable NAND загружается виртуальный MT7621 с Ported, подтверждаются нативные NDMS `system ready`, telnet CLI `show version` и `show system`; **после этого, пока QEMU ещё работает**, выполняется HTTP/RCI probe на localhost:8080. После проверки QEMU выключается и публикуются отдельные санитизированные JSON с итогами гостя и RCI. При провале CLI запросы RCI **не выполняются**. Никаких записей в настройки NDMS.
+
+Пример для Linux x86_64 / WSL2, **только когда уже готовы QEMU с MT7621-патчами и частный NAND Ported 5.1.8**:
+
+```bash
+# Проверить, что localhost 8080 и 8023 никем не заняты.
+# Пример при готовом patched QEMU:
+export QEMU_BIN=/private/qemu-mipsel/qemu-system-mipsel
+
+python3 -m lab.networkhelm_qemu_smoke \
+  --emulator-root . \
+  --nand-dir /private/nand-mi-router-3g-ported \
+  --output-dir /private/reports/networkhelm-mt7621-first \
+  --max-seconds 1800
+
+# Не публиковать исходные UART/SSH/NAND. Для обзора:
+cat /private/reports/networkhelm-mt7621-first/networkhelm-summary.json
+cat /private/reports/networkhelm-mt7621-first/networkhelm-rci.json
+```
+
+Пути `/private/...` — **заполнители**, не обещание, что соответствующие образы присутствуют в рантайме. Точный путь к образу нужно взять из локального стенда, не скачивать и не публиковать приватный NAND.
+
+При требовании авторизации RCI передать `--credentials-file /private/lab-credentials.json` (JSON с ключами `username` и `password`, права **0600** на Linux). Формат credentials дополнительно проверяет существующий раннер. Без файла `AUTH=BLOCKED` при HTTP 401, а не ложный PASS.
+
+**Фиксированный проброс:** `127.0.0.1:8080 → guest:80`, `127.0.0.1:8023 → guest:23`. Если любой локальный порт занят, обвязка не запускает гостя. В нашей текущей изолированной исполнительной среде порт **8080 занят сторонним HTTP-сервисом**, а QEMU и NAND Ported отсутствуют: реальный прогон здесь **BLOCKED**, нельзя считать этот HTTP-сервис эмулятором.
+
+Артефакты:
+- `report.json`, `junit.xml` — исходный отчёт раннера, только boot/CLI.
+- `networkhelm-rci.json` — статусы read-only RCI (создаётся лишь после пройденного boot/CLI).
+- `networkhelm-summary.json` — разделение `guest` и `rci`; если нет подтверждённого гостя, RCI маркируется `NOT_TESTED`.
+- **Выходной код**: 0 — оба этапа PASS; 1 — гостевая CLI прошла, но RCI FAIL; 2 — BLOCKED / нет подтверждённого гостя или учётных данных.
+
+Локальная тестовая обвязка [`lab/test_networkhelm_qemu_smoke.py`](../lab/test_networkhelm_qemu_smoke.py) проверяет preflight-отказ при занятом порте, приватность credentials, корректную передачу `after_scenario`, ложный PASS, BLOCKED, сохранение раздельных отчётов. Прогоны **только с мокированным жизненным циклом QEMU**, не являются guest E2E.
+
+
 ## Следующий этап после read-only RCI PASS
 
 - Запустить NetworkHelm как десктопное приложение на Linux-хосте, в headless-среде Xvfb (или использовать подготовленный бинарник). **Не устанавливать GUI на MIPSel/Entware**.
@@ -73,4 +113,4 @@ py -3 lab/networkhelm_rci_probe.py --url http://127.0.0.1:8080
 
 ## Тесты и факты на дату подготовки (18.11.2026)
 
-Локально выполнены **9/9 unit-тестов PASS** с временным loopback HTTP-сервером: корректная challenge-аутентификация и чтение, фиксированный batch `show`, отсутствие пароля → BLOCKED, неверный пароль → FAIL без утечки, потеря сессии, невалидный JSON/пустой JSON, ошибка RCI в ответе HTTP 200, неверная форма пакетного ответа, отказ/отсутствие batch API, открытая авторизация, блокировка внешних адресов. Отдельные варианты batch проверяются внутри одного параметризованного теста. Тесты **не запускали QEMU** и **не подтверждают полевую работоспособность на KeeneticOS**. Issue [#110](https://github.com/saymer-alt/router-emulator/issues/110) остаётся открытым.
+Локально выполнены **16/16 unit-тестов PASS** (9 проверок RCI + 7 проверок QEMU-обвязки) с временным loopback HTTP-сервером: корректная challenge-аутентификация и чтение, фиксированный batch `show`, отсутствие пароля → BLOCKED, неверный пароль → FAIL без утечки, потеря сессии, невалидный JSON/пустой JSON, ошибка RCI в ответе HTTP 200, неверная форма пакетного ответа, отказ/отсутствие batch API, открытая авторизация, блокировка внешних адресов. Отдельные варианты batch проверяются внутри одного параметризованного теста. Тесты **не запускали QEMU** и **не подтверждают полевую работоспособность на KeeneticOS**. Issue [#110](https://github.com/saymer-alt/router-emulator/issues/110) остаётся открытым.
