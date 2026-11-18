@@ -248,6 +248,9 @@ jobs:
                           ("mihomo_port_7890", ("listening", "not_listening")),
                           ("magitrickle_uptime", ("under_300", "at_least_300")),
                           ("magitrickle_process", ("running", "stopped")),
+                          ("memory_available", ("under_16m", "under_64m",
+                                                "at_least_64m")),
+                          ("kernel_oom_evidence", ("observed", "not_observed")),
                       )
                       safe = []
                       for field, allowed in fields:
@@ -258,7 +261,9 @@ jobs:
                   out.write("A listening port is not an end-to-end proxy PASS.\n")
               else:
                   out.write("### Disposable Ported 5.1.8 lab exception: VERIFIED\n")
-              out.write("KAS experimental installer phase: %s; category: %s\n" % (phase, reason))
+              out.write("KAS experimental installer phase: %s; category: %s; exit_code=%s\n" % (
+                  phase, reason, r.get("exit_code")
+                  if isinstance(r.get("exit_code"), int) else "unknown"))
               if r.get("installer_error_prefix"):
                   out.write("Matched pinned installer err prefix: `%s`\n" % r["installer_error_prefix"])
               out.write("Neither BLOCKED nor this experiment is production KAS acceptance.\n")
