@@ -33,6 +33,7 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 
 from lab.build_entware import build  # noqa: E402
+from lab.make_curl_skew_model import build_model  # noqa: E402
 from lab.guest import Guest  # noqa: E402
 from lab.kas_lifecycle import put as guest_put  # noqa: E402
 from lab.mirror import Mirror  # noqa: E402
@@ -656,7 +657,7 @@ def after_scenario_factory(args, recorder, phases):
                               " | /opt/bin/busybox grep -q %s" % OLD_IPK_SHA256)
             if args.kind in ("curlskew", "curlneg"):
                 for guest_path, data, sha in (
-                        ("/opt/lab/libcurl-model.ipk", args.model_ipk_data, MODEL_IPK_SHA),
+                        ("/opt/lab/libcurl-model.ipk", args.model_ipk_data, args.model_ipk_sha256),
                         ("/opt/lab/libcurl-real.ipk", args.libcurl_ipk_data, LIBCURL_IPK_SHA)):
                     guest_put(guest, guest_path, data)
                     guest.command("/opt/bin/busybox sha256sum %s"
@@ -699,7 +700,9 @@ def main():
                     help="host path of kas-entware-preflight.sh")
     ap.add_argument("--preflight-sha256", required=True)
     ap.add_argument("--model-ipk",
-                    help="path to synthetic 8.15.0-2-model libcurl IPK; required for curl* modes")
+                    help="path to legacy pinned synthetic IPK (curl* modes only)")
+    ap.add_argument("--generate-model", action="store_true",
+                    help="build synthetic IPK from SHA256-pinned real libcurl (curl* modes only)")
     ap.add_argument("--kind", required=True,
                     choices=("fresh", "transition", "feedfail", "interrupt",
                              "curlskew", "curlneg"))
@@ -726,14 +729,19 @@ def main():
     args.preflight_data = preflight_data
     args.old_ipk_data = old_ipk_data
     if args.kind in ("curlskew", "curlneg"):
-        if not args.model_ipk:
-            ap.error("--model-ipk is required for curlskew and curlneg")
-        args.model_ipk_data = Path(args.model_ipk).read_bytes()
-        if hashlib.sha256(args.model_ipk_data).hexdigest() != MODEL_IPK_SHA:
-            raise ValueError("synthetic libcurl model digest mismatch (fail closed)")
+        if bool(args.model_ipk) == bool(args.generate_model):
+            ap.error("choose exactly one: --model-ipk or --generate-model")
         args.libcurl_ipk_data = fetch(
             LIBCURL_IPK_URL, LIBCURL_IPK_SHA,
             Path(args.cache_dir) / "libcurl_8.23.0-1_mipsel-3.4.ipk")
+        if args.generate_model:
+            args.model_ipk_data = build_model(args.libcurl_ipk_data, "mipsel-3.4")
+            args.model_ipk_sha256 = hashlib.sha256(args.model_ipk_data).hexdigest()
+        else:
+            args.model_ipk_data = Path(args.model_ipk).read_bytes()
+            args.model_ipk_sha256 = MODEL_IPK_SHA
+            if hashlib.sha256(args.model_ipk_data).hexdigest() != MODEL_IPK_SHA:
+                raise ValueError("legacy synthetic libcurl model digest mismatch (fail closed)")
         if args.kind == "curlneg":
             foreign = fetch(
                 FOREIGN_LIBCURL_URL, FOREIGN_LIBCURL_SHA,
@@ -758,6 +766,8 @@ def main():
         "old_ipk": {"url": OLD_IPK_URL, "version": OLD_IPK_VERSION,
                     "sha256": OLD_IPK_SHA256},
         "preflight_sha256": args.preflight_sha256,
+        "model_ipk_sha256": getattr(args, "model_ipk_sha256", None),
+        "synthetic_model_generated": args.generate_model,
     })
     phases = [{"fresh": phase_fresh, "transition": phase_transition,
                "feedfail": phase_feedfail, "interrupt": phase_interrupt,
