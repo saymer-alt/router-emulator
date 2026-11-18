@@ -603,12 +603,16 @@ def phase_curlneg(mx):
     mx.run("D12_FEED_DOWN", "opkg update with feed unreachable stays clean",
            "/opt/bin/busybox sed -i 's|http://192.168.1.100/entware|http://192.168.1.100:9/entware|'"
            " /opt/etc/opkg.conf;"
-           " " + capture_probe("/opt/bin/opkg update", lines=20)
-                 .replace('; (exit "$_kas_probe_rc")', '; _feed_down_rc=$_kas_probe_rc') + ";"
+           " (/opt/bin/opkg update) > /opt/lab/.feed-down-output 2>&1;"
+           " _feed_down_rc=$?;"
+           " /opt/bin/busybox head -n 20 /opt/lab/.feed-down-output;"
            " /opt/bin/busybox sed -i 's|http://192.168.1.100:9/entware|http://192.168.1.100/entware|'"
            " /opt/etc/opkg.conf; (exit \"$_feed_down_rc\")",
            {"rc_nonzero": True, "contains": ["Failed to download"]},
            timeout=180)
+    mx.run("D12_FEED_RESTORED", "feed URL restored after failed update",
+           "/opt/bin/busybox grep -F 'http://192.168.1.100/entware' /opt/etc/opkg.conf",
+           {"rc": 0, "absent": [":9/entware"]}, timeout=30)
     mx.preflight("D13_PREFLIGHT_AFTER_NEGATIVES", "KAS preflight after the negative set (gap map)")
     mx.run("D14_FINAL_CURL", "final curl ELF startup after recovery",
            capture_probe("/opt/bin/curl -V", lines=1),
