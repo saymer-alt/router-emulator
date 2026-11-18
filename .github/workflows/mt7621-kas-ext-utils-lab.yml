@@ -263,6 +263,14 @@ jobs:
                   out.write("Matched pinned installer err prefix: `%s`\n" % r["installer_error_prefix"])
               out.write("Neither BLOCKED nor this experiment is production KAS acceptance.\n")
           print("LAB_EXT_UTILS_ONLY_EXCEPTION_REACHED: " + phase + " " + reason)
+          # The original guard-only experiment intentionally accepts a
+          # blocked installer to verify the single missing component.
+          # Full HTTPS mode instead tests real KAS runtime postconditions.
+          # A BLOCKED installer must make the workflow red even if all
+          # prerequisite packages/TLS checks succeeded. Preserve summaries
+          # and sanitized artifacts via subsequent if: always() steps.
+          if https_mode and phase != "PASS":
+              raise SystemExit("KAS_RUNTIME_NOT_ACCEPTED: " + reason)
           PY
 
       - name: Report only safe action counts (no UART)
