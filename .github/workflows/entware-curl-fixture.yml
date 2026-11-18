@@ -10,6 +10,7 @@ on:
       - "lab/test_make_curl_skew_model.py"
       - "lab/curl_aarch64_matrix.py"
       - "lab/mt7621/busybox_matrix.py"
+      - "lab/curl_qemu_user_smoke.py"
   workflow_dispatch:
 
 permissions:
@@ -80,3 +81,21 @@ jobs:
           print('REAL_SOURCE_SYNTHETIC_MODEL_PASS')
           PY
           sha256sum model1.ipk
+
+  qemu-userspace-loader:
+    name: QEMU userspace ELF loader (${{ matrix.arch }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [aarch64-3.10, mipsel-3.4]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install QEMU user-mode only (no system firmware)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends qemu-user-static
+      - name: Real Entware curl, synthetic library skew, and recovery in userspace
+        run: |
+          python3 -m lab.curl_qemu_user_smoke --arch "${{ matrix.arch }}"
