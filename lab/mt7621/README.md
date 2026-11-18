@@ -271,6 +271,20 @@ Read-only `memory_available` and `kernel_oom_evidence` probes have been
 added to the early/delayed snapshots to narrow possible memory causes.
 These fixes and probes have **not been guest-tested** after the dispatch.
 
+**Cheap regression gate (no QEMU)**: the registered workflow now accepts
+`preflight_only=true`; this runs the host-only `unittest discover` suite and
+validates exactly one guard edit against the pinned KAS checkout. QEMU cache,
+patched QEMU build, public firmware downloads, NAND preparation, actual guest
+and all real KAS/Mihomo/MagiTrickle runtime checks are **SKIPPED**. It does
+not claim QEMU support. Run on the experiment branch with:
+
+```powershell
+gh workflow run mt7621-kas-ext-utils-lab.yml --repo saymer-alt/router-emulator --ref experiment/mt7621-kas-runtime-tls-20261117 -f preflight_only=true
+```
+
+Use `https_mirror=true` without `preflight_only` for the next carefully
+budgeted real guest experiment only when runtime diagnostics are ready.
+
 **Next step** (separate explicitly authorized guest run): inspect the two
 service snapshots and the decision to skip or execute an extra ELF probe. If Mihomo remains stopped, collect
 only bounded/private init start exit code, YAML validity classification,
