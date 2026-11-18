@@ -163,36 +163,70 @@ field architecture; (2) an installer check that relies on `curl -V` alone is
 **architecture-dependent** — the package-database comparison + `LD_BIND_NOW`
 probe pair (KAS PR #255) is the only combination that works on both ABIs.
 
-## D. KAS changes (PR #255 branch `test/curl-libcurl-skew-field-20261117`, commit `01be327`)
+## C2. QEMU user-mode: real Entware ELF loader acceptance (2026-11-18)
 
-1. **Package-database skew detector** in `kas-web-install.sh` (primary gate,
-   runs before any download; exact message with the repair command).
-2. Existing `LD_BIND_NOW=1 curl -V` probe kept (secondary, catches loader
-   breakage the version comparison cannot see); its limits documented.
-3. `tests/kas-web-channel-install-regression.py`: new `skewed_versions` case
-   (opkg mock reports curl 8.23.0-1 + libcurl 8.15.0-2 → fail closed, no
-   download) — suite **16/16 OK** in the WSL LF clone.
-4. `docs/32-entware-curl-libcurl-skew.md`: root cause, detection limits,
-   field-proven recovery, and the bootstrap-stage limitation (`curl | sh`
-   cannot self-diagnose; documented operator pre-check; no weak alternative
-   loader shipped).
+This is **new evidence** on emulator PR #109 commit
+`817f7653a22a423b98d4e087056f3fa745628171`.
+See [workflow 44354095969](https://github.com/saymer-alt/router-emulator/actions/runs/44354095969).
+All four jobs completed **SUCCESS**: the two official-IPK fixture creation jobs,
+plus AArch64 and MIPSel userspace QEMU loader acceptance. On the same commit,
+the other five PR workflows also finished successfully.
 
-1. **Package-database skew detector** in `kas-web-install.sh` (primary gate,
-   runs before any download; exact message with the repair command).
-2. Existing `LD_BIND_NOW=1 curl -V` probe kept (secondary, catches loader
-   breakage the version comparison cannot see); its limits documented.
-3. `tests/kas-web-channel-install-regression.py`: new `skewed_versions` case
-   (opkg mock reports curl 8.23.0-1 + libcurl 8.15.0-2 → fail closed, no
-   download) — suite **18/18 OK** in the WSL LF clone.
-4. **`kas-entware-preflight.sh`: new read-only `curl-libcurl-skew` check** —
-   FAIL on a version mismatch with repair guidance, PASS when aligned,
-   UNKNOWN without opkg; `tests/busybox-preflight-regression.py` extended
-   (skew → FAIL exit 1, aligned → PASS, mutating-opkg static scanner stays
-   green) — suite passed.
-5. `docs/32-entware-curl-libcurl-skew.md`: root cause, detection limits,
-   field-proven recovery, and the bootstrap-stage limitation (`curl | sh`
-   cannot self-diagnose; documented operator pre-check; no weak alternative
-   loader shipped).
+Both userspace jobs fetch official, SHA256-verified Entware package dependency
+closures into **disposable temporary filesystem roots**, run the **real 8.23.0-1
+curl ELF** through QEMU user-mode, substitute a **synthetic** version-skewed
+libcurl ELF, and restore the official library. No physical routers or host
+`/opt` are modified; no full KeeneticOS firmware boot occurs in these jobs.
+
+| Stage (real `curl -V`) | AArch64 `aarch64-3.10` | MIPSel `mipsel-3.4` |
+|---|---|---|
+| Aligned: real curl + real libcurl 8.23 | rc 0 — PASS | rc 0 — PASS |
+| Aligned with `LD_BIND_NOW=1` | rc 0 — PASS | rc 0 — PASS |
+| Skew: synthetic libcurl 8.15-model, ordinary loader | rc 127, missing symbol — PASS | rc 0, lazy binding — PASS |
+| Skew with `LD_BIND_NOW=1` | rc 127, missing symbol — PASS | rc 127, missing symbol — PASS |
+| Restored real libcurl 8.23 | rc 0 — PASS | rc 0 — PASS |
+| Restored with `LD_BIND_NOW=1` | rc 0 — PASS | rc 0 — PASS |
+
+Missing symbol in failing cases: `curl_multi_get_offt`. Both jobs print
+`QEMU_USER_CURL_ACCEPTANCE_PASS` with the corresponding ABI.
+
+**Proven generated model hashes (from official libcurl bytes):**
+
+- AArch64 real libcurl `d5d3eca432e020efd92a3dc063bb5c4b2433190ce36680964451b9d76333eec1`
+  → synthetic model `e5087a0734bbf766c786c17a4a97a93081e97cb70fe17f7fc0c3300b2822bd77`.
+- MIPSel real libcurl `f2f5f3cfd08413806c7970305d3aa4f52a3bd828c6d06fc99ac58896eb5510c4`
+  → synthetic model `1d21d649b3a8037efd6bc005844227853344c09d1a8ff253c506578a839ca114`.
+
+These newly generated hashes are intentionally **different** from the
+historical synthetic fixture hashes in the fixed-input table. The difference
+is not a failure; never mix evidence or pins from distinct builders.
+
+**Evidence boundaries:** official *source* IPKs and dynamic loaders are real,
+but the missing-symbol 8.15-model is synthetic (the original historical
+8.15.0-2 IPK is still unavailable). Userspace QEMU tests do not prove the
+newest KAS preflight was tested inside a *full* KeeneticOS/OPKG guest; that
+remains an independent acceptance step.
+
+## D. KAS changes and verification boundary (PR #255)
+
+The KAS Draft PR is
+[keenetic-auto-setup-dev #255](https://github.com/saymer-alt/keenetic-auto-setup-dev/pull/255).
+It includes:
+
+1. A read-only OPKG version-skew check in `kas-web-install.sh` before network
+   downloads; `LD_BIND_NOW=1 curl -V` remains the secondary loader check.
+2. A read-only `curl-libcurl-skew` diagnostic in
+   `kas-entware-preflight.sh`; unknown/incomplete installed-package metadata
+   must not be silently reported as PASS.
+3. Mocked regression coverage for mismatched versions, broken curl loader,
+   missing/incomplete OPKG status, and field-proven recovery documentation
+   (`docs/32-entware-curl-libcurl-skew.md`).
+
+The older overnight WSL regression results (including a reported 18/18 pass)
+belong to **earlier PR commits**; they are not evidence that PR #255's newer
+head or the QEMU userspace runner has exercised the current private
+`kas-entware-preflight.sh`. That exact-SHA full-guest test remains
+**NOT TESTED** until separately evidenced. No KAS PR merge is implied.
 
 ## E. Adjacent Entware scenarios — existing coverage map (issue #108 list)
 
