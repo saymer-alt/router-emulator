@@ -1,0 +1,101 @@
+# Focused, low-cost acceptance of real pinned Entware IPKs.
+# Does NOT boot guest firmware, rebuild QEMU, or publish synthetic packages.
+name: Entware curl/libcurl real-IPK fixture acceptance
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/entware-curl-fixture.yml"
+      - "lab/make_curl_skew_model.py"
+      - "lab/test_make_curl_skew_model.py"
+      - "lab/curl_aarch64_matrix.py"
+      - "lab/mt7621/busybox_matrix.py"
+      - "lab/curl_qemu_user_smoke.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: curl-fixture-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pinned-real-libcurl:
+    name: Real Entware IPK model (${{ matrix.arch }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: aarch64-3.10
+            feed: aarch64-k3.10
+            sha: d5d3eca432e020efd92a3dc063bb5c4b2433190ce36680964451b9d76333eec1
+          - arch: mipsel-3.4
+            feed: mipselsf-k3.4
+            sha: f2f5f3cfd08413806c7970305d3aa4f52a3bd828c6d06fc99ac58896eb5510c4
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: No-network synthetic model unit tests
+        run: |
+          set -eu
+          python3 -m unittest discover -s lab -p 'test_make_curl_skew_model.py' -v
+
+      - name: Download and hash-check real libcurl (no installation)
+        shell: bash
+        env:
+          ARCH: ${{ matrix.arch }}
+          FEED: ${{ matrix.feed }}
+          SHA256: ${{ matrix.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/libcurl-fixture"
+          cd "$RUNNER_TEMP/libcurl-fixture"
+          url="https://bin.entware.net/$FEED/libcurl_8.23.0-1_${ARCH}.ipk"
+          curl --proto '=https' -fsSL --retry 2 --connect-timeout 10 --max-time 90 "$url" -o source.ipk
+          printf '%s  %s\n' "$SHA256" source.ipk | sha256sum -c -
+
+      - name: Generate and inspect two matching deterministic fixtures
+        shell: bash
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/libcurl-fixture"
+          python3 "$GITHUB_WORKSPACE/lab/make_curl_skew_model.py" --arch "$ARCH" \
+            --source-ipk source.ipk --output-ipk model1.ipk
+          python3 "$GITHUB_WORKSPACE/lab/make_curl_skew_model.py" --arch "$ARCH" \
+            --source-ipk source.ipk --output-ipk model2.ipk
+          cmp model1.ipk model2.ipk
+          PYTHONPATH="$GITHUB_WORKSPACE" python3 - <<'PY'
+          from pathlib import Path
+          from lab.make_curl_skew_model import _members, TARGET_ELF, OLD_SYMBOL, NEW_SYMBOL
+          o = dict((m.name.removeprefix('./'), b) for m,b in _members(Path('model1.ipk').read_bytes(), 'model'))
+          c = dict((m.name.removeprefix('./'), b) for m,b in _members(o['control.tar.gz'], 'control'))
+          d = dict((m.name.removeprefix('./'), b) for m,b in _members(o['data.tar.gz'], 'data'))
+          assert b'Version: 8.15.0-2' in c['control']
+          assert OLD_SYMBOL not in d[TARGET_ELF]
+          assert NEW_SYMBOL in d[TARGET_ELF]
+          print('REAL_SOURCE_SYNTHETIC_MODEL_PASS')
+          PY
+          sha256sum model1.ipk
+
+  qemu-userspace-loader:
+    name: QEMU userspace ELF loader (${{ matrix.arch }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [aarch64-3.10, mipsel-3.4]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install QEMU user-mode only (no system firmware)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends qemu-user-static
+      - name: Real Entware curl, synthetic library skew, and recovery in userspace
+        run: |
+          python3 -m lab.curl_qemu_user_smoke --arch "${{ matrix.arch }}"

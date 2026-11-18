@@ -1,0 +1,138 @@
+{
+  "schema": 1,
+  "platform": "WR3000P_PORTED_5_1_8_QEMU",
+  "outcome": "FAIL",
+  "hardware_acceptance": "NOT_TESTED",
+  "gates": {
+    "BOOT_READY": {
+      "status": "PASS",
+      "reason": "boot_stages_observed"
+    },
+    "AUTH_READY": {
+      "status": "PASS",
+      "reason": "authenticated_version_and_reboot"
+    },
+    "ENTWARE_READY": {
+      "status": "FAIL",
+      "reason": "runner_failure"
+    },
+    "KAS_PREFLIGHT": {
+      "status": "BLOCKED",
+      "reason": "prerequisite_blocked"
+    },
+    "KAS_INSTALL": {
+      "status": "BLOCKED",
+      "reason": "prerequisite_blocked"
+    },
+    "KAS_DOCTOR": {
+      "status": "BLOCKED",
+      "reason": "prerequisite_blocked"
+    },
+    "KAS_REBOOT": {
+      "status": "BLOCKED",
+      "reason": "prerequisite_blocked"
+    },
+    "KAS_ROLLBACK": {
+      "status": "BLOCKED",
+      "reason": "prerequisite_blocked"
+    },
+    "KAS_UNINSTALL": {
+      "status": "BLOCKED",
+      "reason": "prerequisite_blocked"
+    },
+    "KAS_UNINSTALL_PACKAGES": {
+      "status": "BLOCKED",
+      "reason": "prerequisite_blocked"
+    },
+    "KAS_UPDATE_E2E": {
+      "status": "BLOCKED",
+      "reason": "prerequisite_blocked"
+    }
+  },
+  "capabilities": {
+    "ndmc": {
+      "status": "NOT_TESTED",
+      "reason": "unattempted"
+    },
+    "native_rci": {
+      "status": "NOT_TESTED",
+      "reason": "unattempted"
+    },
+    "dns_filter": {
+      "status": "NOT_TESTED",
+      "reason": "unattempted"
+    },
+    "opkg_kmod_netfilter": {
+      "status": "NOT_TESTED",
+      "reason": "unattempted"
+    },
+    "dns_tls_or_https": {
+      "status": "NOT_TESTED",
+      "reason": "unattempted"
+    },
+    "proxy_client": {
+      "status": "NOT_TESTED",
+      "reason": "unattempted"
+    },
+    "netfilter_mark": {
+      "status": "NOT_TESTED",
+      "reason": "unattempted"
+    },
+    "netfilter_connmark": {
+      "status": "NOT_TESTED",
+      "reason": "unattempted"
+    },
+    "tun": {
+      "status": "NOT_TESTED",
+      "reason": "unattempted"
+    },
+    "routing": {
+      "status": "NOT_TESTED",
+      "reason": "unattempted"
+    },
+    "ext4_opt": {
+      "status": "NOT_TESTED",
+      "reason": "unattempted"
+    },
+    "ram": {
+      "status": "NOT_TESTED",
+      "reason": "unattempted"
+    },
+    "zram": {
+      "status": "NOT_TESTED",
+      "reason": "unattempted"
+    },
+    "external_swap": {
+      "status": "NOT_TESTED",
+      "reason": "unattempted"
+    },
+    "clock": {
+      "status": "NOT_TESTED",
+      "reason": "unattempted"
+    },
+    "dns": {
+      "status": "NOT_TESTED",
+      "reason": "unattempted"
+    },
+    "local_http": {
+      "status": "NOT_TESTED",
+      "reason": "unattempted"
+    },
+    "package_mirror": {
+      "status": "NOT_TESTED",
+      "reason": "unattempted"
+    }
+  },
+  "checks": {},
+  "references": {
+    "emulator_commit": "206d22d05f2ec7d44f7cb6a28d403b988fbbefcf",
+    "qemu_source_commit": "f8b2f64e2336a28bf0d50b6ef8a7d8c013e9bcf3",
+    "qemu_binary_sha256": "d0d343a847d247367141362c3c9a2dea17cdd0edd320046e94731404aed3ff4f",
+    "qemu_patches_sha256": "dd771dca35fdafa98a4790044513143ae5e3b12bc74c6c390bf9c6e47e80625d",
+    "firmware_sha256": "710e4a37b1aa9f3a65a5122edd0650f5c5ad3e6eca5df53b11ac28aab2664eb7",
+    "keenboot_sha256": "8b8615b345d912187853fea6bef6b1868760fd52ed92ba7c3a380ad5533cbf08",
+    "entware_lock_sha256": "1f2ee977fcac25f7e415b4d2b0e50a8686402da27b1d23b9750bcc43bf32f5d8",
+    "kas_assets_lock_sha256": "d7634f584bb1b695f3092c7d2d41c9dee16ebe78c6809a27ad6b182c650d7c0a"
+  },
+  "measurements": {}
+}

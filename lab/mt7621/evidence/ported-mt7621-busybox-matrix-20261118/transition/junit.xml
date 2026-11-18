@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<testsuite name="transition" tests="24">
+  <testcase name="BASELINE_BUSYBOX_STATUS" classname="busybox-matrix.transition" status="PASS"></testcase>
+  <testcase name="BASELINE_SH_LINK" classname="busybox-matrix.transition" status="PASS"></testcase>
+  <testcase name="BASELINE_VERSION" classname="busybox-matrix.transition" status="PASS"></testcase>
+  <testcase name="BASELINEAPPLETS" classname="busybox-matrix.transition" status="PASS"></testcase>
+  <testcase name="BASELINE_WGET_TLS" classname="busybox-matrix.transition" status="OBSERVED"></testcase>
+  <testcase name="BASELINE_Dropbear" classname="busybox-matrix.transition" status="PASS"></testcase>
+  <testcase name="P04_DOWNGRADE_TO_OLD" classname="busybox-matrix.transition" status="PASS"></testcase>
+  <testcase name="P04_STATE_OLD" classname="busybox-matrix.transition" status="PASS"></testcase>
+  <testcase name="PREFLIGHT_AFTER_DOWNGRADE" classname="busybox-matrix.transition" status="OBSERVED"></testcase>
+  <testcase name="P08_HOLD_SET" classname="busybox-matrix.transition" status="PASS"></testcase>
+  <testcase name="P07A_OPKG_UPDATE" classname="busybox-matrix.transition" status="PASS"></testcase>
+  <testcase name="P07B_INSTALL_BUSYBOX" classname="busybox-matrix.transition" status="PASS"></testcase>
+  <testcase name="P07C_OPKG_UPGRADE" classname="busybox-matrix.transition" status="PASS"></testcase>
+  <testcase name="P08_UNHOLD" classname="busybox-matrix.transition" status="PASS"></testcase>
+  <testcase name="P05_STATE_AFTER_TRANSITION" classname="busybox-matrix.transition" status="PASS"></testcase>
+  <testcase name="P05_APPLETS_AFTER_TRANSITION" classname="busybox-matrix.transition" status="PASS"></testcase>
+  <testcase name="PREFLIGHT_AFTER_TRANSITION" classname="busybox-matrix.transition" status="OBSERVED"></testcase>
+  <testcase name="P11_REBOOT" classname="busybox-matrix.transition" status="PASS"></testcase>
+  <testcase name="P11_POST_REBOOT" classname="busybox-matrix.transition" status="PASS"></testcase>
+  <testcase name="P12_IDEMPOTENT_UPGRADE" classname="busybox-matrix.transition" status="PASS"></testcase>
+  <testcase name="P12_FINAL_STATE" classname="busybox-matrix.transition" status="PASS"></testcase>
+  <testcase name="N14_MODIFY_DROPCONF" classname="busybox-matrix.transition" status="PASS"></testcase>
+  <testcase name="N14_REINSTALL_DROPCONF" classname="busybox-matrix.transition" status="OBSERVED"></testcase>
+  <testcase name="N14_CONFILE_BACKUP" classname="busybox-matrix.transition" status="OBSERVED"></testcase>
+</testsuite>

@@ -1,0 +1,153 @@
+{
+  "kind": "interrupt",
+  "meta": {
+    "arch": "mipsel-3.4",
+    "preset": "xiaomi-mi-router-3g-breed",
+    "pinned_bootstrap_busybox": "1.38.0-5",
+    "old_ipk": {
+      "url": "https://test.entware.net/mipselsf-k3.4/busybox_1.38.0-3_mipsel-3.4.ipk",
+      "version": "1.38.0-3",
+      "sha256": "29954f847e9442fc30cebf6bc7dd17a1fc1d391c2fd037c6df582a30c0e40645"
+    },
+    "preflight_sha256": "defb91a0fa819f06d6dcc6651704b183d45a6bf638f831167da2cb5c3132378e"
+  },
+  "entries": [
+    {
+      "id": "BASELINE_BUSYBOX_STATUS",
+      "label": "opkg status busybox",
+      "command": "/opt/bin/opkg status busybox | /opt/bin/busybox grep -E 'Version|Status'",
+      "rc": 0,
+      "status": "PASS",
+      "reasons": [],
+      "output_tail": "Version: 1.38.0-5\nStatus: install hold installed"
+    },
+    {
+      "id": "BASELINE_SH_LINK",
+      "label": "/opt/bin/sh symlink identity",
+      "command": "/opt/bin/busybox ls -l /opt/bin/sh; /opt/bin/busybox readlink -f /opt/bin/sh",
+      "rc": 0,
+      "status": "PASS",
+      "reasons": [],
+      "output_tail": "lrwxr-xr-x    1 root     root            16 Jan  1 00:04 /opt/bin/sh -> /opt/bin/busybox\n/opt/bin/busybox"
+    },
+    {
+      "id": "BASELINE_VERSION",
+      "label": "busybox banner",
+      "command": "/opt/bin/busybox | /opt/bin/busybox head -1; /opt/bin/sh -c 'echo SHELL_EXEC_OK'",
+      "rc": 0,
+      "status": "PASS",
+      "reasons": [],
+      "output_tail": "BusyBox v1.38.0 (2026-05-13 02:19:59 UTC) multi-call binary.\nSHELL_EXEC_OK"
+    },
+    {
+      "id": "BASELINEAPPLETS",
+      "label": "core applets executable",
+      "command": "/opt/bin/busybox sh -c 'chmod --help >/dev/null 2>&1; printf A_%s $((40+$?)); rm --help >/dev/null 2>&1; printf R_%s $((40+$?)); sleep 0; printf S_%s $((40+$?)); ls /opt >/dev/null; printf L_%s $((40+$?))'",
+      "rc": 0,
+      "status": "PASS",
+      "reasons": [],
+      "output_tail": "A_40R_40S_40L_40"
+    },
+    {
+      "id": "BASELINE_WGET_TLS",
+      "label": "wget/curl TLS capability inventory",
+      "command": "/opt/bin/busybox ls -l /opt/bin/wget /opt/bin/wget-ssl 2>&1; /opt/bin/busybox command -v curl && /opt/bin/curl --version | head -1",
+      "rc": 127,
+      "status": "OBSERVED",
+      "reasons": [],
+      "output_tail": "ls: /opt/bin/wget-ssl: No such file or directory\nlrwxr-xr-x    1 root     root            16 Jan  1 00:04 /opt/bin/wget -> /opt/bin/busybox\ncommand: applet not found"
+    },
+    {
+      "id": "BASELINE_Dropbear",
+      "label": "dropbear config + listener",
+      "command": "/opt/bin/busybox cat /opt/etc/config/dropbear.conf; /opt/bin/busybox netstat -tln 2>/dev/null | /opt/bin/busybox grep :222 || echo NETSTAT_UNAVAILABLE",
+      "rc": 0,
+      "status": "PASS",
+      "reasons": [],
+      "output_tail": "PORT=222\nPIDFILE=\"/var/run/lab-dropbear.pid\"\ntcp        0      0 0.0.0.0:222             0.0.0.0:*               LISTEN      \ntcp        0      0 :::222                  :::*                    LISTEN"
+    },
+    {
+      "id": "N01_PIN_POSTINST",
+      "label": "package-owned recovery script pinned aside before the experiment",
+      "command": "/opt/bin/busybox cp /opt/lib/opkg/info/busybox.postinst /opt/lab/postinst-pinned; /opt/bin/busybox sha256sum /opt/lab/postinst-pinned",
+      "rc": 0,
+      "status": "PASS",
+      "reasons": [],
+      "output_tail": "eb3baeb04943d15c60a028ffc83803348a51ec1b3a0086513c524616c6ebd249  /opt/lab/postinst-pinned"
+    },
+    {
+      "id": "N01_PRERM_WINDOW",
+      "label": "installed busybox.prerm (remove branch) executed outside opkg",
+      "command": "/opt/lib/opkg/info/busybox.prerm; printf 'PRERM_%s\\n' $((40+$?)); /opt/bin/busybox ls -l /opt/bin/sh 2>&1 | head -1; /opt/bin/busybox test -e /opt/bin/chmod; printf 'CHMOD_PRESENT_%s\\n' $((40+$?)); /bin/sh -c 'echo X' 2>&1 | head -1; printf 'NATIVE_SH_%s\\n' $((40+$?)); /opt/bin/busybox sh /opt/lab/preflight.sh >/opt/lab/preflight-broken.txt 2>&1; printf 'PREFLIGHT_BROKEN_RC=%s\\n' \"$?\"; /opt/bin/busybox tail -25 /opt/lab/preflight-broken.txt; /opt/bin/busybox sh /opt/lab/postinst-pinned; printf 'RECOVERY_%s\\n' $((40+$?)); /opt/bin/busybox test -x /opt/bin/sh; printf 'SH_RESTORED_%s\\n' $((40+$?)); /opt/bin/busybox test -x /opt/bin/chmod; printf 'CHMOD_RESTORED_%s\\n' $((40+$?))",
+      "rc": 0,
+      "status": "OBSERVED",
+      "reasons": [],
+      "output_tail": "PRERM_40\nls: /opt/bin/sh: No such file or directory\nCHMOD_PRESENT_41\nX\nNATIVE_SH_40\nPREFLIGHT_BROKEN_RC=1\nPASS: busybox-binary: /opt/bin/busybox present and executes\nFAIL: opt-sh: /opt/bin/sh is missing: Entware shell scripts (including KAS tools and opkg configure) cannot run\nFAIL: applet-chmod: /opt/bin/chmod is missing while the busybox build provides the applet: interrupted busybox prerm/postinst or manual link damage; see the rescue guide, do not recreate links blindly\nFAIL: applet-ln: /opt/bin/ln is missing while the busybox build provides the applet: interrupted busybox prerm/postinst or manual link damage; see the rescue guide, do not recreate links blindly\nFAIL: applet-rm: /opt/bin/rm is missing while the busybox build provides the applet: interrupted busybox prerm/postinst or manual link damage; see the rescue guide, do not recreate links blindly\nFAIL: applet-cp: /opt/bin/cp is missing while the busybox build provides the applet: interrupted busybox prerm/postinst or manual link damage; see the rescue guide, do not recreate links blindly\nFAIL: applet-mv: /opt/bin/mv is missing while the busybox build provides the applet: interrupted busybox prerm/postinst or manual link damage; see the rescue guide, do not recreate links blindly\nFAIL: applet-ls: /opt/bin/ls is missing while the busybox build provides the applet: interrupted busybox prerm/postinst or manual link damage; see the rescue guide, do not recreate links blindly\nFAIL: applet-cat: /opt/bin/cat is missing while the busybox build provides the applet: interrupted busybox prerm/postinst or manual link damage; see the rescue guide, do not recreate links blindly\nPASS: applet-grep: /opt/bin/grep resolves to an executable file\nFAIL: applet-sed: /opt/bin/sed is missing while the busybox build provides the applet: interrupted busybox prerm/postinst or manual link damage; see the rescue guide, do not recreate links blindly\nFAIL: applet-awk: /opt/bin/awk is missing while the busybox build provides the applet: interrupted busybox prerm/postinst or manual link damage; see the rescue guide, do not recreate links blindly\nFAIL: applet-wget: /opt/bin/wget is missing while the busybox build provides the applet: interrupted busybox prerm/postinst or manual link damage; see the rescue guide, do not recreate links blindly\nFAIL: wget-capability: /opt/bin/wget is missing or unusable; consult the rescue guide before attempting downloads\nUNKNOWN: opkg-view: opkg did not report busybox as 'install ok installed'; the package database may be damaged or mid-transaction\nWarning: '/opt/bin/grep' is already exists, skipping.\nRECOVERY_40\nSH_RESTORED_40\nCHMOD_RESTORED_40"
+    },
+    {
+      "id": "N01_NEW_SSH_SESSION",
+      "label": "fresh SSH exec after in-channel recovery",
+      "command": "/opt/bin/sh -c 'echo NEW_SESSION_SHELL_OK'; /opt/bin/busybox sh -c 'rm --help >/dev/null 2>&1; printf RM_%s $((40+$?)); sleep 0; printf SLEEP_%s $((40+$?))'",
+      "rc": 0,
+      "status": "PASS",
+      "reasons": [],
+      "output_tail": "NEW_SESSION_SHELL_OK\nRM_40SLEEP_40"
+    },
+    {
+      "id": "N01_PREFLIGHT_RECOVERED",
+      "label": "KAS preflight after package-owned recovery",
+      "command": "/opt/bin/busybox sh /opt/lab/preflight.sh > /opt/lab/preflight-out.txt 2>&1; printf 'PREFLIGHT_RC=%s\\n' \"$?\"; /opt/bin/busybox tail -40 /opt/lab/preflight-out.txt",
+      "rc": 0,
+      "status": "OBSERVED",
+      "reasons": [],
+      "output_tail": "PREFLIGHT_RC=2\nPASS: busybox-binary: /opt/bin/busybox present and executes\nPASS: opt-sh: /opt/bin/sh present and executes\nPASS: applet-chmod: /opt/bin/chmod resolves to an executable file\nPASS: applet-ln: /opt/bin/ln resolves to an executable file\nPASS: applet-rm: /opt/bin/rm resolves to an executable file\nPASS: applet-cp: /opt/bin/cp resolves to an executable file\nPASS: applet-mv: /opt/bin/mv resolves to an executable file\nPASS: applet-ls: /opt/bin/ls resolves to an executable file\nPASS: applet-cat: /opt/bin/cat resolves to an executable file\nPASS: applet-grep: /opt/bin/grep resolves to an executable file\nPASS: applet-sed: /opt/bin/sed resolves to an executable file\nPASS: applet-awk: /opt/bin/awk resolves to an executable file\nPASS: applet-wget: /opt/bin/wget resolves to an executable file\nWARN: wget-capability: /opt/bin/wget points at busybox: the BusyBox wget applet has no HTTPS support, https feeds will fail with 'wget returned 1' (Entware #887)\nUNKNOWN: opkg-view: opkg did not report busybox as 'install ok installed'; the package database may be damaged or mid-transaction",
+      "preflight_rc": 2
+    },
+    {
+      "id": "N10_KILL_MID_TRANSACTION",
+      "label": "kill -9 opkg during forced reinstall",
+      "command": "/opt/bin/opkg install --force-reinstall busybox > /opt/lab/reinstall.log 2>&1 & p=$!; sleep 0.3; kill -9 $p 2>/dev/null; wait $p; printf 'KILL_%s\\n' $((40+$?)); /opt/bin/opkg status busybox | /opt/bin/busybox grep -E '^Status|^Version'",
+      "rc": 0,
+      "status": "OBSERVED",
+      "reasons": [],
+      "output_tail": "KILL_177\nVersion: 1.38.0-5\nStatus: install hold installed\nsleep: invalid number '0.3'\nKilled"
+    },
+    {
+      "id": "N10_STATE_AFTER_KILL",
+      "label": "shell and applet integrity after killed transaction",
+      "command": "/opt/bin/sh -c 'echo SH_OK' 2>&1 | head -1; /opt/bin/busybox test -x /opt/bin/busybox; printf 'BB_PRESENT_%s\\n' $((40+$?))",
+      "rc": 0,
+      "status": "OBSERVED",
+      "reasons": [],
+      "output_tail": "SH_OK\nBB_PRESENT_40"
+    },
+    {
+      "id": "N15_RERUN_COMPLETES",
+      "label": "re-running the transaction completes (opkg self-recovery)",
+      "command": "/opt/bin/opkg install --force-reinstall busybox",
+      "rc": 0,
+      "status": "PASS",
+      "reasons": [],
+      "output_tail": "Warning: '/opt/bin/grep' is already exists, skipping.\nRemoving package busybox from root...\nInstalling busybox (1.38.0-5) to root...\nDownloading http://192.168.1.100/entware/busybox_1.38.0-5_mipsel-3.4.ipk\nConfiguring busybox."
+    },
+    {
+      "id": "N15_STATE_CLEAN",
+      "label": "clean state after the completed rerun",
+      "command": "/opt/bin/opkg status busybox | /opt/bin/busybox grep -E '^Status|^Version'; /opt/bin/sh -c 'echo FINAL_SHELL_OK'",
+      "rc": 0,
+      "status": "PASS",
+      "reasons": [],
+      "output_tail": "Version: 1.38.0-5\nStatus: install hold,user installed\nFINAL_SHELL_OK"
+    },
+    {
+      "id": "PREFLIGHT_FINAL",
+      "label": "KAS preflight after interruption scenarios",
+      "command": "/opt/bin/busybox sh /opt/lab/preflight.sh > /opt/lab/preflight-out.txt 2>&1; printf 'PREFLIGHT_RC=%s\\n' \"$?\"; /opt/bin/busybox tail -40 /opt/lab/preflight-out.txt",
+      "rc": 0,
+      "status": "OBSERVED",
+      "reasons": [],
+      "output_tail": "PREFLIGHT_RC=2\nPASS: busybox-binary: /opt/bin/busybox present and executes\nPASS: opt-sh: /opt/bin/sh present and executes\nPASS: applet-chmod: /opt/bin/chmod resolves to an executable file\nPASS: applet-ln: /opt/bin/ln resolves to an executable file\nPASS: applet-rm: /opt/bin/rm resolves to an executable file\nPASS: applet-cp: /opt/bin/cp resolves to an executable file\nPASS: applet-mv: /opt/bin/mv resolves to an executable file\nPASS: applet-ls: /opt/bin/ls resolves to an executable file\nPASS: applet-cat: /opt/bin/cat resolves to an executable file\nPASS: applet-grep: /opt/bin/grep resolves to an executable file\nPASS: applet-sed: /opt/bin/sed resolves to an executable file\nPASS: applet-awk: /opt/bin/awk resolves to an executable file\nPASS: applet-wget: /opt/bin/wget resolves to an executable file\nWARN: wget-capability: /opt/bin/wget points at busybox: the BusyBox wget applet has no HTTPS support, https feeds will fail with 'wget returned 1' (Entware #887)\nUNKNOWN: opkg-view: opkg did not report busybox as 'install ok installed'; the package database may be damaged or mid-transaction",
+      "preflight_rc": 2
+    }
+  ]
+}

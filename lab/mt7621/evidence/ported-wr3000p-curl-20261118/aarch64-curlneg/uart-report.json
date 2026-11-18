@@ -1,0 +1,60 @@
+{
+  "scenario": "WR3000P AArch64 curl/libcurl skew matrix (curlneg)",
+  "evidence": "KEENETIC_PORTED_EXPERIMENTAL",
+  "outcome": "PASS",
+  "elapsed_seconds": 195.31,
+  "steps": [
+    {
+      "action": "wait_serial",
+      "outcome": "PASS",
+      "elapsed_seconds": 3.25
+    },
+    {
+      "action": "wait_serial",
+      "outcome": "PASS",
+      "elapsed_seconds": 1.0
+    },
+    {
+      "action": "wait_serial",
+      "outcome": "PASS",
+      "elapsed_seconds": 0.0
+    },
+    {
+      "action": "wait_serial",
+      "outcome": "PASS",
+      "elapsed_seconds": 9.26
+    },
+    {
+      "action": "wait_serial",
+      "outcome": "PASS",
+      "elapsed_seconds": 1.25
+    },
+    {
+      "action": "wait_serial",
+      "outcome": "PASS",
+      "elapsed_seconds": 0.0
+    },
+    {
+      "action": "wait_serial",
+      "outcome": "PASS",
+      "elapsed_seconds": 1.25
+    },
+    {
+      "action": "wait_serial",
+      "outcome": "PASS",
+      "elapsed_seconds": 7.26
+    },
+    {
+      "action": "wait_serial",
+      "outcome": "PASS",
+      "elapsed_seconds": 62.07
+    },
+    {
+      "action": "wait_serial",
+      "outcome": "PASS",
+      "elapsed_seconds": 69.37
+    }
+  ],
+  "failure": null,
+  "warning": "Virtual test evidence is NOT physical-router acceptance."
+}

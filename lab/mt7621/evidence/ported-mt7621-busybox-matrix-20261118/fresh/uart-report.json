@@ -1,0 +1,95 @@
+{
+  "scenario": "MT7621 Entware BusyBox matrix (fresh): pristine NAND + fresh pinned bootstrap",
+  "evidence": "KEENETIC_PORTED_EXPERIMENTAL",
+  "outcome": "PASS",
+  "elapsed_seconds": 746.21,
+  "steps": [
+    {
+      "action": "wait_serial",
+      "outcome": "PASS",
+      "elapsed_seconds": 1.0
+    },
+    {
+      "action": "wait_serial",
+      "outcome": "PASS",
+      "elapsed_seconds": 26.55
+    },
+    {
+      "action": "wait_serial",
+      "outcome": "PASS",
+      "elapsed_seconds": 0.0
+    },
+    {
+      "action": "wait_serial",
+      "outcome": "PASS",
+      "elapsed_seconds": 20.02
+    },
+    {
+      "action": "wait_serial",
+      "outcome": "PASS",
+      "elapsed_seconds": 155.26
+    },
+    {
+      "action": "wait_serial",
+      "outcome": "PASS",
+      "elapsed_seconds": 2.0
+    },
+    {
+      "action": "sleep",
+      "outcome": "PASS",
+      "elapsed_seconds": 15.02
+    },
+    {
+      "action": "telnet",
+      "outcome": "PASS",
+      "elapsed_seconds": 0.48
+    },
+    {
+      "action": "telnet",
+      "outcome": "PASS",
+      "elapsed_seconds": 0.45
+    },
+    {
+      "action": "telnet",
+      "outcome": "PASS",
+      "elapsed_seconds": 2.76
+    },
+    {
+      "action": "wait_serial",
+      "outcome": "PASS",
+      "elapsed_seconds": 28.07
+    },
+    {
+      "action": "wait_serial",
+      "outcome": "PASS",
+      "elapsed_seconds": 4.26
+    },
+    {
+      "action": "wait_serial",
+      "outcome": "PASS",
+      "elapsed_seconds": 133.5
+    },
+    {
+      "action": "ssh",
+      "outcome": "PASS",
+      "elapsed_seconds": 1.09
+    },
+    {
+      "action": "ssh",
+      "outcome": "PASS",
+      "elapsed_seconds": 1.03
+    },
+    {
+      "action": "ssh",
+      "outcome": "PASS",
+      "elapsed_seconds": 2.0
+    },
+    {
+      "action": "ssh",
+      "outcome": "PASS",
+      "elapsed_seconds": 1.97
+    }
+  ],
+  "failure": null,
+  "warning": "Virtual test evidence is NOT physical-router acceptance."
+}

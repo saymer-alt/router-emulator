@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<testsuite name="curlneg" tests="14">
+  <testcase name="D1_INSTALL_ALIGNED" classname="busybox-matrix.curlneg" status="PASS"></testcase>
+  <testcase name="D2_MISSING_LIBCURL" classname="busybox-matrix.curlneg" status="OBSERVED"></testcase>
+  <testcase name="D3_RESTORE_LIBCURL" classname="busybox-matrix.curlneg" status="PASS"></testcase>
+  <testcase name="D4_WRONG_ABI" classname="busybox-matrix.curlneg" status="OBSERVED"></testcase>
+  <testcase name="D5_RESTORE_ABI" classname="busybox-matrix.curlneg" status="PASS"></testcase>
+  <testcase name="D6_CORRUPT_LIB" classname="busybox-matrix.curlneg" status="OBSERVED"></testcase>
+  <testcase name="D7_RESTORE_CORRUPT" classname="busybox-matrix.curlneg" status="PASS"></testcase>
+  <testcase name="D8_DANGLING_SYMLINK" classname="busybox-matrix.curlneg" status="OBSERVED"></testcase>
+  <testcase name="D9_RESTORE_DANGLE" classname="busybox-matrix.curlneg" status="PASS"></testcase>
+  <testcase name="D10_LDD_MISSING" classname="busybox-matrix.curlneg" status="OBSERVED"></testcase>
+  <testcase name="D11_PARTIAL_IPK" classname="busybox-matrix.curlneg" status="PASS"></testcase>
+  <testcase name="D12_FEED_DOWN" classname="busybox-matrix.curlneg" status="OBSERVED"></testcase>
+  <testcase name="D13_PREFLIGHT_AFTER_NEGATIVES" classname="busybox-matrix.curlneg" status="OBSERVED"></testcase>
+  <testcase name="D14_FINAL_STATE" classname="busybox-matrix.curlneg" status="PASS"></testcase>
+</testsuite>

@@ -1,0 +1,95 @@
+{
+  "scenario": "MT7621 Entware BusyBox matrix (curlneg): pristine NAND + fresh pinned bootstrap",
+  "evidence": "KEENETIC_PORTED_EXPERIMENTAL",
+  "outcome": "PASS",
+  "elapsed_seconds": 463.62,
+  "steps": [
+    {
+      "action": "wait_serial",
+      "outcome": "PASS",
+      "elapsed_seconds": 0.75
+    },
+    {
+      "action": "wait_serial",
+      "outcome": "PASS",
+      "elapsed_seconds": 41.06
+    },
+    {
+      "action": "wait_serial",
+      "outcome": "PASS",
+      "elapsed_seconds": 0.25
+    },
+    {
+      "action": "wait_serial",
+      "outcome": "PASS",
+      "elapsed_seconds": 20.02
+    },
+    {
+      "action": "wait_serial",
+      "outcome": "PASS",
+      "elapsed_seconds": 201.08
+    },
+    {
+      "action": "wait_serial",
+      "outcome": "PASS",
+      "elapsed_seconds": 2.76
+    },
+    {
+      "action": "sleep",
+      "outcome": "PASS",
+      "elapsed_seconds": 15.03
+    },
+    {
+      "action": "telnet",
+      "outcome": "PASS",
+      "elapsed_seconds": 0.53
+    },
+    {
+      "action": "telnet",
+      "outcome": "PASS",
+      "elapsed_seconds": 0.56
+    },
+    {
+      "action": "telnet",
+      "outcome": "PASS",
+      "elapsed_seconds": 2.63
+    },
+    {
+      "action": "wait_serial",
+      "outcome": "PASS",
+      "elapsed_seconds": 35.38
+    },
+    {
+      "action": "wait_serial",
+      "outcome": "PASS",
+      "elapsed_seconds": 3.75
+    },
+    {
+      "action": "wait_serial",
+      "outcome": "PASS",
+      "elapsed_seconds": 103.67
+    },
+    {
+      "action": "ssh",
+      "outcome": "PASS",
+      "elapsed_seconds": 0.59
+    },
+    {
+      "action": "ssh",
+      "outcome": "PASS",
+      "elapsed_seconds": 1.07
+    },
+    {
+      "action": "ssh",
+      "outcome": "PASS",
+      "elapsed_seconds": 1.06
+    },
+    {
+      "action": "ssh",
+      "outcome": "PASS",
+      "elapsed_seconds": 1.14
+    }
+  ],
+  "failure": null,
+  "warning": "Virtual test evidence is NOT physical-router acceptance."
+}
