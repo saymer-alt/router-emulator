@@ -297,7 +297,19 @@ def classify_installer_failure(code, output, err_prefix):
     for prefix, category in FINAL_ERR_CATEGORIES:
         if err_prefix == prefix:
             return category
-    return classify_failure(code, output)
+    fallback = classify_failure(code, output)
+    # A historical GitHub-download WARN mentions "package unavailable" even
+    # when opkg later installed Mihomo successfully. Do not turn a nonzero
+    # *later* installer exit into IPK_UNAVAILABLE unless a real terminating
+    # [ERROR] line independently establishes a package-install failure.
+    # This protects the guest reports when stdout was truncated or an
+    # unrecognized shell termination occurred (run 44353215646).
+    if fallback == "IPK_UNAVAILABLE" and not re.search(
+            r"(?im)^\[ERROR\]\s+(?:Failed to install\b|"
+            r"Mihomo install failed\b|MagiTrickle package is not present\b)",
+            output):
+        return "INSTALLER_EXIT_NONZERO"
+    return fallback
 
 
 MIHOMO_OUTPUT_MARKERS = (
