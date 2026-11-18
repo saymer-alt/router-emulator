@@ -48,8 +48,8 @@ labelled. Nothing synthetic is presented as real feed behavior.
 | `libcurl_8.23.0-1_mipsel-3.4.ipk` (bin feed) | `f2f5f3cfd08413806c7970305d3aa4f52a3bd828c6d06fc99ac58896eb5510c4` |
 | `curl_8.23.0-1_aarch64-3.10.ipk` (bin feed) | `0a4763ba37644b4a02c7e8d9e737c91e3efd78d29e7286cf8a07c643e891bf1d` |
 | `libcurl_8.23.0-1_aarch64-3.10.ipk` (bin feed) | `d5d3eca432e020efd92a3dc063bb5c4b2433190ce36680964451b9d76333eec1` |
-| synthetic `libcurl_8.15.0-2-model_mipsel-3.4.ipk` (built) | `fab22c86080a71b8f60b3f67f15487e413a675bdfe1a8976298f336df708a6f8` |
-| synthetic `libcurl_8.15.0-2-model_aarch64-3.10.ipk` (built) | `7042f8cf4f4e689c30c1decd784fb50ac2b753a1fc4aced4944592271b896b5c` |
+| synthetic `libcurl_8.15.0-2-model_mipsel-3.4.ipk` (built) | `aa5066cdca7355db18986be9501c32beaf1ed800ad5a631098109b62cdfaa344` |
+| synthetic `libcurl_8.15.0-2-model_aarch64-3.10.ipk` (built) | `a2879ac2c1b6a5b39a6119f2f96e437a1030b3c0b548f5ac003b44c726c13b7d` |
 | KAS preflight (`development@0bbe0cd`) | `defb91a0fa819f06d6dcc6651704b183d45a6bf638f831167da2cb5c3132378e` |
 
 Model construction is reproducible: real `data.tar.gz`, `ELF` members scanned
@@ -57,6 +57,27 @@ for `curl_multi_get_offt`, first occurrence in the library renamed
 (`curl_multi_get_offu`, same length → no offset shifts), `control` Version
 rewritten to `8.15.0-2`, ipk re-tarred. Builder: night-lab `curl-stageA.py`
 (private workspace; digests above pin the outputs).
+
+## Replay prerequisites and current limitation
+
+The two controllers no longer refer to any private Z AI workspace path.
+Pass a **local, checksum-pinned synthetic fixture** with `--model-ipk PATH`
+for the curl scenarios. The matching foreign-ABI IPK is fetched or reused
+from the explicit SHA256-pinned Entware cache; non-curl BusyBox scenarios do
+not need either synthetic or foreign-ABI IPKs.
+
+- MIPSel controller: `python3 lab/mt7621/busybox_matrix.py --help`
+  (use `--kind curlskew` or `curlneg` with `--model-ipk PATH`).
+- AArch64 controller: `python3 lab/curl_aarch64_matrix.py --help`
+  (both scenario kinds require `--model-ipk PATH`).
+- The model hashes in the table are the **current controller pins**, not
+  older staging hashes. Mismatches must abort, never be silently accepted.
+- **Remaining portability gap:** the exact historical synthetic model
+  builder `curl-stageA.py` was retained only in the private night workspace,
+  not committed. A new machine must obtain a trusted copy of the pinned
+  model fixture or reconstruct it and verify its SHA256. Until a reproducible
+  fixture generator or the pinned model artifact is in the repository,
+  these scenarios are not fully self-contained. Do not claim otherwise.
 
 ## B. Emulator matrix — MT7621 / MIPSel (`xiaomi-mi-router-3g-breed`, Ported 5.1.8, ABI `mipsel-3.4`)
 
