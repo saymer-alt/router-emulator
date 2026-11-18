@@ -188,10 +188,16 @@ Owner GO executed the adapter dispatch twice in practice: [run 44160249375](http
 
 #### Read-only service diagnostics prepared (2026-11-18, no new guest run)
 
-The next explicitly authorized `--kas-https-mirror` experiment will append one
-**allowlisted** `service_diagnostics` object to `kas-smoke.json` and print only
-those same fixed categories. It samples the guest *after* the real installer
-returns, without re-running service start/restart or changing KAS/Ported.
+The next explicitly authorized `--kas-https-mirror` experiment will append
+two **allowlisted** snapshots to `kas-smoke.json`:
+`service_diagnostics` (immediately after the real installer exits) and
+`service_diagnostics_delayed` (a second read-only snapshot after one bounded
+`sleep 5`). Both are captured **before** the separate `mihomo -v` probe,
+package observations or MagiTrickle polling, which could change timing or
+resource pressure on this low-memory guest. No service start/restart, firmware,
+KAS production code, real routers or Netfilter rules are changed. The JSON
+schema label remains `mt7621-kas-smoke-v3` with one additive, allowlisted
+field; earlier consumers can keep reading `service_diagnostics` only.
 
 - `mihomo_init`: s28/s99/ambiguous/invalid/absent/unknown
 - `mihomo_config`: present/empty/missing/symlink/unknown (never the YAML)
@@ -204,12 +210,24 @@ returns, without re-running service start/restart or changing KAS/Ported.
 - `tun_device`: present/missing/unknown; absence alone does **not** establish
   the failure cause, especially with the initial mixed-port-only config
 
-Unexpected probe values and failed commands become `unknown`. No raw configs,
-logs, process listings, credentials, addresses, or UART are included in reports.
-The three new host-only unit tests cover fixed values, private-data rejection,
-and fail-closed handling; they have **not been executed in CI** at this revision.
-There has been **no new QEMU run**, and no new KAS PASS is claimed.
- Next technical step (needs a new owner GO, not executed here): one instrumented guest run capturing the init-script start output/exit code, `ls -l /dev/net/tun`, `dmesg | tail`, mihomo log and `resolv.conf` right after the failed start. Virtual-boundary caveat unchanged: no physical Keenetic, reboot, USB, Wi-Fi or ISP coverage is claimed.
+Unexpected probe values, missing commands and timeouts become `unknown`.
+If the five-second wait fails, the entire delayed snapshot becomes `unknown`,
+not `stopped`. A transition from `stopped` to `running` is **evidence of
+delayed observation**, not automatic KAS PASS; `under_300 + stopped` for
+MagiTrickle is **not** proof that its deferred-start service is defective.
+Five-second sleep is not a 300-second MagiTrickle acceptance test.
+
+No raw configs, logs, process listings, credentials, addresses, or UART are
+included in reports. Host-only contract tests cover snapshot ordering,
+read-only behavior, timeout and private-data sanitization; **not yet run in CI**.
+No new QEMU run has been performed for these changes; no KAS PASS is claimed.
+
+**Next step** (separate explicitly authorized guest run): inspect the two
+service snapshots before further ELF probes. If Mihomo remains stopped, collect
+only bounded/private init start exit code, YAML validity classification,
+`/dev/net/tun`, Mihomo log and `resolv.conf` to distinguish a crash from
+missing capabilities. Virtual-boundary caveat remains: no physical Keenetic,
+USB/Wi-Fi or ISP acceptance is claimed.
 
 ## Quick start (Linux x86_64, incl. WSL2)
 
