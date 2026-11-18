@@ -532,12 +532,22 @@ class Mt7621KASGuestContracts(unittest.TestCase):
             1, "[ERROR] Failed to install untrusted", "Failed to install"),
             "IPK_UNAVAILABLE")
 
-    def test_early_warn_without_final_err_keeps_legacy_category(self):
-        # The exact WARN literal from the pinned installer (line 1904) that
-        # the legacy classifier mapped to IPK_UNAVAILABLE.
+    def test_early_warn_without_final_err_cannot_prove_ipk_failure(self):
+        # Real guest 44353215646 installed Mihomo and MagiTrickle successfully.
+        # A pre-fallback GitHub WARN alone does not explain a later nonzero
+        # installer exit; no invented package failure category is permitted.
+        for output in (
+                "[WARN] GitHub Mihomo package unavailable, trying Entware feed "
+                "fallback (last resort)...",
+                "[WARN] Mihomo install from the downloaded GitHub package failed",
+                "[WARN] Package unavailable; Entware fallback used",
+                "[WARN] GitHub Mihomo package unavailable\n"
+                "[INFO] Mihomo installed using Entware feed\n"):
+            with self.subTest(output=output):
+                self.assertEqual(classify_installer_failure(
+                    1, output, None), "INSTALLER_EXIT_NONZERO")
         self.assertEqual(classify_installer_failure(
-            1, "[WARN] GitHub Mihomo package unavailable, trying Entware feed "
-               "fallback (last resort)...", None), "IPK_UNAVAILABLE")
+            1, "[ERROR] Failed to install curl", None), "IPK_UNAVAILABLE")
         self.assertEqual(classify_installer_failure(
             1, "opkg update failed", None), "OPKG_FEED_UNAVAILABLE")
         self.assertEqual(classify_installer_failure(
