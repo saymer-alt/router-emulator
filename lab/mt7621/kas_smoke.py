@@ -122,6 +122,19 @@ def two_phase_service_diagnostics(guest):
     return initial, read_only_service_diagnostics(guest)
 
 
+def may_probe_mihomo_version(early, delayed):
+    """Fail closed before executing a second memory-heavy Go process.
+
+    Only two *observed* stopped states and two non-listening sockets justify
+    another Mihomo invocation. Missing probes are UNKNOWN, not permission.
+    Not a claim that the service itself is healthy or KAS installed.
+    """
+    first = sanitize_service_diagnostics(early)
+    last = sanitize_service_diagnostics(delayed)
+    return (first["mihomo_process"] == last["mihomo_process"] == "stopped"
+            and first["mihomo_port_7890"] == last["mihomo_port_7890"]
+            == "not_listening")
+
 
 REQUIRED_KEENETIC_COMPONENTS = ("proxy", "dns-filter", "opkg-kmod-netfilter",
                                "ext", "ext-utils")
@@ -388,6 +401,7 @@ def write_public(path, kas_ref, phase, reason, exit_code=None, component_gap=Non
                  installer_error_prefix=None, mihomo_binary_path="none",
                  mihomo_probe_exit_code=None, mihomo_output_has_name=False,
                  mihomo_output_has_version=False, mihomo_output_marker=None,
+                 mihomo_version_probe_policy="not_reached",
                  kas_magitrickle_feed=False,
                  socat_package_installed=False,
                  magitrickle_package_installed=False,
@@ -433,6 +447,10 @@ def write_public(path, kas_ref, phase, reason, exit_code=None, component_gap=Non
               "mihomo_probe_exit_code": (mihomo_probe_exit_code
                                          if isinstance(mihomo_probe_exit_code, int)
                                          else None),
+              "mihomo_version_probe_policy": (
+                  mihomo_version_probe_policy if mihomo_version_probe_policy
+                  in ("not_reached", "legacy_probe", "safe_to_probe",
+                      "skipped_runtime_possible") else "not_reached"),
               "mihomo_output_has_name": bool(mihomo_output_has_name),
               "mihomo_output_has_version": bool(mihomo_output_has_version),
               "mihomo_output_marker": (mihomo_output_marker
@@ -484,6 +502,7 @@ def guest_probe(credentials, workspace, deadline, source, kas_ref, public,
     installer_error_prefix = None
     mihomo_binary_path = "none"
     mihomo_probe_exit_code = None
+    mihomo_version_probe_policy = "not_reached"
     mihomo_output_has_name = False
     mihomo_output_has_version = False
     mihomo_output_marker_value = None
@@ -666,46 +685,63 @@ def guest_probe(credentials, workspace, deadline, source, kas_ref, public,
                         else "opt-bin" if "/opt/bin/mihomo" in path_out
                         else "none")
                     if mihomo_binary_path != "none":
-                        binary = path_out.splitlines()[0].strip()
-                        # Full -v capture lives in the disposable guest tmpfs:
+                        # In the full HTTPS guest, the real installer just
+                        # started Mihomo. Do not start a SECOND Go process if
+                        # either snapshot saw it running or was inconclusive.
+                        # The historical non-HTTPS diagnostic keeps its
+                        # independent version proof and original behavior.
+                        allow_version_probe = (
+                            not kas_https_mirror or may_probe_mihomo_version(
+                                service_diagnostics, service_diagnostics_delayed))
+                        mihomo_version_probe_policy = (
+                            "legacy_probe" if not kas_https_mirror
+                            else "safe_to_probe" if allow_version_probe
+                            else "skipped_runtime_possible")
+                        if allow_version_probe:
+                            binary = path_out.splitlines()[0].strip()
+                            # Full -v capture lives in disposable guest tmpfs:
                         # the SSH rings keep only the tail (64 KiB stderr) and
                         # can discard a crash header. Publish only the exit
                         # code, byte counts and pinned constants; the files
                         # never leave the private SSH log and are removed.
-                        rc_out = guest.command(
-                            "rm -f /tmp/.mihomo-v.out /tmp/.mihomo-v.err; "
-                            + binary + " -v >/tmp/.mihomo-v.out "
-                            "2>/tmp/.mihomo-v.err; printf 'rc=%s\\n' \"$?\"",
-                            timeout=90).strip()
-                        match = re.fullmatch(r"rc=(\d+)", rc_out)
-                        if match:
-                            mihomo_probe_exit_code = int(match.group(1))
-                        sizes = [row.strip() for row in guest.command(
-                            "wc -c < /tmp/.mihomo-v.out; wc -c < /tmp/.mihomo-v.err",
-                            timeout=30).splitlines()]
-                        if len(sizes) == 2 and all(row.isdigit() for row in sizes):
-                            mihomo_stdout_size = int(sizes[0])
-                            mihomo_stderr_size = int(sizes[1])
-                        head_out = guest.command(
-                            "cat /tmp/.mihomo-v.out /tmp/.mihomo-v.err "
-                            "2>/dev/null | head -c 240", timeout=30)
-                        mihomo_output_head_marker_value = mihomo_head_marker(
-                            head_out)
-                        mihomo_output_marker_value = mihomo_output_marker(
-                            head_out, "")
-                        mihomo_output_has_name = "NAME_OK" in guest.command(
-                            "grep -iq mihomo /tmp/.mihomo-v.out /tmp/.mihomo-v.err "
-                            "2>/dev/null && printf NAME_OK", timeout=30)
-                        mihomo_output_has_version = "VER_OK" in guest.command(
-                            "grep -Fq '1.19.33' /tmp/.mihomo-v.out /tmp/.mihomo-v.err "
-                            "2>/dev/null && printf VER_OK", timeout=30)
-                        mihomo_binary_version_verified = (
-                            mihomo_probe_exit_code == 0
-                            and mihomo_output_has_name
-                            and mihomo_output_has_version)
-                        guest.command(
-                            "rm -f /tmp/.mihomo-v.out /tmp/.mihomo-v.err",
-                            timeout=30)
+                            rc_out = guest.command(
+                                "rm -f /tmp/.mihomo-v.out /tmp/.mihomo-v.err; "
+                                + binary + " -v >/tmp/.mihomo-v.out "
+                                "2>/tmp/.mihomo-v.err; printf 'rc=%s\\n' \"$?\"",
+                                timeout=90).strip()
+                            match = re.fullmatch(r"rc=(\d+)", rc_out)
+                            if match:
+                                mihomo_probe_exit_code = int(match.group(1))
+                            sizes = [row.strip() for row in guest.command(
+                                "wc -c < /tmp/.mihomo-v.out; wc -c < /tmp/.mihomo-v.err",
+                                timeout=30).splitlines()]
+                            if len(sizes) == 2 and all(row.isdigit() for row in sizes):
+                                mihomo_stdout_size = int(sizes[0])
+                                mihomo_stderr_size = int(sizes[1])
+                            head_out = guest.command(
+                                "cat /tmp/.mihomo-v.out /tmp/.mihomo-v.err "
+                                "2>/dev/null | head -c 240", timeout=30)
+                            mihomo_output_head_marker_value = mihomo_head_marker(
+                                head_out)
+                            mihomo_output_marker_value = mihomo_output_marker(
+                                head_out, "")
+                            mihomo_output_has_name = "NAME_OK" in guest.command(
+                                "grep -iq mihomo /tmp/.mihomo-v.out /tmp/.mihomo-v.err "
+                                "2>/dev/null && printf NAME_OK", timeout=30)
+                            mihomo_output_has_version = "VER_OK" in guest.command(
+                                "grep -Fq '1.19.33' /tmp/.mihomo-v.out /tmp/.mihomo-v.err "
+                                "2>/dev/null && printf VER_OK", timeout=30)
+                            mihomo_binary_version_verified = (
+                                mihomo_probe_exit_code == 0
+                                and mihomo_output_has_name
+                                and mihomo_output_has_version)
+                            guest.command(
+                                "rm -f /tmp/.mihomo-v.out /tmp/.mihomo-v.err",
+                                timeout=30)
+                        else:
+                            print("KAS MIPSEL MIHOMO VERSION PROBE: SKIPPED "
+                                  "(service running or liveness uncertain)",
+                                  flush=True)
                 print("KAS MIPSEL MIHOMO: opkg=%s binary_version=%s probe_rc=%s "
                       "path=%s name=%s version=%s marker=%s" %
                       (mihomo_package_installed, mihomo_binary_version_verified,
@@ -805,6 +841,7 @@ def guest_probe(credentials, workspace, deadline, source, kas_ref, public,
                      installer_error_prefix=installer_error_prefix,
                      mihomo_binary_path=mihomo_binary_path,
                      mihomo_probe_exit_code=mihomo_probe_exit_code,
+                     mihomo_version_probe_policy=mihomo_version_probe_policy,
                      mihomo_output_has_name=mihomo_output_has_name,
                      mihomo_output_has_version=mihomo_output_has_version,
                      mihomo_output_marker=mihomo_output_marker_value,
