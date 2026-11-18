@@ -154,6 +154,9 @@ class Recorder:
             if "rc" in expect and rc != expect["rc"]:
                 ok = False
                 reasons.append("rc=%r expected %r" % (rc, expect["rc"]))
+            if expect.get("rc_nonzero") and (rc is None or rc == 0):
+                ok = False
+                reasons.append("rc=%r expected nonzero" % rc)
             for needle in expect.get("contains", []):
                 if needle not in output:
                     ok = False
@@ -475,6 +478,29 @@ def add_curl_packages(mirror_dir, cache_dir, base_url="https://bin.entware.net/m
     index.write_bytes(gzip.compress(("\n\n".join(blocks) + "\n\n").encode(), mtime=0))
 
 
+def capture_probe(command, outfile="/opt/lab/.curl-probe-output", lines=2,
+                  head="/opt/bin/busybox head"):
+    """Log a command (no pipeline), show a short preview and preserve its rc.
+
+    The final subshell returns the captured command status to SSH; neither
+    'head' nor 'printf' can overwrite it. Use only fixed trusted lab commands
+    and private disposable-guest file paths, never untrusted shell input.
+    """
+    return ("(" + command + ") >" + outfile + " 2>&1;"
+            " _kas_probe_rc=$?; " + head + " -n " + str(lines) + " " + outfile
+            + '; (exit "$_kas_probe_rc")')
+
+
+def plain_curl_expectation(arch):
+    """The synthetic field skew has different startup behavior by ABI."""
+    if arch == "mipsel-3.4":
+        return {"rc": 0, "contains": ["libcurl"],
+                "absent": ["curl_multi_get_offt"]}
+    if arch == "aarch64-3.10":
+        return {"rc_nonzero": True, "contains": ["curl_multi_get_offt"]}
+    raise ValueError("unsupported curl skew ABI: " + str(arch))
+
+
 def phase_curlskew(mx):
     # Positive baseline through opkg's own resolution (Depends on libcurl is
     # unversioned in the real feed metadata — the root cause of #254).
@@ -503,12 +529,12 @@ def phase_curlskew(mx):
            "/opt/bin/opkg status curl | /opt/bin/busybox grep '^Version';"
            " /opt/bin/opkg status libcurl | /opt/bin/busybox grep '^Version'",
            {"rc": 0}, timeout=30)
-    mx.run("C9_SKEW_CURL_V", "plain curl -V with skewed library (field signature)",
-           "/opt/bin/curl -V 2>&1 | head -2; printf 'CURL_V_RC_%s\\n' $((40+$?))",
-           {"contains": ["curl_multi_get_offt"]}, timeout=30)
+    mx.run("C9_SKEW_CURL_V", "plain curl -V with skewed library (ABI-dependent)",
+           capture_probe("/opt/bin/curl -V"),
+           plain_curl_expectation(mx.rec.meta["arch"]), timeout=30)
     mx.run("C10_SKEW_LDBINDNOW", "LD_BIND_NOW=1 curl -V with skewed library",
-           "LD_BIND_NOW=1 /opt/bin/curl -V 2>&1 | head -2; printf 'LDB_RC_%s\\n' $((40+$?))",
-           {"contains": ["curl_multi_get_offt"]}, timeout=30)
+           capture_probe("LD_BIND_NOW=1 /opt/bin/curl -V"),
+           {"rc_nonzero": True, "contains": ["curl_multi_get_offt"]}, timeout=30)
     mx.preflight("C11_PREFLIGHT_SKEW", "KAS preflight while curl/libcurl skewed (detection gap?)")
     # Recovery: real 8.23 libcurl back.
     mx.run("C12_RECOVER", "opkg install /opt/lab/libcurl-real.ipk (recovery path)",
@@ -525,14 +551,17 @@ def phase_curlneg(mx):
            {"rc": 0}, timeout=300)
     mx.run("D2_MISSING_LIBCURL", "opkg remove libcurl -> curl must fail loudly",
            "/opt/bin/opkg remove --force-depends libcurl >/dev/null 2>&1;"
-           " /opt/bin/curl -V 2>&1 | head -2; printf 'MISS_RC_%s\\n' $((40+$?))", timeout=60)
+           " " + capture_probe("/opt/bin/curl -V"),
+           {"rc_nonzero": True, "contains": ["cannot open shared object file"]},
+           timeout=60)
     mx.run("D3_RESTORE_LIBCURL", "opkg install libcurl restores the pair",
            "/opt/bin/opkg install /opt/lab/libcurl-real.ipk",
            {"rc": 0}, timeout=120)
     mx.run("D4_WRONG_ABI", "foreign-ABI libcurl.so.4.8.0 overwrites the file (loader diagnostic)",
            "/opt/bin/busybox cp /opt/lib/libcurl.so.4.8.0 /opt/lib/.libcurl-abi.bak;"
            " /opt/bin/busybox cp /opt/lab/libcurl-foreign.so /opt/lib/libcurl.so.4.8.0;"
-           " /opt/bin/curl -V 2>&1 | head -2; printf 'ABI_RC_%s\\n' $((40+$?))", timeout=60)
+           " " + capture_probe("/opt/bin/curl -V"),
+           {"rc_nonzero": True, "contains": ["wrong ELF class"]}, timeout=60)
     mx.run("D5_RESTORE_ABI", "reinstall restores the correct ABI",
            "/opt/bin/opkg install --force-reinstall /opt/lab/libcurl-real.ipk",
            {"rc": 0}, timeout=120)
@@ -541,39 +570,51 @@ def phase_curlneg(mx):
            " /opt/bin/busybox sh -c 'n=$(/opt/bin/busybox wc -c < /opt/lib/libcurl.so.4.8.0);"
            " /opt/bin/busybox head -c $((n/2)) /opt/lib/libcurl.so.4.8.0 > /opt/lib/.trunc &&"
            " /opt/bin/busybox mv /opt/lib/.trunc /opt/lib/libcurl.so.4.8.0';"
-           " /opt/bin/curl -V 2>&1 | head -2; printf 'CORRUPT_RC_%s\\n' $((40+$?))", timeout=60)
+           " " + capture_probe("/opt/bin/curl -V"),
+           {"rc_nonzero": True}, timeout=60)
     mx.run("D7_RESTORE_CORRUPT", "reinstall restores the corrupted library",
            "/opt/bin/opkg install --force-reinstall /opt/lab/libcurl-real.ipk",
            {"rc": 0}, timeout=120)
     mx.run("D8_DANGLING_SYMLINK", "dangling libcurl.so.4 symlink -> loader error",
            "/opt/bin/busybox rm -f /opt/lib/libcurl.so.4;"
            " /opt/bin/busybox ln -s /nonexistent-target /opt/lib/libcurl.so.4;"
-           " /opt/bin/curl -V 2>&1 | head -2; printf 'DANGLE_RC_%s\\n' $((40+$?))", timeout=60)
+           " " + capture_probe("/opt/bin/curl -V"),
+           {"rc_nonzero": True, "contains": ["cannot open shared object file"]},
+           timeout=60)
     mx.run("D9_RESTORE_DANGLE", "reinstall restores the symlink",
            "/opt/bin/opkg install --force-reinstall /opt/lab/libcurl-real.ipk",
            {"rc": 0}, timeout=120)
     mx.run("D10_LDD_MISSING", "curl works without ldd on PATH",
            "/opt/bin/busybox mkdir -p /tmp/noldd;"
            " /opt/bin/busybox ln -sf /opt/bin/curl /tmp/noldd/curl;"
-           " PATH=/tmp/noldd /tmp/noldd/curl -V 2>&1 | head -1;"
-           " printf 'LDD_RC_%s\\n' $((40+$?))", timeout=30)
+           " " + capture_probe("PATH=/tmp/noldd /tmp/noldd/curl -V", lines=1),
+           {"rc": 0, "contains": ["curl 8.23"]}, timeout=30)
     mx.run("D11_PARTIAL_IPK", "truncated local IPK must be refused (no false install)",
            "/opt/bin/busybox sh -c 'n=$(/opt/bin/busybox wc -c < /opt/lab/libcurl-real.ipk);"
            " /opt/bin/busybox dd if=/opt/lab/libcurl-real.ipk"
            " of=/opt/lab/libcurl-trunc.ipk bs=1 count=$((n*3/5)) 2>/dev/null';"
-           " /opt/bin/opkg install /opt/lab/libcurl-trunc.ipk;"
-           " printf 'PARTIAL_RC_%s\\n' $((40+$?));"
-           " /opt/bin/opkg status libcurl | /opt/bin/busybox grep '^Version'",
-           {"contains": ["Malformed package file", "8.23.0-1"]}, timeout=120)
+           " " + capture_probe("/opt/bin/opkg install /opt/lab/libcurl-trunc.ipk",
+                                lines=20),
+           {"rc_nonzero": True, "contains": ["Malformed package file"]},
+           timeout=120)
+    mx.run("D11_PRESERVED", "refused partial IPK preserves installed libcurl",
+           "/opt/bin/opkg status libcurl | /opt/bin/busybox grep '^Version'",
+           {"rc": 0, "contains": ["Version: 8.23.0-1"]}, timeout=30)
     mx.run("D12_FEED_DOWN", "opkg update with feed unreachable stays clean",
            "/opt/bin/busybox sed -i 's|http://192.168.1.100/entware|http://192.168.1.100:9/entware|'"
-           " /opt/etc/opkg.conf; /opt/bin/opkg update; printf 'UPD_RC_%s\\n' $((40+$?));"
+           " /opt/etc/opkg.conf;"
+           " " + capture_probe("/opt/bin/opkg update", lines=20)
+                 .replace('; (exit "$_kas_probe_rc")', '; _feed_down_rc=$_kas_probe_rc') + ";"
            " /opt/bin/busybox sed -i 's|http://192.168.1.100:9/entware|http://192.168.1.100/entware|'"
-           " /opt/etc/opkg.conf", timeout=180)
+           " /opt/etc/opkg.conf; (exit \"$_feed_down_rc\")",
+           {"rc_nonzero": True, "contains": ["Failed to download"]},
+           timeout=180)
     mx.preflight("D13_PREFLIGHT_AFTER_NEGATIVES", "KAS preflight after the negative set (gap map)")
-    mx.run("D14_FINAL_STATE", "final aligned working state",
-           "/opt/bin/curl -V | head -1;"
-           " /opt/bin/opkg status curl | /opt/bin/busybox grep '^Version';"
+    mx.run("D14_FINAL_CURL", "final curl ELF startup after recovery",
+           capture_probe("/opt/bin/curl -V", lines=1),
+           {"rc": 0, "contains": ["curl 8.23"]}, timeout=30)
+    mx.run("D14_FINAL_STATE", "final aligned package database",
+           "/opt/bin/opkg status curl | /opt/bin/busybox grep '^Version';"
            " /opt/bin/opkg status libcurl | /opt/bin/busybox grep '^Version'",
            {"rc": 0, "contains": ["8.23.0-1"]}, timeout=30)
 
