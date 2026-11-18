@@ -75,6 +75,11 @@ class Mt7621KASGuestContracts(unittest.TestCase):
         self.assertTrue(all("mihomo -v" not in cmd and " restart" not in cmd
                             and "opkg install" not in cmd
                             for cmd, _ in guest.commands))
+        # Prevent a future "fix" from dropping the safe availability probes.
+        self.assertTrue(any("command -v pidof" in cmd
+                            for cmd, _ in guest.commands))
+        self.assertTrue(any("command -v netstat" in cmd
+                            for cmd, _ in guest.commands))
         # The genuine guest hook must take its snapshots before any separate
         # Mihomo ELF version probe or post-install package manipulation.
         probe = inspect.getsource(guest_probe)
