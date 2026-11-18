@@ -700,10 +700,9 @@ def guest_probe(credentials, workspace, deadline, source, kas_ref, public,
                         if allow_version_probe:
                             binary = path_out.splitlines()[0].strip()
                             # Full -v capture lives in disposable guest tmpfs:
-                        # the SSH rings keep only the tail (64 KiB stderr) and
-                        # can discard a crash header. Publish only the exit
-                        # code, byte counts and pinned constants; the files
-                        # never leave the private SSH log and are removed.
+                            # SSH rings keep only the tail (64 KiB stderr) and
+                            # can discard a crash header. Publish fixed
+                            # categories only; full output remains private.
                             rc_out = guest.command(
                                 "rm -f /tmp/.mihomo-v.out /tmp/.mihomo-v.err; "
                                 + binary + " -v >/tmp/.mihomo-v.out "
