@@ -227,7 +227,10 @@ jobs:
                       r.get("mihomo_output_marker"), r.get("mihomo_output_head_marker"),
                       r.get("mihomo_stdout_size"), r.get("mihomo_stderr_size")))
                   if r.get("mihomo_binary_version_verified") is not True:
-                      out.write("WARNING: MIPSEL_MIHOMO_ELF_UNPROVEN (head marker above; not KAS PASS)\n")
+                      if r.get("mihomo_version_probe_policy") == "skipped_runtime_possible":
+                          out.write("INFO: Mihomo -v intentionally skipped to avoid a second Go process; not a binary failure or KAS PASS.\n")
+                      else:
+                          out.write("WARNING: MIPSEL_MIHOMO_ELF_UNPROVEN (no valid -v proof; not KAS PASS)\n")
                   # Read only fixed allowlisted values from the two snapshots.
                   # Never echo arbitrary content from a future/corrupt JSON.
                   policy = r.get("mihomo_version_probe_policy")
