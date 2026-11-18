@@ -16,6 +16,7 @@ import subprocess
 import tarfile
 import tempfile
 import time
+import urllib.error
 import urllib.request
 
 LOCK = Path(__file__).with_name("entware.lock.json")
@@ -60,6 +61,7 @@ def fetch(url, digest, destination):
         # retries. Failures name the URL; every downloaded byte is still
         # pinned by the digest check below.
         missing = 0
+        timeouts = 0
         for attempt in (1, 2, 3, 4, 5):
             try:
                 with urllib.request.urlopen(url, timeout=90) as response:
@@ -72,6 +74,24 @@ def fetch(url, digest, destination):
                         raise ValueError(f"trusted origin answered 404 after two retries: {url}") from error
                 elif attempt == 5 or error.code not in (502, 503, 504):
                     raise ValueError(f"trusted origin fetch failed: HTTP {error.code}: {url}") from error
+                time.sleep(min(15, 3 * attempt))
+            except (urllib.error.URLError, TimeoutError) as error:
+                # A host-side network timeout (connect or response.read)
+                # must not abort an otherwise valid SHA-pinned experiment.
+                # Do NOT retry certificate, DNS, proxy or other URL errors:
+                # a retry cannot make them trusted. At most 3 timeout
+                # attempts within the pre-existing 5-attempt outer bound.
+                reason = (error.reason if isinstance(error, urllib.error.URLError)
+                          else error)
+                is_timeout = (isinstance(reason, TimeoutError)
+                              or str(reason).strip().lower() == "timed out")
+                if not is_timeout:
+                    raise ValueError(f"trusted origin fetch failed: {url}") from error
+                timeouts += 1
+                if timeouts >= 3 or attempt == 5:
+                    raise ValueError(
+                        f"trusted origin timed out after bounded attempts: {url}"
+                    ) from error
                 time.sleep(min(15, 3 * attempt))
         else:
             raise ValueError(f"trusted origin fetch failed after bounded attempts: {url}")

@@ -130,6 +130,77 @@ class EntwareTests(unittest.TestCase):
         self.assertIn('download digest mismatch', str(raised.exception))
         self.assertIn('/payload.bin', str(raised.exception))
 
+
+    def test_transient_timeout_recovers_without_weakening_digest(self):
+        import io
+        import urllib.error
+        with tempfile.TemporaryDirectory() as td:
+            dest = pathlib.Path(td) / "installer.tar.gz"
+            url = entware.MIPSLSF_ORIGIN + "installer/EN_mipsel-installer.tar.gz"
+            with patch.object(entware.urllib.request, "urlopen",
+                              side_effect=[urllib.error.URLError(TimeoutError("timed out")),
+                                           io.BytesIO(self.payload)]) as open_url, \
+                 patch.object(entware.time, "sleep") as sleep:
+                result = entware.fetch(url, self.digest, dest)
+            self.assertEqual(result.read_bytes(), self.payload)
+            self.assertEqual(open_url.call_count, 2)
+            sleep.assert_called_once()
+
+    def test_read_timeout_restarts_from_fresh_verified_response(self):
+        import io
+        class PartialTimedOut(io.BytesIO):
+            def read(self, *args):
+                super().read(5)  # simulate bytes already consumed in memory
+                raise TimeoutError("timed out")
+
+        with tempfile.TemporaryDirectory() as td:
+            dest = pathlib.Path(td) / "installer.tar.gz"
+            url = entware.MIPSLSF_ORIGIN + "installer/EN_mipsel-installer.tar.gz"
+            with patch.object(entware.urllib.request, "urlopen",
+                              side_effect=[PartialTimedOut(b"partial"), io.BytesIO(self.payload)]) as opened, \
+                 patch.object(entware.time, "sleep"):
+                entware.fetch(url, self.digest, dest)
+            self.assertEqual(dest.read_bytes(), self.payload)
+            self.assertEqual(opened.call_count, 2)
+
+    def test_repeated_timeout_fails_closed_without_writing_asset(self):
+        import urllib.error
+        with tempfile.TemporaryDirectory() as td:
+            dest = pathlib.Path(td) / "installer.tar.gz"
+            url = entware.MIPSLSF_ORIGIN + "installer/EN_mipsel-installer.tar.gz"
+            error = urllib.error.URLError(TimeoutError("timed out"))
+            with patch.object(entware.urllib.request, "urlopen",
+                              side_effect=[error] * 6) as opened, \
+                 patch.object(entware.time, "sleep") as sleep:
+                with self.assertRaisesRegex(ValueError, "timed out after bounded attempts"):
+                    entware.fetch(url, self.digest, dest)
+            self.assertEqual(opened.call_count, 3)
+            self.assertEqual(sleep.call_count, 2)
+            self.assertFalse(dest.exists())
+
+    def test_non_timeout_url_error_fails_fast_and_cannot_bypass_digest(self):
+        import urllib.error
+        with tempfile.TemporaryDirectory() as td:
+            dest = pathlib.Path(td) / "installer.tar.gz"
+            url = entware.MIPSLSF_ORIGIN + "installer/EN_mipsel-installer.tar.gz"
+            with patch.object(entware.urllib.request, "urlopen",
+                              side_effect=urllib.error.URLError("certificate verify failed")) as opened, \
+                 patch.object(entware.time, "sleep") as sleep:
+                with self.assertRaisesRegex(ValueError, "trusted origin fetch failed"):
+                    entware.fetch(url, self.digest, dest)
+            opened.assert_called_once()
+            sleep.assert_not_called()
+            self.assertFalse(dest.exists())
+
+    def test_valid_pinned_cache_avoids_network_after_timeout(self):
+        with tempfile.TemporaryDirectory() as td:
+            dest = pathlib.Path(td) / "installer.tar.gz"
+            dest.write_bytes(self.payload)
+            url = entware.MIPSLSF_ORIGIN + "installer/EN_mipsel-installer.tar.gz"
+            with patch.object(entware.urllib.request, "urlopen") as opened:
+                self.assertEqual(entware.fetch(url, self.digest, dest), dest)
+            opened.assert_not_called()
+
     def test_45_wedge_is_bisectable_and_the_tz_probe_is_bounded(self):
         """MT7621 clean run (2026-11-15, pristine NAND + fresh USB + complete
         25-package mirror): every doinstall statement produced output through
