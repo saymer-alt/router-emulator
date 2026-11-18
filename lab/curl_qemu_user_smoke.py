@@ -113,6 +113,12 @@ def extract_package(ipk, root):
         raise ValueError("IPK without data.tar.gz")
     pending = []
     for member, body in _members(chunks["data.tar.gz"], "IPK data"):
+        # Real Entware data archives start with a harmless root '.' entry.
+        # It has no filesystem effect and must not be treated as traversal.
+        if member.name.rstrip("/") in (".", "./"):
+            if not member.isdir():
+                raise ValueError("non-directory entry at archive root")
+            continue
         target = _safe_target(root, member.name)
         if member.isdir():
             target.mkdir(parents=True, exist_ok=True)
