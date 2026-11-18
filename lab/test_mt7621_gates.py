@@ -66,6 +66,22 @@ class DerivationTests(unittest.TestCase):
         self.assertEqual(gates["MIPSEL_NATIVE_ELF"]["reason"],
                          "busybox_uname_answered_mips_in_guest")
 
+    def test_contradictory_report_outcome_cannot_fake_openwrt_pass(self):
+        # The runner cannot emit all-PASS rows with overall FAIL, or a
+        # failed step under overall PASS. Both must fail closed.
+        for overall, fail_last in (("FAIL", False), ("PASS", True),
+                                   ("BLOCKED", False)):
+            with self.subTest(overall=overall, fail_last=fail_last):
+                rows = [row(s["action"]) for s in BOOT_STEPS]
+                if fail_last:
+                    rows[-1]["outcome"] = "FAIL"
+                rep = self.report(rows, outcome=overall)
+                gates = mg.derive_openwrt_gates(
+                    scenario(steps=BOOT_STEPS), rep)
+                for gate in gates.values():
+                    self.assertEqual(gate["status"], "FAIL")
+                    self.assertEqual(gate["reason"], "report_outcome_mismatch")
+
     def test_reboot_requires_reset_step_in_scenario(self):
         steps = [s for s in BOOT_STEPS if s["action"] != "reset"]
         rep = self.report([row(s["action"]) for s in steps])
@@ -264,6 +280,20 @@ class PortedTests(unittest.TestCase):
         self.assertEqual(gates["PORTED_REBOOT"]["reason"],
                          "reset_then_second_full_boot_to_ndms")
 
+    def test_contradictory_report_outcome_cannot_fake_ported_pass(self):
+        for overall, fail_last in (("FAIL", False), ("PASS", True),
+                                   ("BLOCKED", False)):
+            with self.subTest(overall=overall, fail_last=fail_last):
+                rows = [row(s["action"]) for s in PORTED_STEPS]
+                if fail_last:
+                    rows[-1]["outcome"] = "FAIL"
+                gates = mg.derive_ported_gates(
+                    scenario(steps=PORTED_STEPS, name="p"),
+                    self.report(rows, outcome=overall))
+                for gate in gates.values():
+                    self.assertEqual(gate["status"], "FAIL")
+                    self.assertEqual(gate["reason"], "report_outcome_mismatch")
+
     def test_smp_marker_timeout_fails_boot_gates(self):
         steps = list(PORTED_STEPS)
         rows = [row(s["action"]) for s in steps]
@@ -398,6 +428,19 @@ class CliGateTests(unittest.TestCase):
         self.assertEqual(gates["PORTED_NDMC_READY"]["status"], "PASS")
         self.assertEqual(gates["PORTED_NDMC_READY"]["reason"],
                          "ndm_cli_prompt_and_version_answer_on_telnet")
+
+    def test_contradictory_report_outcome_cannot_fake_cli_pass(self):
+        for overall, fail_last in (("FAIL", False), ("PASS", True),
+                                   ("BLOCKED", False)):
+            with self.subTest(overall=overall, fail_last=fail_last):
+                rows = [row(s["action"]) for s in CLI_STEPS]
+                if fail_last:
+                    rows[-1]["outcome"] = "FAIL"
+                gate = mg.derive_cli_gates(
+                    scenario(steps=CLI_STEPS, name="c"),
+                    self.report(rows, outcome=overall))["PORTED_NDMC_READY"]
+                self.assertEqual(gate["status"], "FAIL")
+                self.assertEqual(gate["reason"], "report_outcome_mismatch")
 
     def test_missing_prompt_is_not_tested(self):
         gates = self.full(steps=(CLI_STEPS[0], CLI_STEPS[2]))

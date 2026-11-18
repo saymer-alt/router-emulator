@@ -161,6 +161,13 @@ def derive_openwrt_gates(scenario, report):
                                                "prerequisite_failed")}
         return _mismatch()
     steps, rows, first_fail = checked
+    if report.get("outcome") != ("PASS" if first_fail is None else "FAIL"):
+        # A successful-looking sequence with a failed overall result (or
+        # a failed row inside an overall PASS) cannot prove any native gate.
+        return {name: _gate("FAIL", "report_outcome_mismatch")
+                for name in ("MT7621_OPENWRT_BOOT", "MT7621_REBOOT",
+                             "MIPSEL_NATIVE_ELF")}
+
 
     reset_idx = next((i for i, s in enumerate(steps) if s["action"] == "reset"),
                      None)
@@ -248,6 +255,10 @@ def derive_ported_gates(scenario, report):
                     for name in PORTED_DERIVED_GATES}
         return _ported_mismatch()
     steps, rows, first_fail = checked
+    if report.get("outcome") != ("PASS" if first_fail is None else "FAIL"):
+        return {name: _gate("FAIL", "report_outcome_mismatch")
+                for name in PORTED_DERIVED_GATES}
+
 
     def wait_idx(marker):
         return next((i for i, s in enumerate(steps)
@@ -359,6 +370,10 @@ def derive_cli_gates(scenario, report):
     if checked is None:
         return {"PORTED_NDMC_READY": _gate("FAIL", "report_scenario_mismatch")}
     steps, rows, first_fail = checked
+    if report.get("outcome") != ("PASS" if first_fail is None else "FAIL"):
+        return {"PORTED_NDMC_READY":
+                _gate("FAIL", "report_outcome_mismatch")}
+
 
     def telnet_idx(predicate):
         return next((i for i, s in enumerate(steps)
