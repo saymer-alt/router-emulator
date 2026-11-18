@@ -228,6 +228,31 @@ jobs:
                       r.get("mihomo_stdout_size"), r.get("mihomo_stderr_size")))
                   if r.get("mihomo_binary_version_verified") is not True:
                       out.write("WARNING: MIPSEL_MIHOMO_ELF_UNPROVEN (head marker above; not KAS PASS)\n")
+                  # Read only fixed allowlisted values from the two snapshots.
+                  # Never echo arbitrary content from a future/corrupt JSON.
+                  policy = r.get("mihomo_version_probe_policy")
+                  if policy not in ("not_reached", "legacy_probe", "safe_to_probe",
+                                    "skipped_runtime_possible"):
+                      policy = "not_reached"
+                  out.write("Mihomo extra -v policy: %s\n" % policy)
+                  for label, key in (("immediate", "service_diagnostics"),
+                                     ("delayed", "service_diagnostics_delayed")):
+                      snapshot = r.get(key)
+                      if not isinstance(snapshot, dict):
+                          snapshot = {}
+                      fields = (
+                          ("mihomo_process", ("running", "stopped")),
+                          ("mihomo_port_7890", ("listening", "not_listening")),
+                          ("magitrickle_uptime", ("under_300", "at_least_300")),
+                          ("magitrickle_process", ("running", "stopped")),
+                      )
+                      safe = []
+                      for field, allowed in fields:
+                          value = snapshot.get(field)
+                          safe.append("%s=%s" % (
+                              field, value if value in allowed else "unknown"))
+                      out.write("Service %s: %s\n" % (label, ", ".join(safe)))
+                  out.write("A listening port is not an end-to-end proxy PASS.\n")
               else:
                   out.write("### Disposable Ported 5.1.8 lab exception: VERIFIED\n")
               out.write("KAS experimental installer phase: %s; category: %s\n" % (phase, reason))
