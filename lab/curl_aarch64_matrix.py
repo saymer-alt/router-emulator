@@ -42,9 +42,8 @@ FORWARDS = "8080:80;8022:222"
 CURL_IPK_SHA = "0a4763ba37644b4a02c7e8d9e737c91e3efd78d29e7286cf8a07c643e891bf1d"
 LIBCURL_IPK_URL = AARCH64_BASE + "libcurl_8.23.0-1_aarch64-3.10.ipk"
 LIBCURL_IPK_SHA = "d5d3eca432e020efd92a3dc063bb5c4b2433190ce36680964451b9d76333eec1"
-MODEL_IPK_PATH = Path("/mnt/c/Users/Saymer/.zcode/workspace/draft-1c6aa290-d31c-40b0-a0d8-3d11be3973b8/nightly-lab/curl-ipks/libcurl_8.15.0-2-model_aarch64-3.10.ipk")
 MODEL_IPK_SHA = "a2879ac2c1b6a5b39a6119f2f96e437a1030b3c0b548f5ac003b44c726c13b7d"
-FOREIGN_LIBCURL_PATH = Path("/mnt/c/Users/Saymer/.zcode/workspace/draft-1c6aa290-d31c-40b0-a0d8-3d11be3973b8/nightly-lab/curl-ipks/libcurl_8.23.0-1_mipsel-3.4.ipk")
+FOREIGN_LIBCURL_URL = "https://bin.entware.net/mipselsf-k3.4/libcurl_8.23.0-1_mipsel-3.4.ipk"
 FOREIGN_LIBCURL_SHA = "f2f5f3cfd08413806c7970305d3aa4f52a3bd828c6d06fc99ac58896eb5510c4"
 
 
@@ -121,6 +120,8 @@ def main():
     ap.add_argument("--credentials-file", required=True)
     ap.add_argument("--preflight-file", required=True)
     ap.add_argument("--preflight-sha256", required=True)
+    ap.add_argument("--model-ipk", required=True,
+                    help="path to synthetic 8.15.0-2-model aarch64 libcurl IPK")
     ap.add_argument("--kind", required=True, choices=("curlskew", "curlneg"))
     ap.add_argument("--report-dir", required=True)
     ap.add_argument("--max-seconds", type=int, default=3000)
@@ -137,12 +138,16 @@ def main():
     if hashlib.sha256(preflight_data).hexdigest() != args.preflight_sha256:
         raise ValueError("preflight digest mismatch (fail closed)")
     args.preflight_data = preflight_data
-    args.model_ipk_data = MODEL_IPK_PATH.read_bytes()
+    args.model_ipk_data = Path(args.model_ipk).read_bytes()
     if hashlib.sha256(args.model_ipk_data).hexdigest() != MODEL_IPK_SHA:
-        raise ValueError("synthetic model digest mismatch")
-    args.libcurl_ipk_data = fetch(LIBCURL_IPK_URL, LIBCURL_IPK_SHA,
-                                  Path(args.cache_dir) / "libcurl_8.23.0-1_aarch64-3.10.ipk")
-    args.foreign_so_data = extract_foreign_so(FOREIGN_LIBCURL_PATH, FOREIGN_LIBCURL_SHA)
+        raise ValueError("synthetic model digest mismatch (fail closed)")
+    args.libcurl_ipk_data = fetch(
+        LIBCURL_IPK_URL, LIBCURL_IPK_SHA,
+        Path(args.cache_dir) / "libcurl_8.23.0-1_aarch64-3.10.ipk")
+    if args.kind == "curlneg":
+        foreign_path = Path(args.cache_dir) / "libcurl_8.23.0-1_mipsel-3.4.ipk"
+        fetch(FOREIGN_LIBCURL_URL, FOREIGN_LIBCURL_SHA, foreign_path)
+        args.foreign_so_data = extract_foreign_so(foreign_path, FOREIGN_LIBCURL_SHA)
 
     nand = workspace / "nand"
     if not args.skip_build:
