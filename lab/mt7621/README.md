@@ -184,7 +184,32 @@ Owner GO executed the adapter dispatch twice in practice: [run 44160249375](http
 * **MagiTrickle via the real installer**: package + `S99magitrickle` init script present (the `MagiTrickle start failed` err never fired), but `magitrickled` was **not running** at the lab post-check (the installer's own `MT_RUNTIME_STOPPED` warn) — a regression against run 44120337317 (`daemon=True`); unexplained, candidate deltas are the HTTPS-stage DNS/clock environment and post-check timing.
 * **KAS terminally aborts** at the MIHOMO SERVICE STATE block: `pidof mihomo` finds no process 2 s after the init-script start, so the pinned literal `err "Mihomo start/restart could not be confirmed."` fires and the installer exits before its post-install self-check. The binary works standalone (`-v` RC=0) but **dies as a service** — the mechanism (config exit, `/dev/net/tun`, port conflict, …) is **not established** from the sanitized artifacts. Commit `0fb5f0c` adds the honest `MIHOMO_START_NOT_CONFIRMED` category (the legacy fallback had mislabelled this abort `IPK_UNAVAILABLE` from the earlier GitHub WARN).
 
-**Verdict: KAS remains BLOCKED — the terminating stage is pinned evidence, the service-death mechanism is not.** Next technical step (needs a new owner GO, not executed here): one instrumented guest run capturing the init-script start output/exit code, `ls -l /dev/net/tun`, `dmesg | tail`, mihomo log and `resolv.conf` right after the failed start. Virtual-boundary caveat unchanged: no physical Keenetic, reboot, USB, Wi-Fi or ISP coverage is claimed.
+**Verdict: KAS remains BLOCKED — the terminating stage is pinned evidence, the service-death mechanism is not.**
+
+#### Read-only service diagnostics prepared (2026-11-18, no new guest run)
+
+The next explicitly authorized `--kas-https-mirror` experiment will append one
+**allowlisted** `service_diagnostics` object to `kas-smoke.json` and print only
+those same fixed categories. It samples the guest *after* the real installer
+returns, without re-running service start/restart or changing KAS/Ported.
+
+- `mihomo_init`: s28/s99/ambiguous/invalid/absent/unknown
+- `mihomo_config`: present/empty/missing/symlink/unknown (never the YAML)
+- `mihomo_process`: running/stopped/unknown (a quick `pidof` snapshot; KAS
+  separately uses its own /proc-based `mp_state`)
+- `mihomo_port_7890`: listening/not_listening/unknown
+- `magitrickle_uptime`: under_300/at_least_300/unknown (accounts for the
+  package init script's deferred start threshold)
+- `magitrickle_process`: running/stopped/unknown
+- `tun_device`: present/missing/unknown; absence alone does **not** establish
+  the failure cause, especially with the initial mixed-port-only config
+
+Unexpected probe values and failed commands become `unknown`. No raw configs,
+logs, process listings, credentials, addresses, or UART are included in reports.
+The three new host-only unit tests cover fixed values, private-data rejection,
+and fail-closed handling; they have **not been executed in CI** at this revision.
+There has been **no new QEMU run**, and no new KAS PASS is claimed.
+ Next technical step (needs a new owner GO, not executed here): one instrumented guest run capturing the init-script start output/exit code, `ls -l /dev/net/tun`, `dmesg | tail`, mihomo log and `resolv.conf` right after the failed start. Virtual-boundary caveat unchanged: no physical Keenetic, reboot, USB, Wi-Fi or ISP coverage is claimed.
 
 ## Quick start (Linux x86_64, incl. WSL2)
 
