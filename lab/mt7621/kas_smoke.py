@@ -86,6 +86,21 @@ SERVICE_PROBES = {
     "tun_device": (
         "if [ -c /dev/net/tun ]; then echo present; else echo missing; fi",
         ("present", "missing")),
+    "memory_available": (
+        "m=$(awk '$1==\"MemAvailable:\" {print $2; exit}' "
+        "/proc/meminfo 2>/dev/null); "
+        "case \"$m\" in ''|*[!0-9]*) echo unknown ;; "
+        "*) if [ \"$m\" -lt 16384 ]; then echo under_16m; "
+        "elif [ \"$m\" -lt 65536 ]; then echo under_64m; "
+        "else echo at_least_64m; fi ;; esac",
+        ("under_16m", "under_64m", "at_least_64m")),
+    "kernel_oom_evidence": (
+        "if ! command -v dmesg >/dev/null 2>&1; then echo unknown; "
+        "else k=$(dmesg 2>/dev/null) || { echo unknown; exit 0; }; "
+        "if printf '%s\\n' \"$k\" | grep -Eiq "
+        "'(out of memory|killed process.*mihomo|oom-killer)'; "
+        "then echo observed; else echo not_observed; fi; fi",
+        ("observed", "not_observed")),
 }
 
 
