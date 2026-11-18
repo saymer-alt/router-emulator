@@ -58,26 +58,52 @@ for `curl_multi_get_offt`, first occurrence in the library renamed
 rewritten to `8.15.0-2`, ipk re-tarred. Builder: night-lab `curl-stageA.py`
 (private workspace; digests above pin the outputs).
 
-## Replay prerequisites and current limitation
+## Replay: deterministic fixture generation (added 2026-11-18)
 
-The two controllers no longer refer to any private Z AI workspace path.
-Pass a **local, checksum-pinned synthetic fixture** with `--model-ipk PATH`
-for the curl scenarios. The matching foreign-ABI IPK is fetched or reused
-from the explicit SHA256-pinned Entware cache; non-curl BusyBox scenarios do
-not need either synthetic or foreign-ABI IPKs.
+The new `lab/make_curl_skew_model.py` is committed in PR #109. It reads a
+SHA256-pinned official `libcurl 8.23.0-1` IPK and builds a **synthetic**
+`8.15.0-2-model` by replacing exactly one `.dynstr` symbol string with a
+same-length name and modifying package control metadata. It is **not** the
+original historical 8.15.0-2 package. The code refuses missing symbols, wrong
+ELF ABI, unexpected package version/architecture and unpinned source bytes.
+It never extracts packages on the host filesystem or installs them.
 
-- MIPSel controller: `python3 lab/mt7621/busybox_matrix.py --help`
-  (use `--kind curlskew` or `curlneg` with `--model-ipk PATH`).
-- AArch64 controller: `python3 lab/curl_aarch64_matrix.py --help`
-  (both scenario kinds require `--model-ipk PATH`).
-- The model hashes in the table are the **current controller pins**, not
-  older staging hashes. Mismatches must abort, never be silently accepted.
-- **Remaining portability gap:** the exact historical synthetic model
-  builder `curl-stageA.py` was retained only in the private night workspace,
-  not committed. A new machine must obtain a trusted copy of the pinned
-  model fixture or reconstruct it and verify its SHA256. Until a reproducible
-  fixture generator or the pinned model artifact is in the repository,
-  these scenarios are not fully self-contained. Do not claim otherwise.
+For a portable curl-matrix run, choose `--generate-model`. Both controllers
+fetch (or reuse cached) matching real IPKs from the pinned Entware feed, then
+derive the fixture in memory and verify its SHA256 after guest transfer:
+
+- `python3 lab/mt7621/busybox_matrix.py --help` —
+  `--kind curlskew --generate-model` or `curlneg --generate-model`
+- `python3 lab/curl_aarch64_matrix.py --help` —
+  `--kind curlskew --generate-model` or `curlneg --generate-model`
+
+All other required flags, existing private QEMU images, and runtime
+dependencies remain unchanged. `--model-ipk PATH` is an alternative for
+replaying the **historical pinned synthetic files**; do not supply both options.
+Normal MIPSel BusyBox modes do not need the model.
+
+To materialize an independently inspectable copy (no guest, no privileges):
+
+```sh
+python3 lab/make_curl_skew_model.py \
+  --arch aarch64-3.10 \
+  --source-ipk /path/to/verified/libcurl_8.23.0-1_aarch64-3.10.ipk \
+  --output-ipk /path/to/new/libcurl_8.15.0-2-synthetic-aarch64.ipk
+python3 -m unittest discover -s lab -p 'test*.py' -v
+```
+
+Output is gzip/tar with canonical gzip mtime=0, so the same pinned input
+and unchanged generator produce identical output bytes. The controller
+records the *new generated* SHA256 in evidence metadata; historical model
+hashes in the fixed-input table above refer only to the **earlier night
+fixtures** and must never be silently reused as new output hashes.
+
+**Evidence boundary:** the generator passed six local no-network tests using
+artificial ELF/IPK structures (AArch64 and MIPSel, deterministic output and
+fail-closed scenarios). The new generator has **not yet been run against
+official real libcurl IPK bytes inside this review session**, and the new
+controller path has **not yet passed a native guest replay**. Do not relabel
+the 2026-11-18 night evidence as a PASS on the updated code.
 
 ## B. Emulator matrix — MT7621 / MIPSel (`xiaomi-mi-router-3g-breed`, Ported 5.1.8, ABI `mipsel-3.4`)
 
