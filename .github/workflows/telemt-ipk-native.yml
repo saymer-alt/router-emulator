@@ -1,0 +1,25 @@
+# Opt-in targeted QEMU acceptance. Uses the real Entware opkg in a disposable ARM64 guest.
+# No physical Keenetic / no actual Telegram clients / no private configuration.
+name: TeleMT IPK native QEMU acceptance
+on:
+  pull_request:
+    paths:
+      - lab/telemt_ipk_e2e.py
+      - lab/test_telemt_ipk.py
+      - lab/ported_e2e.py
+      - lab/gates.py
+      - .github/workflows/telemt-ipk-native.yml
+      - .github/workflows/ported-entware-kas.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  telemt-native-qemu:
+    uses: ./.github/workflows/ported-entware-kas.yml
+    with:
+      emulator_ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      kas_ref: '6dd6438e2b64bad0fe9205ab6575795f808dabd8'
+      telemt_ref: '8a1b13d6f4a0fa07f5420700f76025ff94bcfd92'
+      stage: telemt-ipk

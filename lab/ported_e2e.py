@@ -103,6 +103,11 @@ def run_entware(args, private, credentials, coldboot, evidence):
                 from lab.knvr_e2e import lifecycle
                 completed['ok'] = lifecycle(guest, args, evidence, context, private, cameras)
                 return
+            if args.stage == 'telemt-ipk':
+                from lab.telemt_ipk_e2e import lifecycle
+                completed['ok'] = lifecycle(
+                    guest, evidence, Path(args.telemt_dir), Path(args.telemt_ipk_dir))
+                return
             phase['name'] = 'KAS_PREFLIGHT'
             evidence.set('KAS_PREFLIGHT', 'NOT_TESTED', 'unattempted')
             guest.command('opkg update && opkg install ca-bundle curl jq iptables ip-full nano cron socat', timeout=240)
@@ -220,7 +225,17 @@ def run_entware(args, private, credentials, coldboot, evidence):
         evidence.set('ENTWARE_READY', 'FAIL', 'entware_install_failed')
         return 1
     if result != 0:
-        phase_failure(evidence, phase['name'])
+        if args.stage == 'telemt-ipk':
+            # The native IPK suite owns its own phase/check outcome. Do not
+            # convert NOT_TESTED panel buttons / service health into FAIL,
+            # and never report unattempted later scenarios as executed.
+            if not any(evidence.checks.get(name, {}).get('status') == 'FAIL'
+                       for name in ('TELEMT_IPK_INSTALL', 'TELEMT_IPK_REFUSALS',
+                                    'TELEMT_IPK_STAGE', 'TELEMT_IPK_UPGRADE',
+                                    'TELEMT_IPK_RESTORE', 'TELEMT_IPK_REMOVE_REINSTALL')):
+                evidence.check('TELEMT_IPK_INSTALL', 'BLOCKED', 'runner_failure')
+        else:
+            phase_failure(evidence, phase['name'])
         return 1
     return 0 if completed['ok'] else 1
 
@@ -231,7 +246,7 @@ def main():
     parser.add_argument('--nand-dir', required=True)
     parser.add_argument('--private-dir', required=True)
     parser.add_argument('--report-dir', required=True)
-    parser.add_argument('--stage', choices=('entware', 'preflight', 'kas', 'uninstall-packages', 'kas-update', 'knvr', 'web', 'web-filter'), default='kas')
+    parser.add_argument('--stage', choices=('entware', 'preflight', 'kas', 'uninstall-packages', 'kas-update', 'knvr', 'web', 'web-filter', 'telemt-ipk'), default='kas')
     parser.add_argument('--legacy-ip-global', choices=('true', 'false'), default='false',
                         help='legacy-bridge profile A/B: pre-seed Proxy0 with '
                              "'ip global auto' as the production create does")
@@ -242,6 +257,8 @@ def main():
     parser.add_argument('--knvr-dir')
     parser.add_argument('--knvr-ref')
     parser.add_argument('--mediamtx')
+    parser.add_argument('--telemt-dir', help='Pinned entware-go telemt/ source scripts')
+    parser.add_argument('--telemt-ipk-dir', help='Private SHA256-pinned IPK inputs')
     parser.add_argument('--kas-dir')
     parser.add_argument('--kas-ref', default='6dd6438e2b64bad0fe9205ab6575795f808dabd8')
     args = parser.parse_args()
@@ -251,6 +268,8 @@ def main():
         parser.error('Web stages require --web-bin for the pinned ARM64 binary')
     if args.stage == 'knvr' and not all((args.knvr_dir, args.knvr_ref, args.mediamtx)):
         parser.error('KNVR requires --knvr-dir, --knvr-ref and --mediamtx')
+    if args.stage == 'telemt-ipk' and not (args.telemt_dir and args.telemt_ipk_dir):
+        parser.error('telemt-ipk stage requires --telemt-dir and --telemt-ipk-dir')
     private = Path(args.private_dir).resolve()
     if private.exists():
         parser.error('private workspace must be new')
