@@ -11,12 +11,62 @@ from lab.mt7621.kas_smoke import (
     lab_only_without_ext_utils_guard, verified_mihomo_version,
     matched_installer_error, mihomo_output_categories, mihomo_output_marker,
     mihomo_head_marker, MIHOMO_HEAD_MARKER_VALUES,
+    read_only_service_diagnostics, sanitize_service_diagnostics, SERVICE_PROBES,
     require_exact_lab_component_gap, LAB_EXT_UTILS_GUARD,
     LAB_EXT_UTILS_DISABLED,
 )
 
 
 class Mt7621KASGuestContracts(unittest.TestCase):
+    def test_service_snapshot_read_only_and_categorical(self):
+        expected = ["s28", "present", "stopped", "not_listening",
+                    "under_300", "stopped", "missing"]
+
+        class FakeGuest:
+            def __init__(self):
+                self.results = iter(expected)
+                self.commands = []
+            def command(self, command, timeout=30):
+                self.commands.append((command, timeout))
+                return next(self.results)
+
+        guest = FakeGuest()
+        snapshot = read_only_service_diagnostics(guest)
+        self.assertEqual(list(snapshot.values()), expected)
+        self.assertEqual(len(guest.commands), len(SERVICE_PROBES))
+        self.assertTrue(all(timeout == 20 for _, timeout in guest.commands))
+        self.assertTrue(all(" restart " not in cmd and " opkg install " not in cmd
+                            and " start " not in cmd for cmd, _ in guest.commands))
+
+    def test_service_snapshot_sanitizes_private_output(self):
+        private = "private config, server IP, secret"
+        snapshot = sanitize_service_diagnostics({
+            "mihomo_init": "s99", "mihomo_config": private,
+            "magitrickle_uptime": "300.0", "untrusted": private,
+        })
+        self.assertEqual(snapshot["mihomo_init"], "s99")
+        self.assertEqual(snapshot["mihomo_config"], "unknown")
+        self.assertEqual(snapshot["magitrickle_uptime"], "unknown")
+        self.assertNotIn("untrusted", snapshot)
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "report.json"
+            write_public(path, "a" * 40, "BLOCKED", "MIHOMO_START_NOT_CONFIRMED", 1,
+                         service_diagnostics={"mihomo_config": private,
+                                              "magitrickle_uptime": "under_300"})
+            raw = path.read_text()
+            self.assertNotIn(private, raw)
+            report = json.loads(raw)
+            self.assertFalse(report["kas_installed"])
+            self.assertEqual(report["service_diagnostics"]["mihomo_config"], "unknown")
+            self.assertEqual(report["service_diagnostics"]["magitrickle_uptime"], "under_300")
+
+    def test_service_snapshot_failed_probe_stays_unknown(self):
+        class FakeGuest:
+            def command(self, command, timeout=30):
+                raise RuntimeError("probe failed")
+        self.assertEqual(read_only_service_diagnostics(FakeGuest()),
+                         {name: "unknown" for name in SERVICE_PROBES})
+
     def test_unambiguous_real_install_exit_and_marker(self):
         self.assertEqual(classify_failure(0, "[OK] Done"), "INSTALLER_COMPLETED")
         self.assertEqual(classify_failure(1, "[OK] Done"), "INSTALLER_EXIT_NONZERO")
@@ -58,7 +108,8 @@ class Mt7621KASGuestContracts(unittest.TestCase):
                                         "kas_https_stage", "kas_https_dns_configured",
                                         "kas_https_clock_synced",
                                         "kas_https_ca_trust_applied",
-                                        "kas_https_helper_tls_verified"})
+                                        "kas_https_helper_tls_verified",
+                                        "service_diagnostics"})
             self.assertEqual(rec["schema"], "mt7621-kas-smoke-v3")
             self.assertFalse(rec["kas_installed"])
             self.assertEqual(rec["kas_ref"], ref)
@@ -89,6 +140,8 @@ class Mt7621KASGuestContracts(unittest.TestCase):
             self.assertFalse(rec["kas_https_clock_synced"])
             self.assertFalse(rec["kas_https_ca_trust_applied"])
             self.assertFalse(rec["kas_https_helper_tls_verified"])
+            self.assertEqual(rec["service_diagnostics"],
+                             {name: "unknown" for name in SERVICE_PROBES})
 
     def test_report_exposes_only_allowed_actual_base_install_ids(self):
         with tempfile.TemporaryDirectory() as td:
