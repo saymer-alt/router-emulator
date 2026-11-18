@@ -235,6 +235,24 @@ def classify_failure(code, output):
     return "INSTALLER_EXIT_NONZERO"
 
 
+
+# KAS calls the init script with "start" or "restart" and turns nonzero
+# return codes into one of these constant WARN messages. Report this
+# classification instead of uploading the full private installer output.
+# "not_observed" is not proof that the daemon started successfully.
+MIHOMO_INIT_MARKERS = ("not_observed", "start_failed", "restart_failed")
+
+
+def mihomo_init_marker(output):
+    if not isinstance(output, str):
+        return "not_observed"
+    if "Mihomo restart failed" in output:
+        return "restart_failed"
+    if "Mihomo start failed" in output:
+        return "start_failed"
+    return "not_observed"
+
+
 ERR_LITERAL = re.compile(r'\berr\s+"((?:[^"\\]|\\.)*)"')
 
 
@@ -425,7 +443,8 @@ def write_public(path, kas_ref, phase, reason, exit_code=None, component_gap=Non
                  kas_base_deps_feed=False, installed_base_packages=None,
                  kas_mihomo_feed=False, mihomo_package_installed=False,
                  mihomo_binary_version_verified=False,
-                 installer_error_prefix=None, mihomo_binary_path="none",
+                 installer_error_prefix=None, mihomo_init_result="not_observed",
+                 mihomo_binary_path="none",
                  mihomo_probe_exit_code=None, mihomo_output_has_name=False,
                  mihomo_output_has_version=False, mihomo_output_marker=None,
                  mihomo_version_probe_policy="not_reached",
@@ -464,6 +483,9 @@ def write_public(path, kas_ref, phase, reason, exit_code=None, component_gap=Non
               "kas_mihomo_feed": bool(kas_mihomo_feed),
               "mihomo_package_installed": bool(mihomo_package_installed),
               "mihomo_binary_version_verified": bool(mihomo_binary_version_verified),
+              "mihomo_init_result": (mihomo_init_result
+                                      if mihomo_init_result in MIHOMO_INIT_MARKERS
+                                      else "not_observed"),
               "installer_error_prefix": (installer_error_prefix[:120]
                                          if isinstance(installer_error_prefix, str)
                                          else None),
@@ -530,6 +552,7 @@ def guest_probe(credentials, workspace, deadline, source, kas_ref, public,
     mihomo_binary_path = "none"
     mihomo_probe_exit_code = None
     mihomo_version_probe_policy = "not_reached"
+    mihomo_init_result = "not_observed"
     mihomo_output_has_name = False
     mihomo_output_has_version = False
     mihomo_output_marker_value = None
@@ -670,6 +693,7 @@ def guest_probe(credentials, workspace, deadline, source, kas_ref, public,
                    " sh /opt/lab/install.sh disk")
         exit_code, stdout, stderr = guest.execute(command, timeout=300)
         combined = stdout + "\n" + stderr
+        mihomo_init_result = mihomo_init_marker(combined)
         installer_error_prefix = matched_installer_error(combined, source)
         category = classify_installer_failure(exit_code, combined,
                                               installer_error_prefix)
@@ -865,6 +889,7 @@ def guest_probe(credentials, workspace, deadline, source, kas_ref, public,
                      mihomo_package_installed=mihomo_package_installed,
                      mihomo_binary_version_verified=mihomo_binary_version_verified,
                      installer_error_prefix=installer_error_prefix,
+                     mihomo_init_result=mihomo_init_result,
                      mihomo_binary_path=mihomo_binary_path,
                      mihomo_probe_exit_code=mihomo_probe_exit_code,
                      mihomo_version_probe_policy=mihomo_version_probe_policy,

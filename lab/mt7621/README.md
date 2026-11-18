@@ -285,7 +285,7 @@ gh workflow run mt7621-kas-ext-utils-lab.yml --repo saymer-alt/router-emulator -
 Use `https_mirror=true` without `preflight_only` for the next carefully
 budgeted real guest experiment only when runtime diagnostics are ready.
 
-**Next step** (separate explicitly authorized guest run): inspect the two
+**Host-only follow-up (18.11, run 44369318294):** The early and delayed observations both showed Mihomo stopped, TCP 7890 not listening, S28 init and config present, and /dev/net/tun present. A new fixed-enum `mihomo_init_result` field (not_observed/start_failed/restart_failed) classifies the existing pinned KAS init WARN without running any additional guest command or publishing the installer output. `not_observed` is NOT service success. This field and the already prepared memory/OOM probes have **not yet been guest-tested**; no new QEMU run was started.\n\n**Next step** (separate explicitly authorized guest run): inspect the two
 service snapshots and the decision to skip or execute an extra ELF probe. If Mihomo remains stopped, collect
 only bounded/private init start exit code, YAML validity classification,
 `/dev/net/tun`, Mihomo log and `resolv.conf` to distinguish a crash from

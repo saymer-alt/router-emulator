@@ -10,7 +10,8 @@ from lab.mt7621.kas_smoke import (
     classify_failure, classify_installer_failure, write_public,
     missing_required_components, guarded_refusal_proven,
     lab_only_without_ext_utils_guard, verified_mihomo_version,
-    matched_installer_error, mihomo_output_categories, mihomo_output_marker,
+    matched_installer_error, mihomo_init_marker, MIHOMO_INIT_MARKERS,
+    mihomo_output_categories, mihomo_output_marker,
     mihomo_head_marker, MIHOMO_HEAD_MARKER_VALUES,
     read_only_service_diagnostics, two_phase_service_diagnostics,
     may_probe_mihomo_version, sanitize_service_diagnostics,
@@ -220,7 +221,8 @@ class Mt7621KASGuestContracts(unittest.TestCase):
                                         "kas_base_deps_feed", "base_packages_installed",
                                         "kas_mihomo_feed", "mihomo_package_installed",
                                         "mihomo_binary_version_verified",
-                                        "installer_error_prefix", "mihomo_binary_path",
+                                        "installer_error_prefix", "mihomo_init_result",
+                                        "mihomo_binary_path",
                                         "mihomo_probe_exit_code",
                                         "mihomo_version_probe_policy",
                                         "mihomo_output_has_name",
@@ -249,6 +251,7 @@ class Mt7621KASGuestContracts(unittest.TestCase):
             self.assertFalse(rec["mihomo_package_installed"])
             self.assertFalse(rec["mihomo_binary_version_verified"])
             self.assertIsNone(rec["installer_error_prefix"])
+            self.assertEqual(rec["mihomo_init_result"], "not_observed")
             self.assertEqual(rec["mihomo_binary_path"], "none")
             self.assertIsNone(rec["mihomo_probe_exit_code"])
             self.assertEqual(rec["mihomo_version_probe_policy"], "not_reached")
@@ -493,6 +496,31 @@ class Mt7621KASGuestContracts(unittest.TestCase):
             1, output,
             "Failed to download MagiTrickle repository helper through curl/wget"),
             "MAGITRICKLE_HELPER_DOWNLOAD_FAILED")
+
+    def test_mihomo_init_marker_is_categorical_and_read_only(self):
+        self.assertEqual(mihomo_init_marker(
+            "[WARN] Mihomo start failed\n[ERROR] Mihomo start/restart could not be confirmed."),
+            "start_failed")
+        self.assertEqual(mihomo_init_marker(
+            "[WARN] Mihomo restart failed\n[ERROR] Mihomo start/restart could not be confirmed."),
+            "restart_failed")
+        self.assertEqual(mihomo_init_marker(
+            "[ERROR] Mihomo start/restart could not be confirmed."),
+            "not_observed")
+        self.assertEqual(mihomo_init_marker(None), "not_observed")
+        self.assertEqual(set(MIHOMO_INIT_MARKERS),
+                         {"not_observed", "start_failed", "restart_failed"})
+
+    def test_mihomo_init_result_never_leaks_untrusted_text(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "report.json"
+            secret = "user-config-key-192.168.99.7"
+            write_public(p, "a" * 40, "BLOCKED",
+                         "MIHOMO_START_NOT_CONFIRMED",
+                         mihomo_init_result=secret)
+            self.assertNotIn(secret, p.read_text())
+            self.assertEqual(json.loads(p.read_text())["mihomo_init_result"],
+                             "not_observed")
 
     def test_mihomo_service_start_failure_is_not_ipk_unavailable(self):
         # Run 44162737407: the pinned installer aborted on its own mihomo
