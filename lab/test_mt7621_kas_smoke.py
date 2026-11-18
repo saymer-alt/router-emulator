@@ -13,7 +13,8 @@ from lab.mt7621.kas_smoke import (
     matched_installer_error, mihomo_output_categories, mihomo_output_marker,
     mihomo_head_marker, MIHOMO_HEAD_MARKER_VALUES,
     read_only_service_diagnostics, two_phase_service_diagnostics,
-    sanitize_service_diagnostics, SERVICE_PROBES, guest_probe,
+    may_probe_mihomo_version, sanitize_service_diagnostics,
+    SERVICE_PROBES, guest_probe,
     require_exact_lab_component_gap, LAB_EXT_UTILS_GUARD,
     LAB_EXT_UTILS_DISABLED,
 )
@@ -91,6 +92,36 @@ class Mt7621KASGuestContracts(unittest.TestCase):
         self.assertEqual(delayed,
                          {name: "unknown" for name in SERVICE_PROBES})
 
+    def test_mihomo_version_probe_requires_two_explicitly_stopped_snapshots(self):
+        base = {name: "unknown" for name in SERVICE_PROBES}
+        base.update({"mihomo_process": "stopped",
+                     "mihomo_port_7890": "not_listening"})
+        self.assertTrue(may_probe_mihomo_version(base, base))
+        for key, value in (("mihomo_process", "running"),
+                           ("mihomo_process", "unknown"),
+                           ("mihomo_port_7890", "listening"),
+                           ("mihomo_port_7890", "unknown")):
+            altered = dict(base, **{key: value})
+            with self.subTest(key=key, value=value):
+                self.assertFalse(may_probe_mihomo_version(base, altered))
+                self.assertFalse(may_probe_mihomo_version(altered, base))
+        self.assertFalse(may_probe_mihomo_version(None, base))
+        self.assertFalse(may_probe_mihomo_version(base, {"mihomo_process": "private"}))
+
+    def test_guest_probe_version_launch_is_inside_runtime_gate(self):
+        source = inspect.getsource(guest_probe)
+        start = source.index('if mihomo_binary_path != "none":')
+        decision = source.index("allow_version_probe = (", start)
+        guard = source.index("if allow_version_probe:", decision)
+        version_launch = source.index("rc_out = guest.command(", guard)
+        skipped = source.index("skipped_runtime_possible", decision)
+        self.assertLess(start, decision)
+        self.assertLess(decision, skipped)
+        self.assertLess(skipped, guard)
+        self.assertLess(guard, version_launch)
+        self.assertGreater(source[:version_launch].count("if allow_version_probe:"),
+                           0)
+
     def test_service_snapshot_sanitizes_private_output(self):
         private = "private config, server IP, secret"
         snapshot = sanitize_service_diagnostics({
@@ -107,7 +138,8 @@ class Mt7621KASGuestContracts(unittest.TestCase):
                          service_diagnostics={"mihomo_config": private,
                                               "magitrickle_uptime": "under_300"},
                          service_diagnostics_delayed={"mihomo_config": private,
-                                                      "mihomo_process": "running"})
+                                                      "mihomo_process": "running"},
+                         mihomo_version_probe_policy="skipped_runtime_possible")
             raw = path.read_text()
             self.assertNotIn(private, raw)
             report = json.loads(raw)
@@ -116,6 +148,8 @@ class Mt7621KASGuestContracts(unittest.TestCase):
             self.assertEqual(report["service_diagnostics"]["magitrickle_uptime"], "under_300")
             self.assertEqual(report["service_diagnostics_delayed"]["mihomo_config"], "unknown")
             self.assertEqual(report["service_diagnostics_delayed"]["mihomo_process"], "running")
+            self.assertEqual(report["mihomo_version_probe_policy"],
+                             "skipped_runtime_possible")
 
     def test_service_snapshot_failed_probe_stays_unknown(self):
         class FakeGuest:
@@ -123,6 +157,15 @@ class Mt7621KASGuestContracts(unittest.TestCase):
                 raise RuntimeError("probe failed")
         self.assertEqual(read_only_service_diagnostics(FakeGuest()),
                          {name: "unknown" for name in SERVICE_PROBES})
+
+    def test_version_probe_policy_is_allowlisted(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "report.json"
+            write_public(p, "a" * 40, "BLOCKED", "MIHOMO_START_NOT_CONFIRMED",
+                         mihomo_version_probe_policy="secret-IP-and-token")
+            self.assertEqual(json.loads(p.read_text())[
+                "mihomo_version_probe_policy"], "not_reached")
+            self.assertNotIn("secret-IP-and-token", p.read_text())
 
     def test_unambiguous_real_install_exit_and_marker(self):
         self.assertEqual(classify_failure(0, "[OK] Done"), "INSTALLER_COMPLETED")
@@ -154,7 +197,9 @@ class Mt7621KASGuestContracts(unittest.TestCase):
                                         "kas_mihomo_feed", "mihomo_package_installed",
                                         "mihomo_binary_version_verified",
                                         "installer_error_prefix", "mihomo_binary_path",
-                                        "mihomo_probe_exit_code", "mihomo_output_has_name",
+                                        "mihomo_probe_exit_code",
+                                        "mihomo_version_probe_policy",
+                                        "mihomo_output_has_name",
                                         "mihomo_output_has_version", "mihomo_output_marker",
                                         "kas_magitrickle_feed",
                                         "socat_package_installed", "magitrickle_package_installed",
@@ -182,6 +227,7 @@ class Mt7621KASGuestContracts(unittest.TestCase):
             self.assertIsNone(rec["installer_error_prefix"])
             self.assertEqual(rec["mihomo_binary_path"], "none")
             self.assertIsNone(rec["mihomo_probe_exit_code"])
+            self.assertEqual(rec["mihomo_version_probe_policy"], "not_reached")
             self.assertFalse(rec["mihomo_output_has_name"])
             self.assertFalse(rec["mihomo_output_has_version"])
             self.assertIsNone(rec["mihomo_output_marker"])
