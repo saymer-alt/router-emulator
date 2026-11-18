@@ -60,9 +60,8 @@ CURL_IPK_URL = "https://bin.entware.net/mipselsf-k3.4/curl_8.23.0-1_mipsel-3.4.i
 CURL_IPK_SHA = "4b821e371d7efae77c35bd4dbd16cffa201db820d99ed8c4b270f77c9ba72fac"
 LIBCURL_IPK_URL = "https://bin.entware.net/mipselsf-k3.4/libcurl_8.23.0-1_mipsel-3.4.ipk"
 LIBCURL_IPK_SHA = "f2f5f3cfd08413806c7970305d3aa4f52a3bd828c6d06fc99ac58896eb5510c4"
-MODEL_IPK_PATH = Path("/mnt/c/Users/Saymer/.zcode/workspace/draft-1c6aa290-d31c-40b0-a0d8-3d11be3973b8/nightly-lab/curl-ipks/libcurl_8.15.0-2-model_mipsel-3.4.ipk")
 MODEL_IPK_SHA = "aa5066cdca7355db18986be9501c32beaf1ed800ad5a631098109b62cdfaa344"
-FOREIGN_LIBCURL_PATH = Path("/mnt/c/Users/Saymer/.zcode/workspace/draft-1c6aa290-d31c-40b0-a0d8-3d11be3973b8/nightly-lab/curl-ipks/libcurl_8.23.0-1_aarch64-3.10.ipk")
+FOREIGN_LIBCURL_URL = "https://bin.entware.net/aarch64-k3.10/libcurl_8.23.0-1_aarch64-3.10.ipk"
 FOREIGN_LIBCURL_SHA = "d5d3eca432e020efd92a3dc063bb5c4b2433190ce36680964451b9d76333eec1"
 
 BOOT_PATTERN = "Boot and Recovery Environment"
@@ -579,12 +578,11 @@ def phase_curlneg(mx):
            {"rc": 0, "contains": ["8.23.0-1"]}, timeout=30)
 
 
-def extract_foreign_so():
+def extract_foreign_so(raw):
     """Real aarch64 libcurl.so.4.8.0 pulled out of the real foreign-ABI ipk
     (used to overwrite the mipsel library by 'confused operator' simulation)."""
     import io as _io
     import tarfile as _tf
-    raw = FOREIGN_LIBCURL_PATH.read_bytes()
     if hashlib.sha256(raw).hexdigest() != FOREIGN_LIBCURL_SHA:
         raise ValueError("foreign libcurl ipk digest mismatch")
     with _tf.open(fileobj=_io.BytesIO(raw), mode="r:*") as outer:
@@ -655,6 +653,8 @@ def main():
     ap.add_argument("--preflight-file", required=True,
                     help="host path of kas-entware-preflight.sh")
     ap.add_argument("--preflight-sha256", required=True)
+    ap.add_argument("--model-ipk",
+                    help="path to synthetic 8.15.0-2-model libcurl IPK; required for curl* modes")
     ap.add_argument("--kind", required=True,
                     choices=("fresh", "transition", "feedfail", "interrupt",
                              "curlskew", "curlneg"))
@@ -680,13 +680,20 @@ def main():
                          Path(args.cache_dir) / ("busybox_%s_mipsel-3.4.ipk" % OLD_IPK_VERSION))
     args.preflight_data = preflight_data
     args.old_ipk_data = old_ipk_data
-    args.model_ipk_data = MODEL_IPK_PATH.read_bytes()
-    if hashlib.sha256(args.model_ipk_data).hexdigest() != MODEL_IPK_SHA:
-        raise ValueError("synthetic libcurl model digest mismatch (fail closed)")
-    args.libcurl_ipk_data = fetch(LIBCURL_IPK_URL, LIBCURL_IPK_SHA,
-                                  Path(args.cache_dir) / "libcurl_8.23.0-1_mipsel-3.4.ipk")
-    if args.kind == "curlneg":
-        args.foreign_so_data = extract_foreign_so()
+    if args.kind in ("curlskew", "curlneg"):
+        if not args.model_ipk:
+            ap.error("--model-ipk is required for curlskew and curlneg")
+        args.model_ipk_data = Path(args.model_ipk).read_bytes()
+        if hashlib.sha256(args.model_ipk_data).hexdigest() != MODEL_IPK_SHA:
+            raise ValueError("synthetic libcurl model digest mismatch (fail closed)")
+        args.libcurl_ipk_data = fetch(
+            LIBCURL_IPK_URL, LIBCURL_IPK_SHA,
+            Path(args.cache_dir) / "libcurl_8.23.0-1_mipsel-3.4.ipk")
+        if args.kind == "curlneg":
+            foreign = fetch(
+                FOREIGN_LIBCURL_URL, FOREIGN_LIBCURL_SHA,
+                Path(args.cache_dir) / "libcurl_8.23.0-1_aarch64-3.10.ipk")
+            args.foreign_so_data = extract_foreign_so(foreign)
     lock = json.loads(LOCK.read_text(encoding="utf8"))
     pinned_bb = next(p for p in lock["packages"] if p["Package"] == "busybox")
 
