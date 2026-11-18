@@ -1,6 +1,7 @@
 """No guest dependencies: public-only contract for MT7621 KAS smoke."""
 import json
 import hashlib
+import inspect
 from pathlib import Path
 import tempfile
 import unittest
@@ -11,7 +12,8 @@ from lab.mt7621.kas_smoke import (
     lab_only_without_ext_utils_guard, verified_mihomo_version,
     matched_installer_error, mihomo_output_categories, mihomo_output_marker,
     mihomo_head_marker, MIHOMO_HEAD_MARKER_VALUES,
-    read_only_service_diagnostics, sanitize_service_diagnostics, SERVICE_PROBES,
+    read_only_service_diagnostics, two_phase_service_diagnostics,
+    sanitize_service_diagnostics, SERVICE_PROBES, guest_probe,
     require_exact_lab_component_gap, LAB_EXT_UTILS_GUARD,
     LAB_EXT_UTILS_DISABLED,
 )
@@ -38,6 +40,50 @@ class Mt7621KASGuestContracts(unittest.TestCase):
         self.assertTrue(all(" restart " not in cmd and " opkg install " not in cmd
                             and " start " not in cmd for cmd, _ in guest.commands))
 
+    def test_two_phase_snapshot_is_read_only_and_ordered(self):
+        first = ["s28", "present", "stopped", "not_listening",
+                 "under_300", "stopped", "missing"]
+        second = ["s28", "present", "running", "listening",
+                  "at_least_300", "running", "missing"]
+
+        class FakeGuest:
+            def __init__(self):
+                self.values = iter(first + second)
+                self.commands = []
+            def command(self, command, timeout=30):
+                self.commands.append((command, timeout))
+                if command == "sleep 5":
+                    return ""
+                return next(self.values)
+
+        guest = FakeGuest()
+        initial, delayed = two_phase_service_diagnostics(guest)
+        self.assertEqual(list(initial.values()), first)
+        self.assertEqual(list(delayed.values()), second)
+        self.assertEqual(guest.commands[len(SERVICE_PROBES)], ("sleep 5", 15))
+        self.assertEqual(len(guest.commands), 2 * len(SERVICE_PROBES) + 1)
+        self.assertTrue(all(" -v" not in cmd and " restart" not in cmd
+                            and "opkg install" not in cmd
+                            for cmd, _ in guest.commands))
+        # The genuine guest hook must take its snapshots before any separate
+        # Mihomo ELF version probe or post-install package manipulation.
+        probe = inspect.getsource(guest_probe)
+        self.assertLess(probe.index("two_phase_service_diagnostics(guest)"),
+                        probe.index("rc_out = guest.command("))
+        self.assertLess(probe.index("two_phase_service_diagnostics(guest)"),
+                        probe.index('installed_now = guest.command('))
+
+    def test_two_phase_sleep_timeout_is_unknown_not_stopped(self):
+        class FakeGuest:
+            def command(self, command, timeout=30):
+                if command == "sleep 5":
+                    raise TimeoutError("guest delayed sample timed out")
+                return "stopped"
+        initial, delayed = two_phase_service_diagnostics(FakeGuest())
+        self.assertEqual(initial["mihomo_process"], "stopped")
+        self.assertEqual(delayed,
+                         {name: "unknown" for name in SERVICE_PROBES})
+
     def test_service_snapshot_sanitizes_private_output(self):
         private = "private config, server IP, secret"
         snapshot = sanitize_service_diagnostics({
@@ -52,13 +98,17 @@ class Mt7621KASGuestContracts(unittest.TestCase):
             path = Path(td) / "report.json"
             write_public(path, "a" * 40, "BLOCKED", "MIHOMO_START_NOT_CONFIRMED", 1,
                          service_diagnostics={"mihomo_config": private,
-                                              "magitrickle_uptime": "under_300"})
+                                              "magitrickle_uptime": "under_300"},
+                         service_diagnostics_delayed={"mihomo_config": private,
+                                                      "mihomo_process": "running"})
             raw = path.read_text()
             self.assertNotIn(private, raw)
             report = json.loads(raw)
             self.assertFalse(report["kas_installed"])
             self.assertEqual(report["service_diagnostics"]["mihomo_config"], "unknown")
             self.assertEqual(report["service_diagnostics"]["magitrickle_uptime"], "under_300")
+            self.assertEqual(report["service_diagnostics_delayed"]["mihomo_config"], "unknown")
+            self.assertEqual(report["service_diagnostics_delayed"]["mihomo_process"], "running")
 
     def test_service_snapshot_failed_probe_stays_unknown(self):
         class FakeGuest:
@@ -109,7 +159,8 @@ class Mt7621KASGuestContracts(unittest.TestCase):
                                         "kas_https_clock_synced",
                                         "kas_https_ca_trust_applied",
                                         "kas_https_helper_tls_verified",
-                                        "service_diagnostics"})
+                                        "service_diagnostics",
+                                        "service_diagnostics_delayed"})
             self.assertEqual(rec["schema"], "mt7621-kas-smoke-v3")
             self.assertFalse(rec["kas_installed"])
             self.assertEqual(rec["kas_ref"], ref)
@@ -141,6 +192,8 @@ class Mt7621KASGuestContracts(unittest.TestCase):
             self.assertFalse(rec["kas_https_ca_trust_applied"])
             self.assertFalse(rec["kas_https_helper_tls_verified"])
             self.assertEqual(rec["service_diagnostics"],
+                             {name: "unknown" for name in SERVICE_PROBES})
+            self.assertEqual(rec["service_diagnostics_delayed"],
                              {name: "unknown" for name in SERVICE_PROBES})
 
     def test_report_exposes_only_allowed_actual_base_install_ids(self):
