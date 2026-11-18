@@ -40,6 +40,13 @@ class Mt7621KASGuestContracts(unittest.TestCase):
         self.assertTrue(all(" restart " not in cmd and " opkg install " not in cmd
                             and " start " not in cmd for cmd, _ in guest.commands))
 
+    def test_single_snapshot_probe_timeout_is_unknown(self):
+        class FakeGuest:
+            def command(self, command, timeout=30):
+                raise TimeoutError("guest command exceeded deadline")
+        self.assertEqual(read_only_service_diagnostics(FakeGuest()),
+                         {name: "unknown" for name in SERVICE_PROBES})
+
     def test_two_phase_snapshot_is_read_only_and_ordered(self):
         first = ["s28", "present", "stopped", "not_listening",
                  "under_300", "stopped", "missing"]
