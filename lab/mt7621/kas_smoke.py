@@ -103,10 +103,23 @@ def read_only_service_diagnostics(guest):
     for name, (command, _allowed) in SERVICE_PROBES.items():
         try:
             observed[name] = guest.command(command, timeout=20).strip()
-        except RuntimeError:
+        except (RuntimeError, TimeoutError):
             observed[name] = "unknown"
     return sanitize_service_diagnostics(observed)
 
+
+def two_phase_service_diagnostics(guest):
+    """Observe before any post-install ELF probing, then after five seconds.
+
+    Both snapshots are read-only: no extra Mihomo launch or service start.
+    An unavailable delayed probe is UNKNOWN, never inferred to be stopped.
+    """
+    initial = read_only_service_diagnostics(guest)
+    try:
+        guest.command("sleep 5", timeout=15)
+    except (RuntimeError, TimeoutError):
+        return initial, sanitize_service_diagnostics(None)
+    return initial, read_only_service_diagnostics(guest)
 
 
 
@@ -386,7 +399,7 @@ def write_public(path, kas_ref, phase, reason, exit_code=None, component_gap=Non
                  kas_https_clock_synced=False,
                  kas_https_ca_trust_applied=False,
                  kas_https_helper_tls_verified=False,
-                 service_diagnostics=None):
+                 service_diagnostics=None, service_diagnostics_delayed=None):
     """No guest output, passwords, paths, script bodies, or arbitrary diagnostics.
 
     installer_error_prefix is a constant prefix extracted from the pinned KAS
@@ -443,6 +456,8 @@ def write_public(path, kas_ref, phase, reason, exit_code=None, component_gap=Non
               "kas_https_ca_trust_applied": bool(kas_https_ca_trust_applied),
               "kas_https_helper_tls_verified": bool(kas_https_helper_tls_verified),
               "service_diagnostics": sanitize_service_diagnostics(service_diagnostics),
+              "service_diagnostics_delayed": sanitize_service_diagnostics(
+                  service_diagnostics_delayed),
               "source_variant": ("DISPOSABLE_LAB_EXT_UTILS_EXCEPTION"
                                  if lab_exception_applied else "PINNED_UNMODIFIED")}
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -484,6 +499,7 @@ def guest_probe(credentials, workspace, deadline, source, kas_ref, public,
     kas_https_ca_trust_applied = False
     kas_https_helper_tls_verified = False
     service_diagnostics = None
+    service_diagnostics_delayed = None
     if kas_magitrickle_feed and not kas_mihomo_feed:
         raise ValueError("MagiTrickle IPK lab overlay requires the Mihomo feed")
     if kas_mihomo_feed and not kas_base_deps_feed:
@@ -611,6 +627,16 @@ def guest_probe(credentials, workspace, deadline, source, kas_ref, public,
         installer_error_prefix = matched_installer_error(combined, source)
         category = classify_installer_failure(exit_code, combined,
                                               installer_error_prefix)
+        if kas_https_mirror:
+            # Capture true immediate post-install state BEFORE launching
+            # another Mihomo -v process or waiting for MagiTrickle.
+            service_diagnostics, service_diagnostics_delayed = (
+                two_phase_service_diagnostics(guest))
+            for label, snapshot in (("early", service_diagnostics),
+                                    ("delayed", service_diagnostics_delayed)):
+                print("KAS MIPSEL SERVICE SNAPSHOT %s: " % label + " ".join(
+                    "%s=%s" % (key, value)
+                    for key, value in snapshot.items()), flush=True)
         if installer_error_prefix:
             print("KAS INSTALLER ERR PREFIX MATCHED (pinned source constant)",
                   flush=True)
@@ -736,12 +762,6 @@ def guest_probe(credentials, workspace, deadline, source, kas_ref, public,
                     print("KAS MIPSEL MAGITRICKLE RUNTIME: daemon=%s init=%s" %
                           (magitrickle_daemon_running,
                            magitrickle_init_script_present), flush=True)
-        if kas_https_mirror:
-            # A separate read-only postmortem; no second service start or retry.
-            service_diagnostics = read_only_service_diagnostics(guest)
-            print("KAS MIPSEL SERVICE SNAPSHOT: " + " ".join(
-                "%s=%s" % (key, val)
-                for key, val in service_diagnostics.items()), flush=True)
         if category != "INSTALLER_COMPLETED":
             reason = category
             print("KAS MIPSEL INSTALL: " + category, flush=True)
@@ -801,7 +821,8 @@ def guest_probe(credentials, workspace, deadline, source, kas_ref, public,
                      kas_https_clock_synced=kas_https_clock_synced,
                      kas_https_ca_trust_applied=kas_https_ca_trust_applied,
                      kas_https_helper_tls_verified=kas_https_helper_tls_verified,
-                     service_diagnostics=service_diagnostics)
+                     service_diagnostics=service_diagnostics,
+                     service_diagnostics_delayed=service_diagnostics_delayed)
 
 
 def main():
