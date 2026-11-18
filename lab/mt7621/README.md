@@ -209,6 +209,11 @@ field; earlier consumers can keep reading `service_diagnostics` only.
 - `magitrickle_process`: running/stopped/unknown
 - `tun_device`: present/missing/unknown; absence alone does **not** establish
   the failure cause, especially with the initial mixed-port-only config
+- `memory_available`: under_16m/under_64m/at_least_64m/unknown, based on
+  `/proc/meminfo` without publishing the actual memory amount
+- `kernel_oom_evidence`: observed/not_observed/unknown from a read-only
+  kernel ring scan; `not_observed` does **not** rule out a crash, OOM or
+  messages overwritten in the kernel ring
 
 Unexpected probe values, missing commands and timeouts become `unknown`.
 If the five-second wait fails, the entire delayed snapshot becomes `unknown`,
@@ -236,6 +241,35 @@ included in reports. Host-only contract tests cover snapshot ordering,
 read-only behavior, timeout, privacy filtering, `mihomo -v` guarded
 execution and policy sanitization; **not yet run in CI**.
 No new QEMU run has been performed for these changes; no KAS PASS is claimed.
+
+#### Actual second dispatch: 44353215646 (2026-11-18)
+
+The host-only suite completed **385/385**, QEMU and real guest Entware boot
+succeeded. HTTPS helper certificate verification passed, all six KAS base
+IPKs installed, Mihomo v1.19.33-1 was verified by native `-v` RC=0, and
+MagiTrickle's daemon actually ran (both snapshots: `running`, init present).
+`/dev/net/tun` is present and Mihomo's config file is non-empty.
+
+**Crucial failure:** Both early and delayed snapshots show
+`mihomo_process=stopped` and `mihomo_port_7890=not_listening`.
+The real pinned KAS installer exited with code **1**, no terminal pinned
+`err()` prefix was matched, and the guest run/report are **FAIL/BLOCKED**.
+The old report incorrectly categorized this as `IPK_UNAVAILABLE` from an
+earlier GitHub-download warning, although opkg actually installed both
+packages. The run's GitHub Actions *job* appeared green because the guest
+step had `continue-on-error: true` and the evaluator deliberately accepted
+any reported `BLOCKED` as a diagnostically useful run. Neither green job
+nor successful IPK setup was a genuine KAS PASS.
+
+The lab-only branch now corrects two **reporting** issues without changing
+production KAS: an early GitHub Mihomo WARN without a matched terminal
+`[ERROR]` no longer proves `IPK_UNAVAILABLE`; it is classified as
+`INSTALLER_EXIT_NONZERO` (cause unproven). In full HTTPS mode a reported
+`BLOCKED` will cause a red Actions job *after* printing safe summaries
+while the default single-guard scenario remains an intentional diagnostic.
+Read-only `memory_available` and `kernel_oom_evidence` probes have been
+added to the early/delayed snapshots to narrow possible memory causes.
+These fixes and probes have **not been guest-tested** after the dispatch.
 
 **Next step** (separate explicitly authorized guest run): inspect the two
 service snapshots and the decision to skip or execute an extra ELF probe. If Mihomo remains stopped, collect
