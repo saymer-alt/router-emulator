@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Read-only localhost RCI smoke probe for an isolated KeeneticOS QEMU guest.
 
-No configuration changes, no response bodies or secrets in reports. The only
-POST is the KeeneticOS /auth handshake. Python standard library only.
+No configuration changes, no response bodies or secrets in reports. POSTs
+are restricted to /auth and a fixed show-only RCI batch. Python stdlib only.
 """
 
 import argparse
@@ -17,6 +17,9 @@ from urllib.parse import urlsplit
 
 MAX_RESPONSE = 256 * 1024
 PATHS = ("/rci/show/version", "/rci/show/system", "/rci/show/interface")
+# NetworkHelm coalesces these into POST /rci/; all commands are read-only.
+SHOW_NAMES = ("version", "system", "interface")
+SHOW_BATCH = [{"show": {name: {}}} for name in SHOW_NAMES]
 
 
 def parse_target(url):
@@ -84,7 +87,7 @@ def check_json(body):
         obj = json.loads(body)
     except (ValueError, UnicodeError):
         return "invalid_json"
-    if not isinstance(obj, (list, dict)):
+    if not isinstance(obj, (list, dict)) or not obj:
         return "invalid_json_shape"
 
     def has_error(value):
@@ -100,6 +103,25 @@ def check_json(body):
         return False
 
     return "rci_status_error" if has_error(obj) else None
+
+
+def check_batch(body):
+    issue = check_json(body)
+    if issue:
+        return issue
+    try:
+        answers = json.loads(body)
+    except (ValueError, UnicodeError):
+        return "invalid_json"
+    if not isinstance(answers, list) or len(answers) != len(SHOW_NAMES):
+        return "invalid_batch_shape"
+    for name, answer in zip(SHOW_NAMES, answers):
+        if not isinstance(answer, dict):
+            return "invalid_batch_envelope"
+        show = answer.get("show")
+        if not isinstance(show, dict) or name not in show:
+            return "invalid_batch_envelope"
+    return None
 
 
 def run(url, user="", password="", timeout=8):
@@ -148,12 +170,24 @@ def run(url, user="", password="", timeout=8):
             name = "RCI_" + path.rsplit("/", 1)[-1].upper()
             if code in (401, 403):
                 record(name, "BLOCKED", f"http_{code}")
-                break
+                return finish()
             if code != 200:
                 record(name, "FAIL", f"http_{code}")
                 continue
             issue = check_json(body)
             record(name, "FAIL" if issue else "PASS", issue or "json_ok")
+
+        # A POST in RCI is not automatically a write: these exact show-only
+        # commands match NetworkHelm's read batching. Never accept user input
+        # as a batch; that would permit configuration writes by accident.
+        code, _, body = client.request("POST", "/rci/", SHOW_BATCH)
+        if code in (401, 403):
+            record("RCI_BATCH_SHOW", "BLOCKED", f"http_{code}")
+        elif code != 200:
+            record("RCI_BATCH_SHOW", "FAIL", f"http_{code}")
+        else:
+            issue = check_batch(body)
+            record("RCI_BATCH_SHOW", "FAIL" if issue else "PASS", issue or "show_batch_ok")
         return finish()
     except (OSError, http.client.HTTPException, TimeoutError, ValueError) as exc:
         if isinstance(exc, (TimeoutError, socket.timeout)):
