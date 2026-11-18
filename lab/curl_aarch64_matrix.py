@@ -23,6 +23,7 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 
 from lab.build_entware import build  # noqa: E402
+from lab.make_curl_skew_model import build_model  # noqa: E402
 from lab.guest import Guest  # noqa: E402
 from lab.kas_lifecycle import put as guest_put  # noqa: E402
 from lab.mirror import Mirror  # noqa: E402
@@ -84,7 +85,7 @@ def after_scenario_factory(args, recorder, phases):
             guest.command("/opt/bin/busybox sha256sum /opt/lab/preflight.sh"
                           " | /opt/bin/busybox grep -q %s" % args.preflight_sha256)
             for guest_path, data, sha in (
-                    ("/opt/lab/libcurl-model.ipk", args.model_ipk_data, MODEL_IPK_SHA),
+                    ("/opt/lab/libcurl-model.ipk", args.model_ipk_data, args.model_ipk_sha256),
                     ("/opt/lab/libcurl-real.ipk", args.libcurl_ipk_data, LIBCURL_IPK_SHA)):
                 guest_put(guest, guest_path, data)
                 guest.command("/opt/bin/busybox sha256sum %s"
@@ -120,8 +121,10 @@ def main():
     ap.add_argument("--credentials-file", required=True)
     ap.add_argument("--preflight-file", required=True)
     ap.add_argument("--preflight-sha256", required=True)
-    ap.add_argument("--model-ipk", required=True,
-                    help="path to synthetic 8.15.0-2-model aarch64 libcurl IPK")
+    ap.add_argument("--model-ipk",
+                    help="path to legacy SHA256-pinned synthetic aarch64 IPK")
+    ap.add_argument("--generate-model", action="store_true",
+                    help="rebuild model from SHA256-pinned current real libcurl")
     ap.add_argument("--kind", required=True, choices=("curlskew", "curlneg"))
     ap.add_argument("--report-dir", required=True)
     ap.add_argument("--max-seconds", type=int, default=3000)
@@ -138,12 +141,19 @@ def main():
     if hashlib.sha256(preflight_data).hexdigest() != args.preflight_sha256:
         raise ValueError("preflight digest mismatch (fail closed)")
     args.preflight_data = preflight_data
-    args.model_ipk_data = Path(args.model_ipk).read_bytes()
-    if hashlib.sha256(args.model_ipk_data).hexdigest() != MODEL_IPK_SHA:
-        raise ValueError("synthetic model digest mismatch (fail closed)")
+    if bool(args.model_ipk) == bool(args.generate_model):
+        ap.error("choose exactly one: --model-ipk or --generate-model")
     args.libcurl_ipk_data = fetch(
         LIBCURL_IPK_URL, LIBCURL_IPK_SHA,
         Path(args.cache_dir) / "libcurl_8.23.0-1_aarch64-3.10.ipk")
+    if args.generate_model:
+        args.model_ipk_data = build_model(args.libcurl_ipk_data, "aarch64-3.10")
+        args.model_ipk_sha256 = hashlib.sha256(args.model_ipk_data).hexdigest()
+    else:
+        args.model_ipk_data = Path(args.model_ipk).read_bytes()
+        args.model_ipk_sha256 = MODEL_IPK_SHA
+        if hashlib.sha256(args.model_ipk_data).hexdigest() != MODEL_IPK_SHA:
+            raise ValueError("legacy synthetic libcurl model digest mismatch (fail closed)")
     if args.kind == "curlneg":
         foreign_path = Path(args.cache_dir) / "libcurl_8.23.0-1_mipsel-3.4.ipk"
         fetch(FOREIGN_LIBCURL_URL, FOREIGN_LIBCURL_SHA, foreign_path)
@@ -173,7 +183,8 @@ def main():
 
     recorder = Recorder(args.kind, {
         "arch": "aarch64-3.10", "preset": PRESET,
-        "model_ipk_sha256": MODEL_IPK_SHA,
+        "model_ipk_sha256": args.model_ipk_sha256,
+        "synthetic_model_generated": args.generate_model,
         "libcurl_real_sha256": LIBCURL_IPK_SHA,
         "foreign_so": "mipsel-3.4 libcurl.so.4.8.0 (real bytes)",
         "preflight_sha256": args.preflight_sha256,
