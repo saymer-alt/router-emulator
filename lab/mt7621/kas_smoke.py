@@ -42,6 +42,73 @@ LOCK = Path(__file__).resolve().parents[1] / "entware-mipselsf.lock.json"
 PIN = re.compile(r"^[0-9a-f]{40}$")
 
 
+# Read-only post-install evidence. Never upload raw config, logs or process lists.
+# Command outputs are restricted to finite categories before publication.
+SERVICE_PROBES = {
+    "mihomo_init": (
+        "if [ -L /opt/etc/init.d/S28mihomo ] || [ -L /opt/etc/init.d/S99mihomo ]; "
+        "then echo invalid; "
+        "elif [ -x /opt/etc/init.d/S28mihomo ] && [ -x /opt/etc/init.d/S99mihomo ]; "
+        "then echo ambiguous; "
+        "elif [ -x /opt/etc/init.d/S28mihomo ]; then echo s28; "
+        "elif [ -x /opt/etc/init.d/S99mihomo ]; then echo s99; "
+        "elif [ -e /opt/etc/init.d/S28mihomo ] || [ -e /opt/etc/init.d/S99mihomo ]; "
+        "then echo invalid; else echo absent; fi",
+        ("s28", "s99", "ambiguous", "invalid", "absent")),
+    "mihomo_config": (
+        "if [ -L /opt/etc/mihomo/config.yaml ]; then echo symlink; "
+        "elif [ -s /opt/etc/mihomo/config.yaml ]; then echo present; "
+        "elif [ -e /opt/etc/mihomo/config.yaml ]; then echo empty; "
+        "else echo missing; fi",
+        ("symlink", "present", "empty", "missing")),
+    "mihomo_process": (
+        "if ! command -v pidof >/dev/null 2>&1; then echo unknown; "
+        "elif pidof mihomo >/dev/null 2>&1; then echo running; else echo stopped; fi",
+        ("running", "stopped")),
+    "mihomo_port_7890": (
+        "if ! command -v netstat >/dev/null 2>&1; then echo unknown; "
+        "else n=$(netstat -tln 2>/dev/null) || { echo unknown; exit 0; }; "
+        "if printf '%s\n' \"$n\" | "
+        "grep -Eq ':7890[[:space:]].*[[:space:]]LISTEN([[:space:]]|$)'; "
+        "then echo listening; else echo not_listening; fi; fi",
+        ("listening", "not_listening")),
+    "magitrickle_uptime": (
+        "u=$(cut -d. -f1 /proc/uptime 2>/dev/null); "
+        "case \"$u\" in ''|*[!0-9]*) echo unknown ;; "
+        "*) if [ \"$u\" -lt 300 ]; then echo under_300; "
+        "else echo at_least_300; fi ;; esac",
+        ("under_300", "at_least_300")),
+    "magitrickle_process": (
+        "if ! command -v pidof >/dev/null 2>&1; then echo unknown; "
+        "elif pidof magitrickled >/dev/null 2>&1; then echo running; "
+        "else echo stopped; fi",
+        ("running", "stopped")),
+    "tun_device": (
+        "if [ -c /dev/net/tun ]; then echo present; else echo missing; fi",
+        ("present", "missing")),
+}
+
+
+def sanitize_service_diagnostics(observations):
+    """Fail closed: public JSON contains only known keys and fixed values."""
+    observations = observations if isinstance(observations, dict) else {}
+    return {name: (observations.get(name) if observations.get(name) in allowed
+                   else "unknown")
+            for name, (_command, allowed) in SERVICE_PROBES.items()}
+
+
+def read_only_service_diagnostics(guest):
+    """One bounded snapshot after the real KAS attempt, without restarts."""
+    observed = {}
+    for name, (command, _allowed) in SERVICE_PROBES.items():
+        try:
+            observed[name] = guest.command(command, timeout=20).strip()
+        except RuntimeError:
+            observed[name] = "unknown"
+    return sanitize_service_diagnostics(observed)
+
+
+
 
 REQUIRED_KEENETIC_COMPONENTS = ("proxy", "dns-filter", "opkg-kmod-netfilter",
                                "ext", "ext-utils")
@@ -318,7 +385,8 @@ def write_public(path, kas_ref, phase, reason, exit_code=None, component_gap=Non
                  kas_https_stage=False, kas_https_dns_configured=False,
                  kas_https_clock_synced=False,
                  kas_https_ca_trust_applied=False,
-                 kas_https_helper_tls_verified=False):
+                 kas_https_helper_tls_verified=False,
+                 service_diagnostics=None):
     """No guest output, passwords, paths, script bodies, or arbitrary diagnostics.
 
     installer_error_prefix is a constant prefix extracted from the pinned KAS
@@ -374,6 +442,7 @@ def write_public(path, kas_ref, phase, reason, exit_code=None, component_gap=Non
               "kas_https_clock_synced": bool(kas_https_clock_synced),
               "kas_https_ca_trust_applied": bool(kas_https_ca_trust_applied),
               "kas_https_helper_tls_verified": bool(kas_https_helper_tls_verified),
+              "service_diagnostics": sanitize_service_diagnostics(service_diagnostics),
               "source_variant": ("DISPOSABLE_LAB_EXT_UTILS_EXCEPTION"
                                  if lab_exception_applied else "PINNED_UNMODIFIED")}
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -414,6 +483,7 @@ def guest_probe(credentials, workspace, deadline, source, kas_ref, public,
     kas_https_clock_synced = False
     kas_https_ca_trust_applied = False
     kas_https_helper_tls_verified = False
+    service_diagnostics = None
     if kas_magitrickle_feed and not kas_mihomo_feed:
         raise ValueError("MagiTrickle IPK lab overlay requires the Mihomo feed")
     if kas_mihomo_feed and not kas_base_deps_feed:
@@ -666,6 +736,12 @@ def guest_probe(credentials, workspace, deadline, source, kas_ref, public,
                     print("KAS MIPSEL MAGITRICKLE RUNTIME: daemon=%s init=%s" %
                           (magitrickle_daemon_running,
                            magitrickle_init_script_present), flush=True)
+        if kas_https_mirror:
+            # A separate read-only postmortem; no second service start or retry.
+            service_diagnostics = read_only_service_diagnostics(guest)
+            print("KAS MIPSEL SERVICE SNAPSHOT: " + " ".join(
+                "%s=%s" % (key, val)
+                for key, val in service_diagnostics.items()), flush=True)
         if category != "INSTALLER_COMPLETED":
             reason = category
             print("KAS MIPSEL INSTALL: " + category, flush=True)
@@ -724,7 +800,8 @@ def guest_probe(credentials, workspace, deadline, source, kas_ref, public,
                      kas_https_dns_configured=kas_https_dns_configured,
                      kas_https_clock_synced=kas_https_clock_synced,
                      kas_https_ca_trust_applied=kas_https_ca_trust_applied,
-                     kas_https_helper_tls_verified=kas_https_helper_tls_verified)
+                     kas_https_helper_tls_verified=kas_https_helper_tls_verified,
+                     service_diagnostics=service_diagnostics)
 
 
 def main():
