@@ -64,6 +64,7 @@ def smoke(args):
     output = Path(args.output_dir).resolve()
     if output.exists() and any(output.iterdir()):
         raise ValueError("output_directory_must_be_empty")
+    output.mkdir(parents=True, exist_ok=True)
     rci_result = None
 
     def after_scenario(**_context):
