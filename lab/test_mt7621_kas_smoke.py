@@ -23,7 +23,8 @@ from lab.mt7621.kas_smoke import (
 class Mt7621KASGuestContracts(unittest.TestCase):
     def test_service_snapshot_read_only_and_categorical(self):
         expected = ["s28", "present", "stopped", "not_listening",
-                    "under_300", "stopped", "missing"]
+                    "under_300", "stopped", "missing", "under_64m",
+                    "not_observed"]
 
         class FakeGuest:
             def __init__(self):
@@ -50,9 +51,11 @@ class Mt7621KASGuestContracts(unittest.TestCase):
 
     def test_two_phase_snapshot_is_read_only_and_ordered(self):
         first = ["s28", "present", "stopped", "not_listening",
-                 "under_300", "stopped", "missing"]
+                 "under_300", "stopped", "missing", "under_16m",
+                 "observed"]
         second = ["s28", "present", "running", "listening",
-                  "at_least_300", "running", "missing"]
+                  "at_least_300", "running", "missing", "at_least_64m",
+                  "not_observed"]
 
         class FakeGuest:
             def __init__(self):
@@ -128,6 +131,20 @@ class Mt7621KASGuestContracts(unittest.TestCase):
         self.assertLess(guard, version_launch)
         self.assertGreater(source[:version_launch].count("if allow_version_probe:"),
                            0)
+
+    def test_memory_and_oom_buckets_are_closed_enums(self):
+        leak = "raw dmesg, kernel addresses, private names"
+        raw = {"memory_available": leak, "kernel_oom_evidence": leak}
+        scrubbed = sanitize_service_diagnostics(raw)
+        self.assertEqual(scrubbed["memory_available"], "unknown")
+        self.assertEqual(scrubbed["kernel_oom_evidence"], "unknown")
+        for val in ("under_16m", "under_64m", "at_least_64m"):
+            self.assertEqual(sanitize_service_diagnostics(
+                {"memory_available": val})["memory_available"], val)
+        for val in ("observed", "not_observed"):
+            self.assertEqual(sanitize_service_diagnostics(
+                {"kernel_oom_evidence": val})["kernel_oom_evidence"], val)
+        self.assertNotIn(leak, str(scrubbed))
 
     def test_service_snapshot_sanitizes_private_output(self):
         private = "private config, server IP, secret"
