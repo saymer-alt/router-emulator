@@ -70,7 +70,9 @@ class Mt7621KASGuestContracts(unittest.TestCase):
         self.assertEqual(list(delayed.values()), second)
         self.assertEqual(guest.commands[len(SERVICE_PROBES)], ("sleep 5", 15))
         self.assertEqual(len(guest.commands), 2 * len(SERVICE_PROBES) + 1)
-        self.assertTrue(all(" -v" not in cmd and " restart" not in cmd
+        # "command -v pidof/netstat" is a read-only presence check,
+        # not a second Mihomo ELF process. Match the actual binary name.
+        self.assertTrue(all("mihomo -v" not in cmd and " restart" not in cmd
                             and "opkg install" not in cmd
                             for cmd, _ in guest.commands))
         # The genuine guest hook must take its snapshots before any separate
