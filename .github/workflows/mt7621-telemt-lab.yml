@@ -245,8 +245,12 @@ jobs:
           GUEST_SCENARIO: ${{ inputs.scenario || 'panel-g' }}
         run: |
           set -euo pipefail
+          # Module mode (-m), not script mode: the drivers import the lab
+          # package (lab.build_entware); script execution puts lab/mt7621 on
+          # sys.path instead of the repo root and crashes with
+          # ModuleNotFoundError (router-emulator run 44592063187).
           if [ "$GUEST_SCENARIO" = "mihomo-s28" ]; then
-            python3 lab/mt7621/mihomo_s28_lab.py \
+            python3 -m lab.mt7621.mihomo_s28_lab \
               --emulator-root . \
               --nand-dir "$RUNNER_TEMP/mt7621-nand" \
               --workspace "$RUNNER_TEMP/mt7621-workspace" \
@@ -255,7 +259,7 @@ jobs:
               --scenario mihomo-s28 \
               --max-seconds 2400
           else
-            python3 lab/mt7621/telemt_lab.py \
+            python3 -m lab.mt7621.telemt_lab \
               --emulator-root . \
               --nand-dir "$RUNNER_TEMP/mt7621-nand" \
               --workspace "$RUNNER_TEMP/mt7621-workspace" \

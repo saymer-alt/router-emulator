@@ -176,7 +176,11 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("scenario:", workflow)  # dispatch input
         self.assertIn("default: panel-g", workflow)
         self.assertIn("lab.mt7621.mihomo_s28_lab --audit-ipks", workflow)
-        self.assertIn("mihomo_s28_lab.py", workflow)
+        self.assertIn("python3 -m lab.mt7621.mihomo_s28_lab", workflow)
+        self.assertIn("python3 -m lab.mt7621.telemt_lab", workflow)
+        # Script-mode launch crashes on the lab package import (run
+        # 44592063187); module mode keeps sys.path at the repo root.
+        self.assertNotIn("python3 lab/mt7621/", workflow)
         self.assertIn("mihomo-s28", workflow)
         # The default TeleMT path must stay untouched.
         self.assertIn("telemt-core-mipsel-experimental-getfb", workflow)
