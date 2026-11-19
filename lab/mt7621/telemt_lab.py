@@ -100,9 +100,13 @@ def tar_members(blob, label):
         raise AuditError("invalid gzip tar: %s" % label) from error
 
 
-def ipk_parts(blob):
+def ipk_parts(blob, extra_fields=()):
     """Split an .ipk (tar.gz outer, as produced by the pinned packer) into
-    control fields and the data payload members."""
+    control fields and the data payload members.
+
+    Only the identity fields are returned by default; extra_fields lets a
+    caller (e.g. the dependency gate) retain additional control keys without
+    changing the existing audit contracts."""
     outer = tar_members(blob, "outer IPK")
     control_members = [k for k in outer if k.startswith("control.tar.")]
     data_members = [k for k in outer if k.startswith("data.tar.")]
@@ -119,7 +123,7 @@ def ipk_parts(blob):
         if ": " not in line:
             continue
         key, value = line.split(": ", 1)
-        if key in {"Package", "Version", "Architecture"}:
+        if key in {"Package", "Version", "Architecture"} | set(extra_fields):
             if key in fields:
                 raise AuditError("duplicated %s in control" % key)
             fields[key] = value
