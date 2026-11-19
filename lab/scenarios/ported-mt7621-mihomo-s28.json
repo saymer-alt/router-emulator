@@ -286,7 +286,7 @@
    "action": "ssh",
    "port": 8022,
    "timeout_sec": 120,
-   "send": "n=0; [ -f /proc/net/tcp6 ] && n=$((n+$(/opt/bin/busybox grep -Ec '00000000000000000000000000000000:1ED2 [0-9A-F]+:[0-9A-F]{4} 0A ' /proc/net/tcp6 || true))); [ -f /proc/net/tcp ] && n=$((n+$(/opt/bin/busybox grep -Ec '00000000:1ED2 [0-9A-F]+:[0-9A-F]{4} 0A ' /proc/net/tcp || true))); [ \"$n\" -ge 1 ] && printf 'PORT_%s\\n' \"V2_LISTENING\" || exit 1",
+   "send": "n=0; [ -f /proc/net/tcp6 ] && n=$((n+$(/opt/bin/busybox grep -Ec '00000000000000000000000000000000:1ED2 [0-9A-F]+:[0-9A-F]{4} 0A ' /proc/net/tcp6 || true))); [ -f /proc/net/tcp ] && n=$((n+$(/opt/bin/busybox grep -Ec '(00000000|0100007F):1ED2 [0-9A-F]+:[0-9A-F]{4} 0A ' /proc/net/tcp || true))); [ \"$n\" -ge 1 ] && printf 'PORT_%s\\n' \"V2_LISTENING\" || exit 1",
    "expect": "PORT_V2_LISTENING"
   },
   {
@@ -370,7 +370,7 @@
    "action": "ssh",
    "port": 8022,
    "timeout_sec": 120,
-   "send": "n=0; [ -f /proc/net/tcp6 ] && n=$((n+$(/opt/bin/busybox grep -Ec '00000000000000000000000000000000:1ED2 [0-9A-F]+:[0-9A-F]{4} 0A ' /proc/net/tcp6 || true))); [ -f /proc/net/tcp ] && n=$((n+$(/opt/bin/busybox grep -Ec '00000000:1ED2 [0-9A-F]+:[0-9A-F]{4} 0A ' /proc/net/tcp || true))); [ \"$n\" -ge 1 ] && printf 'PORT_%s\\n' \"V3_LISTENING\" || exit 1",
+   "send": "n=0; [ -f /proc/net/tcp6 ] && n=$((n+$(/opt/bin/busybox grep -Ec '00000000000000000000000000000000:1ED2 [0-9A-F]+:[0-9A-F]{4} 0A ' /proc/net/tcp6 || true))); [ -f /proc/net/tcp ] && n=$((n+$(/opt/bin/busybox grep -Ec '(00000000|0100007F):1ED2 [0-9A-F]+:[0-9A-F]{4} 0A ' /proc/net/tcp || true))); [ \"$n\" -ge 1 ] && printf 'PORT_%s\\n' \"V3_LISTENING\" || exit 1",
    "expect": "PORT_V3_LISTENING"
   },
   {
@@ -491,7 +491,7 @@
    "action": "ssh",
    "port": 8022,
    "timeout_sec": 120,
-   "send": "n=0; [ -f /proc/net/tcp6 ] && n=$((n+$(/opt/bin/busybox grep -Ec '00000000000000000000000000000000:1ED2 [0-9A-F]+:[0-9A-F]{4} 0A ' /proc/net/tcp6 || true))); [ -f /proc/net/tcp ] && n=$((n+$(/opt/bin/busybox grep -Ec '00000000:1ED2 [0-9A-F]+:[0-9A-F]{4} 0A ' /proc/net/tcp || true))); [ \"$n\" -ge 1 ] && printf 'PORT_%s\\n' \"GEN2_LISTENING\" || exit 1",
+   "send": "n=0; [ -f /proc/net/tcp6 ] && n=$((n+$(/opt/bin/busybox grep -Ec '00000000000000000000000000000000:1ED2 [0-9A-F]+:[0-9A-F]{4} 0A ' /proc/net/tcp6 || true))); [ -f /proc/net/tcp ] && n=$((n+$(/opt/bin/busybox grep -Ec '(00000000|0100007F):1ED2 [0-9A-F]+:[0-9A-F]{4} 0A ' /proc/net/tcp || true))); [ \"$n\" -ge 1 ] && printf 'PORT_%s\\n' \"GEN2_LISTENING\" || exit 1",
    "expect": "PORT_GEN2_LISTENING"
   },
   {

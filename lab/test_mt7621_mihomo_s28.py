@@ -205,12 +205,14 @@ class ScenarioTests(unittest.TestCase):
 
     def test_dual_stack_port_regex_and_single_proc_checks(self):
         text = json.dumps(self.scenario)
-        # The KN-1913 dual-stack form (:::7890 in /proc/net/tcp6) must stay
-        # accepted, but the QEMU ported image has no IPv6, where Go binds
-        # 0.0.0.0:7890 in /proc/net/tcp instead (run 44598183577) — both
-        # listening forms count; the functional proof is the egress step.
+        # The shipped config has allow-lan unset, so mihomo binds
+        # 127.0.0.1:7890 by default (0100007F); with allow-lan it binds
+        # 0.0.0.0:7890 (tcp4) or :::7890 (tcp6, the KN-1913 dual-stack
+        # form).  All three legitimate listening forms count; the
+        # functional proof is the egress step (runs 44598183577 and
+        # 44600900477 showed the localhost bind).
         self.assertIn("00000000000000000000000000000000:1ED2", text)
-        self.assertIn("00000000:1ED2 [0-9A-F]+:[0-9A-F]{4} 0A ", text)
+        self.assertIn("(00000000|0100007F):1ED2 [0-9A-F]+:[0-9A-F]{4} 0A ", text)
         self.assertNotIn(":1ED1", text)
         self.assertNotIn(":1ED3", text)
         self.assertIn("wc -w", text)
