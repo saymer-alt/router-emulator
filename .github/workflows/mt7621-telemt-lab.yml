@@ -46,7 +46,7 @@ concurrency:
 
 jobs:
   acquire-ipks:
-    name: Acquire pinned experimental IPKs (requires TELEMT_IPK_TOKEN)
+    name: Acquire pinned IPKs (public releases for mihomo-s28, token for panel-g)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
@@ -57,9 +57,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Gate on the pinned-artifact token
+      - name: Gate artifact acquisition
         id: gate
-        if: env.TELEMT_TOKEN != ''
+        # The mihomo-s28 scenario needs no credential: both pinned IPKs are
+        # public, immutable release assets of saymer-alt/entware-go (bytes
+        # verified against SHA256 pins before any guest work).  The panel-g
+        # scenario still requires TELEMT_IPK_TOKEN for the frozen cross-repo
+        # research artifacts.
+        if: inputs.scenario == 'mihomo-s28' || env.TELEMT_TOKEN != ''
         run: echo "acquired=true" >> "$GITHUB_OUTPUT"
       - name: Download the getfb TeleMT Core artifact from entware-go
         if: steps.gate.outputs.acquired == 'true' && inputs.scenario != 'mihomo-s28'
@@ -84,33 +89,19 @@ jobs:
           github-token: ${{ secrets.TELEMT_IPK_TOKEN }}
           path: ${{ runner.temp }}/telemt-ipk
 
-      - name: Download the CI-built Mihomo -3 MIPSel artifact from entware-go
+      - name: Fetch the published Mihomo -3/-2 MIPSel release assets (no token)
         if: steps.gate.outputs.acquired == 'true' && inputs.scenario == 'mihomo-s28'
-        uses: actions/download-artifact@v4
-        with:
-          # PR #67 revision-aware no-publish matrix (S28 init, PKG_RELEASE 3,
-          # entware-go run 44565066188).  The upgrade base is the published
-          # -2 latest asset, fetched next; mihomo_s28_lab pins both bytes
-          # before any guest work.
-          name: mihomo-1.19.34-mipsel
-          repository: saymer-alt/entware-go
-          run-id: 44565066188
-          github-token: ${{ secrets.TELEMT_IPK_TOKEN }}
-          path: ${{ runner.temp }}/telemt-ipk
-
-      - name: Fetch the published -2 latest asset for the upgrade base
-        if: steps.gate.outputs.acquired == 'true' && inputs.scenario == 'mihomo-s28'
-        env:
-          GH_TOKEN: ${{ secrets.TELEMT_IPK_TOKEN }}
         run: |
           set -euo pipefail
-          gh release download latest --repo saymer-alt/entware-go \
-            --pattern 'mihomo_1.19.34-2_mipsel-3.4.ipk' \
-            --dir "$RUNNER_TEMP/telemt-ipk" --clobber
-          # The CI artifact nests the -3 IPK under mipsel-3.4/.../packages/;
-          # flatten both pins to the top level for the auditor and re-upload.
-          find "$RUNNER_TEMP/telemt-ipk" -mindepth 2 -name '*.ipk' \
-            -exec cp -n {} "$RUNNER_TEMP/telemt-ipk/" \;
+          # Priority-1 source per the release review: public verified release
+          # assets with immutable SHA256.  -3 is the published S28 set
+          # (1.19.34-3); -2 is the preserved rollback archive release
+          # mihomo-1.19.34-2 (S99 upgrade base).  mihomo_s28_lab re-pins both
+          # bytes before any guest work; a changed upstream set fails closed.
+          curl -fsSL -o "$RUNNER_TEMP/telemt-ipk/mihomo_1.19.34-3_mipsel-3.4.ipk" \
+            https://github.com/saymer-alt/entware-go/releases/latest/download/mihomo_1.19.34-3_mipsel-3.4.ipk
+          curl -fsSL -o "$RUNNER_TEMP/telemt-ipk/mihomo_1.19.34-2_mipsel-3.4.ipk" \
+            https://github.com/saymer-alt/entware-go/releases/download/mihomo-1.19.34-2/mihomo_1.19.34-2_mipsel-3.4.ipk
           ls -1 "$RUNNER_TEMP/telemt-ipk"/*.ipk
 
       - name: Audit both immutable IPK pins and ABI before guest handoff
@@ -135,18 +126,20 @@ jobs:
           path: ${{ runner.temp }}/telemt-ipk/*.ipk
           if-no-files-found: error
           retention-days: 1
-      - name: Explain the intentional skip (no token)
+      - name: Explain the intentional skip (no token, panel-g only)
         if: steps.gate.outputs.acquired != 'true'
         shell: bash
         run: |
           cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
-          ### TeleMT cloud guest stage intentionally NOT attempted
-          The repository secret `TELEMT_IPK_TOKEN` (actions:read on
+          ### panel-g guest stage intentionally NOT attempted
+          This skip only affects the panel-g (TeleMT) scenario.  The
+          repository secret `TELEMT_IPK_TOKEN` (actions:read on
           saymer-alt/entware-go) is not configured, so the two frozen
           experimental IPKs of entware-go run 43742529964 cannot be
           downloaded and pinned-verified on the runner.  They are never
           rebuilt and never approximated; the guest stage activates as soon
-          as the token exists.
+          as the token exists.  The mihomo-s28 scenario is unaffected: its
+          pinned IPKs are public release assets and need no credential.
           EOF
 
   real-guest-telemt:

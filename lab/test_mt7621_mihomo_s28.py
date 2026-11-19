@@ -175,8 +175,6 @@ class WorkflowTests(unittest.TestCase):
         workflow = (root / ".github/workflows/mt7621-telemt-lab.yml").read_text()
         self.assertIn("scenario:", workflow)  # dispatch input
         self.assertIn("default: panel-g", workflow)
-        self.assertIn("mihomo-1.19.34-mipsel", workflow)
-        self.assertIn("44565066188", workflow)
         self.assertIn("lab.mt7621.mihomo_s28_lab --audit-ipks", workflow)
         self.assertIn("mihomo_s28_lab.py", workflow)
         self.assertIn("mihomo-s28", workflow)
@@ -184,6 +182,20 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("telemt-core-mipsel-experimental-getfb", workflow)
         self.assertIn("43948987955", workflow)
         self.assertIn("--scenario panel-g", workflow)
+        # mihomo-s28 needs no credential: both pins are public, immutable
+        # release assets of saymer-alt/entware-go (priority-1 source from the
+        # release review; the CI-artifact source needed cross-repo actions:read).
+        self.assertIn(
+            "https://github.com/saymer-alt/entware-go/releases/latest/download/"
+            "mihomo_1.19.34-3_mipsel-3.4.ipk", workflow)
+        self.assertIn(
+            "https://github.com/saymer-alt/entware-go/releases/download/"
+            "mihomo-1.19.34-2/mihomo_1.19.34-2_mipsel-3.4.ipk", workflow)
+        acquire = workflow.split("acquire-ipks:")[1].split("real-guest-telemt:")[0]
+        self.assertIn("inputs.scenario == 'mihomo-s28' || env.TELEMT_TOKEN != ''", acquire)
+        mihomo_fetch = acquire.split("Fetch the published Mihomo")[1].split("Audit both immutable Mihomo")[0]
+        self.assertNotIn("TELEMT_IPK_TOKEN", mihomo_fetch)
+        self.assertNotIn("actions/download-artifact", mihomo_fetch)
 
     def test_gate_driver_registered(self):
         root = Path(ml.__file__).resolve().parents[2]
