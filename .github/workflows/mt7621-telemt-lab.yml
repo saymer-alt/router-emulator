@@ -93,6 +93,7 @@ jobs:
         if: steps.gate.outputs.acquired == 'true' && inputs.scenario == 'mihomo-s28'
         run: |
           set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/telemt-ipk"
           # Priority-1 source per the release review: public verified release
           # assets with immutable SHA256.  -3 is the published S28 set
           # (1.19.34-3, tag `latest` — pinned by tag, not by the moving
