@@ -18,12 +18,14 @@ from test_mt7621_telemt import gzip_tar, make_elf
 
 def make_mihomo_ipk(init_name="opt/etc/init.d/S28mihomo", version="1.19.34-3",
                     fp_abi=3, dynamic=False, interp=None, e_type=2,
-                    init_payload=b"#!/bin/sh\nENABLED=yes\n"):
+                    init_payload=b"#!/bin/sh\nENABLED=yes\n", depends=None):
     elf = make_elf(fp_abi=fp_abi, dynamic=dynamic, interp=interp,
                    e_type=e_type)
     config = b"# HTTP + SOCKS5 mixed proxy.\nmixed-port: 7890\n"
     control = (f"Package: mihomo\nVersion: {version}\n"
                "Architecture: mipsel-3.4\n").encode()
+    if depends:
+        control += f"Depends: {depends}\n".encode()
     return gzip_tar([
         ("./debian-binary", b"2.0\n"),
         ("./control.tar.gz", gzip_tar([("./control", control)])),
@@ -110,6 +112,61 @@ class AuditTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             with self.assertRaises(ml.AuditError):
                 ml.verify_ipk_dir(td)
+
+
+class FeedDependencyTests(unittest.TestCase):
+    """The pinned local feed must satisfy every Depends of the pinned IPKs.
+
+    Guest run 44593450737 failed at the first opkg install: mihomo declares
+    Depends: ca-bundle, but the pinned feed had no ca-bundle, so opkg
+    refused the package before any guest acceptance could run.
+    """
+
+    def test_pinned_feed_carries_ca_bundle(self):
+        import sys
+        sys.path.insert(0, str(Path(ml.__file__).resolve().parents[2]))
+        from lab.build_entware import validate_mipsel_lock
+        from lab.mt7621.kas_base_deps import (BOOTSTRAP_LOCK,
+                                              validated_kas_base_overlay)
+        lock = json.loads(BOOTSTRAP_LOCK.read_text())
+        # The 25-package bootstrap contract is unchanged; ca-bundle comes
+        # from the validated KAS base overlay, which the mirror extends.
+        self.assertEqual(validate_mipsel_lock(lock), 25)
+        overlay = validated_kas_base_overlay()["packages"]
+        self.assertIn("ca-bundle", {p["Package"] for p in overlay})
+        self.assertIn("ca-bundle", ml.feed_provides())
+
+    def _fixture_dir(self, depends):
+        import tempfile
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        for init_name, version, name in (
+                ("opt/etc/init.d/S99mihomo", ml.V2_VERSION, ml.V2_IPK_NAME),
+                ("opt/etc/init.d/S28mihomo", ml.V3_VERSION, ml.V3_IPK_NAME)):
+            blob = make_mihomo_ipk(init_name=init_name, version=version,
+                                   depends=depends)
+            (Path(td.name) / name).write_bytes(blob)
+        return td.name
+
+    def test_feed_dependency_accepted(self):
+        ml.pin_dependencies_satisfied(self._fixture_dir("ca-bundle"),
+                                      ml.feed_provides())
+
+    def test_alternative_dependency_accepted(self):
+        ml.pin_dependencies_satisfied(
+            self._fixture_dir("ca-bundle | nonexistent-certificates"),
+            ml.feed_provides())
+
+    def test_no_depends_field_accepted(self):
+        ml.pin_dependencies_satisfied(self._fixture_dir(None),
+                                      ml.feed_provides())
+
+    def test_unknown_dependency_fails_closed(self):
+        with self.assertRaises(ml.AuditError) as caught:
+            ml.pin_dependencies_satisfied(self._fixture_dir("libmissing"),
+                                          ml.feed_provides())
+        self.assertIn("libmissing", str(caught.exception))
+        self.assertIn(ml.V2_IPK_NAME, str(caught.exception))
 
 
 class ScenarioTests(unittest.TestCase):

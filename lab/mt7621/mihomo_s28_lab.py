@@ -30,7 +30,8 @@ from pathlib import Path
 import sys
 from types import SimpleNamespace
 
-from lab.build_entware import build
+from lab.build_entware import add_packages, build
+from lab.mt7621.kas_base_deps import (OVERLAY_LOCK, validated_kas_base_overlay)
 from lab.mirror import Mirror
 from lab.mt7621.telemt_lab import (MAX_IPK, AuditError, elf_mips_info,
                                    ipk_parts)
@@ -120,6 +121,43 @@ def audit_ipk(blob, kind, expected_elf_sha=None, expected_init_sha=None,
             "ipk_sha256": hashlib.sha256(blob).hexdigest()}
 
 
+def feed_provides():
+    """Package names and Provides aliases of the pinned local feed: the
+    25-package Entware bootstrap plus the validated KAS base overlay
+    (ca-bundle and friends live in the overlay, not the bootstrap)."""
+    provided = set()
+    for packages in (json.loads(LOCK.read_text())["packages"],
+                     validated_kas_base_overlay()["packages"]):
+        for package in packages:
+            provided.add(package["Package"])
+            for alias in package.get("Provides", "").split(","):
+                alias = alias.strip().split(" ", 1)[0]
+                if alias:
+                    provided.add(alias)
+    return provided
+
+
+def pin_dependencies_satisfied(ipk_dir, provided):
+    """Fail closed when a pinned IPK needs a package the local feed cannot
+    provide (run 44593450737: opkg refused mihomo because ca-bundle was not
+    in the pinned 25-package feed)."""
+    for name, _sha in PINS:
+        blob = (Path(ipk_dir) / name).read_bytes()
+        fields, _payload = ipk_parts(blob, extra_fields=("Depends",))
+        missing = []
+        for group in fields.get("Depends", "").split(","):
+            group = group.strip()
+            if not group:
+                continue
+            if not any(alt.strip() in provided
+                       for alt in group.split("|")):
+                missing.append(group)
+        if missing:
+            raise AuditError(
+                "pinned feed cannot satisfy %s dependencies: %s"
+                % (name, ", ".join(missing)))
+
+
 def verify_ipk_dir(ipk_dir):
     """Fail-closed host gate over both frozen artifacts; returns a
     sanitized summary (pins and ELF facts only, no payload bytes)."""
@@ -140,6 +178,7 @@ def verify_ipk_dir(ipk_dir):
                          "init_name": PAYLOAD[kind]["init_name"],
                          "control": report["control"],
                          "fp_abi": report["elf"]["fp_abi"]}
+    pin_dependencies_satisfied(ipk_dir, feed_provides())
     return summary
 
 
@@ -177,6 +216,12 @@ def main():
     image, feed = workspace / "opt.img", workspace / "mirror"
     build(str(image), str(feed), workspace / "cache", args.credentials_file,
           arch="mipsel", lock_path=str(LOCK))
+    # mihomo Depends: ca-bundle, which lives in the validated KAS base
+    # overlay, not the 25-package bootstrap.  Extend only the disposable
+    # mirror (add_packages verifies every digest); the proven bootstrap
+    # lock stays untouched (run 44593450737 lesson).
+    validated_kas_base_overlay()
+    add_packages(feed, workspace / "cache", OVERLAY_LOCK)
     # Loopback-only IPK delivery: the same pinned bytes, verified above,
     # served beside the pinned 25-package feed at /entware/<name>.
     for name, _sha in PINS:
