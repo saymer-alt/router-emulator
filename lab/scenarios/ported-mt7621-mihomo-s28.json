@@ -1,0 +1,512 @@
+{
+  "name": "KeeneticOS MT7621 Mihomo S28 pinned IPK: published -2 (S99) upgrade to -3 (S28), config preservation, rollback and rc.unslung autostart",
+  "evidence": "KEENETIC_PORTED_EXPERIMENTAL",
+  "steps": [
+    {
+      "action": "wait_serial",
+      "pattern": "Boot and Recovery Environment",
+      "timeout_sec": 120
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Starting kernel",
+      "timeout_sec": 240
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Linux version",
+      "timeout_sec": 120
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Brought up 4 CPUs",
+      "timeout_sec": 240
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "system ready",
+      "timeout_sec": 600
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "waiting for connections",
+      "timeout_sec": 120
+    },
+    {
+      "action": "sleep",
+      "seconds": 15
+    },
+    {
+      "action": "telnet",
+      "port": 8023,
+      "greeting": "\\(config\\)>",
+      "timeout_sec": 60
+    },
+    {
+      "action": "telnet",
+      "port": 8023,
+      "send": "show version",
+      "expect": "release: 5\\.01\\.C\\.8\\.0-2",
+      "timeout_sec": 60,
+      "greeting": "\\(config\\)>"
+    },
+    {
+      "action": "telnet",
+      "port": 8023,
+      "send": "show running-config",
+      "expect": "Model:|interface|dns|opkg|hostname",
+      "timeout_sec": 60,
+      "greeting": "\\(config\\)>"
+    },
+    {
+      "action": "telnet",
+      "port": 8023,
+      "greeting": "\\(config\\)>",
+      "send": [
+        "user admin",
+        "password plain {password}",
+        "exit",
+        "system configuration save",
+        "opkg disk KASOPT:/"
+      ],
+      "expect": "\\(config\\)>",
+      "timeout_sec": 180
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "mounted to /opt",
+      "timeout_sec": 180
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "\\[1/5\\]",
+      "reject_pattern": "Critical error:|Please use ext2/ext3/ext4",
+      "timeout_sec": 300
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "lab-tz-skipped",
+      "reject_pattern": "do_page_fault\\(\\)|Segmentation fault|SIGSEGV",
+      "timeout_sec": 600
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "configured init script",
+      "reject_pattern": "Critical error:|Please use ext2/ext3/ext4|do_page_fault\\(\\)|Segmentation fault|SIGSEGV",
+      "timeout_sec": 600
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "/opt/bin/opkg print-architecture",
+      "expect": "mipsel-3\\.4_kn 200",
+      "timeout_sec": 120
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "/opt/bin/opkg list-installed",
+      "expect": "entware-release - ",
+      "timeout_sec": 60
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "/opt/bin/opkg install bash",
+      "expect": "Configuring bash",
+      "timeout_sec": 300
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "/opt/bin/bash --version",
+      "expect": "mipsel-openwrt-linux-gnu",
+      "timeout_sec": 60
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "/opt/bin/busybox test ! -e /opt/etc/init.d/doinstall && printf 'DOINSTALL_%s\\n' ABSENT",
+      "expect": "DOINSTALL_ABSENT",
+      "timeout_sec": 60
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "printf MARK$((7*6)) > /opt/.lab-marker; /opt/bin/busybox cat /opt/.lab-marker",
+      "expect": "MARK42",
+      "timeout_sec": 60
+    },
+    {
+      "action": "telnet",
+      "port": 8023,
+      "greeting": "Login:|\\(config\\)>",
+      "send": [
+        "admin",
+        "{password}",
+        "system reboot"
+      ],
+      "expect": "Activated system reboot",
+      "timeout_sec": 120
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "reboot: Restarting system",
+      "timeout_sec": 120
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Boot and Recovery Environment",
+      "timeout_sec": 240
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Starting kernel",
+      "timeout_sec": 240
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Brought up 4 CPUs",
+      "timeout_sec": 240
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "system ready",
+      "timeout_sec": 600
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "waiting for connections",
+      "timeout_sec": 120
+    },
+    {
+      "action": "telnet",
+      "port": 8023,
+      "greeting": "Login:|\\(config\\)>",
+      "send": [
+        "admin",
+        "{password}",
+        "show version"
+      ],
+      "expect": "release: 5\\.01\\.C\\.8\\.0-2",
+      "timeout_sec": 120
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "/opt/bin/busybox cat /proc/mounts",
+      "expect": "/opt ext4",
+      "timeout_sec": 180
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "/opt/bin/opkg print-architecture",
+      "expect": "mipsel-3\\.4_kn 200",
+      "timeout_sec": 180
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "/opt/bin/bash --version",
+      "expect": "mipsel-openwrt-linux-gnu",
+      "timeout_sec": 120
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "/opt/bin/busybox cat /opt/.lab-marker",
+      "expect": "MARK42",
+      "timeout_sec": 120
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "send": "/opt/bin/busybox --list | /opt/bin/busybox grep -x base64 >/dev/null && /opt/bin/busybox --list | /opt/bin/busybox grep -x readlink >/dev/null && /opt/bin/busybox --list | /opt/bin/busybox grep -x wget >/dev/null && /opt/bin/busybox --list | /opt/bin/busybox grep -x sha256sum >/dev/null && printf 'APPLET_%s\\n' READY",
+      "expect": "APPLET_READY",
+      "timeout_sec": 90
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "timeout_sec": 120,
+      "send": "mkdir -p /opt/lab && printf 'LAB_%s\\n' DIR_OK",
+      "expect": "LAB_DIR_OK"
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "timeout_sec": 300,
+      "send": "/opt/bin/busybox wget -qO /opt/lab/mihomo-2.ipk http://192.168.1.100/entware/mihomo_1.19.34-2_mipsel-3.4.ipk && /opt/bin/busybox wget -qO /opt/lab/mihomo-3.ipk http://192.168.1.100/entware/mihomo_1.19.34-3_mipsel-3.4.ipk && printf 'WGET_%s\\n' IPKS_OK",
+      "expect": "WGET_IPKS_OK"
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "timeout_sec": 180,
+      "send": "printf '%s  /opt/lab/mihomo-2.ipk\\n%s  /opt/lab/mihomo-3.ipk\\n' 290c0802e60b12e38eb43f58656de3d8f0de317532a0bb67d2dda30b80fdadf6 3176e3f402f7f7f10aca3659fb57f0cd53c4d9d2b34d3e270a620c0dfdfc948f > /opt/lab/ipks.sha && cd / && sha256sum -c /opt/lab/ipks.sha",
+      "expect": ": OK"
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "timeout_sec": 300,
+      "send": "/opt/bin/opkg install /opt/lab/mihomo-2.ipk >/opt/lab/opkg-2.log 2>&1 && /opt/bin/opkg status mihomo | /opt/bin/busybox grep -q 'Version: 1.19.34-2' && printf 'OPKG_%s\\n' V2_OK || exit 1",
+      "expect": "OPKG_V2_OK"
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "timeout_sec": 120,
+      "send": "test -x /opt/etc/init.d/S99mihomo && test ! -e /opt/etc/init.d/S28mihomo && printf 'INIT_%s\\n' V2_S99_ONLY || exit 1",
+      "expect": "INIT_V2_S99_ONLY"
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "timeout_sec": 120,
+      "send": "printf '\\n# lab-upgrade-marker 1911\\n' >> /opt/etc/mihomo/config.yaml && /opt/bin/busybox grep -q 'lab-upgrade-marker' /opt/etc/mihomo/config.yaml && printf 'CONFIG_%s\\n' MARKED || exit 1",
+      "expect": "CONFIG_MARKED"
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "timeout_sec": 120,
+      "send": "/opt/etc/init.d/S99mihomo start >/opt/lab/s99-start.log 2>&1 && printf 'S99_%s\\n' STARTED || exit 1",
+      "expect": "S99_STARTED"
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "timeout_sec": 180,
+      "send": "ok=0; i=0; while [ \"$i\" -lt 20 ]; do if pidof mihomo >/dev/null 2>&1; then ok=1; break; fi; /opt/bin/busybox sleep 2; i=$((i+1)); done; [ \"$ok\" = 1 ] && printf 'MIHOMO_%s\\n' PROC_ALIVE || exit 1",
+      "expect": "MIHOMO_PROC_ALIVE"
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "timeout_sec": 120,
+      "send": "n=0; [ -f /proc/net/tcp6 ] && n=$((n+$(/opt/bin/busybox grep -Ec '00000000000000000000000000000000:1ED2 [0-9A-F]+:[0-9A-F]{4} 0A ' /proc/net/tcp6 || true))); [ \"$n\" -ge 1 ] && printf 'PORT_%s\\n' \"V2_LISTENING\" || exit 1",
+      "expect": "PORT_V2_LISTENING"
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "timeout_sec": 120,
+      "send": "out=$(http_proxy=http://127.0.0.1:7890 /opt/bin/busybox wget -qO- -T 20 http://192.168.1.100/lab/health 2>/dev/null); [ \"$out\" = KEENETIC_LAB_HTTP_OK ] && printf 'PROXY_%s\\n' MIXED_EGRESS_OK || exit 1",
+      "expect": "PROXY_MIXED_EGRESS_OK"
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "timeout_sec": 180,
+      "send": "/opt/etc/init.d/S99mihomo stop >/opt/lab/s99-stop.log 2>&1; ok=0; i=0; while [ \"$i\" -lt 15 ]; do if ! pidof mihomo >/dev/null 2>&1; then ok=1; break; fi; /opt/bin/busybox sleep 2; i=$((i+1)); done; [ \"$ok\" = 1 ] && printf 'MIHOMO_%s\\n' STOPPED || exit 1",
+      "expect": "MIHOMO_STOPPED"
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "timeout_sec": 300,
+      "send": "/opt/bin/opkg install /opt/lab/mihomo-3.ipk >/opt/lab/opkg-3.log 2>&1 && /opt/bin/opkg status mihomo | /opt/bin/busybox grep -q 'Version: 1.19.34-3' && printf 'OPKG_%s\\n' V3_UPGRADED || exit 1",
+      "expect": "OPKG_V3_UPGRADED"
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "timeout_sec": 120,
+      "send": "test -x /opt/etc/init.d/S28mihomo && test ! -e /opt/etc/init.d/S99mihomo && printf 'MIGRATION_%s\\n' S99_TO_S28_OK || exit 1",
+      "expect": "MIGRATION_S99_TO_S28_OK"
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "timeout_sec": 120,
+      "send": "n=$(ls /opt/etc/init.d/ | /opt/bin/busybox grep -c mihomo); [ \"$n\" = 1 ] && printf 'SINGLE_%s\\n' MIHOMO_INIT || exit 1",
+      "expect": "SINGLE_MIHOMO_INIT"
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "timeout_sec": 120,
+      "send": "/opt/bin/busybox grep -q 'lab-upgrade-marker' /opt/etc/mihomo/config.yaml && printf 'CONFIG_%s\\n' V3_PRESERVED || exit 1",
+      "expect": "CONFIG_V3_PRESERVED"
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "timeout_sec": 120,
+      "send": "test -f /opt/etc/mihomo/config.yaml-opkg && printf 'SAMPLE_%s\\n' PRESENT || exit 1",
+      "expect": "SAMPLE_PRESENT"
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "timeout_sec": 120,
+      "send": "printf '%s  /opt/bin/mihomo\\n%s  /opt/etc/init.d/S28mihomo\\n' 30857fb981b8778e7f25a07ca128b0891f6e3008f9495e55f719e7db09ce769c 06ba8f6abe78a3b109d2037c902d826085d5a4814cf4b4aca0d135b22a7b86d9 > /opt/lab/v3.sha && cd / && sha256sum -c /opt/lab/v3.sha",
+      "expect": ": OK"
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "timeout_sec": 120,
+      "send": "/opt/bin/mihomo -v 2>&1 | /opt/bin/busybox grep -q 'Mihomo Meta v1.19.34' && printf 'ELF_%s\\n' V3_RUNS || exit 1",
+      "expect": "ELF_V3_RUNS"
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "timeout_sec": 120,
+      "send": "/opt/etc/init.d/S28mihomo start >/opt/lab/s28-start.log 2>&1 && printf 'S28_%s\\n' STARTED || exit 1",
+      "expect": "S28_STARTED"
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "timeout_sec": 180,
+      "send": "ok=0; i=0; while [ \"$i\" -lt 20 ]; do if pidof mihomo >/dev/null 2>&1; then ok=1; break; fi; /opt/bin/busybox sleep 2; i=$((i+1)); done; [ \"$ok\" = 1 ] && printf 'MIHOMO_%s\\n' PROC_ALIVE || exit 1",
+      "expect": "MIHOMO_V3_PROC_ALIVE"
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "timeout_sec": 120,
+      "send": "n=0; [ -f /proc/net/tcp6 ] && n=$((n+$(/opt/bin/busybox grep -Ec '00000000000000000000000000000000:1ED2 [0-9A-F]+:[0-9A-F]{4} 0A ' /proc/net/tcp6 || true))); [ \"$n\" -ge 1 ] && printf 'PORT_%s\\n' \"V3_LISTENING\" || exit 1",
+      "expect": "PORT_V3_LISTENING"
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "timeout_sec": 300,
+      "send": "/opt/bin/opkg install --force-downgrade /opt/lab/mihomo-2.ipk >/opt/lab/opkg-rollback.log 2>&1 && /opt/bin/opkg status mihomo | /opt/bin/busybox grep -q 'Version: 1.19.34-2' && printf 'ROLLBACK_%s\\n' V2_OK || exit 1",
+      "expect": "ROLLBACK_V2_OK"
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "timeout_sec": 120,
+      "send": "test -x /opt/etc/init.d/S99mihomo && test ! -e /opt/etc/init.d/S28mihomo && printf 'ROLLBACK_%s\\n' S99_RESTORED || exit 1",
+      "expect": "ROLLBACK_S99_RESTORED"
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "timeout_sec": 120,
+      "send": "/opt/bin/busybox grep -q 'lab-upgrade-marker' /opt/etc/mihomo/config.yaml && printf 'CONFIG_%s\\n' ROLLBACK_PRESERVED || exit 1",
+      "expect": "CONFIG_ROLLBACK_PRESERVED"
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "timeout_sec": 180,
+      "send": "/opt/etc/init.d/S99mihomo restart >/opt/lab/s99-restart.log 2>&1; ok=0; i=0; while [ \"$i\" -lt 20 ]; do if pidof mihomo >/dev/null 2>&1; then ok=1; break; fi; /opt/bin/busybox sleep 2; i=$((i+1)); done; [ \"$ok\" = 1 ] && printf 'MIHOMO_%s\\n' PROC_ALIVE || exit 1",
+      "expect": "MIHOMO_ROLLBACK_RUNS"
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "timeout_sec": 300,
+      "send": "/opt/bin/opkg install /opt/lab/mihomo-3.ipk >/opt/lab/opkg-3b.log 2>&1 && /opt/bin/opkg status mihomo | /opt/bin/busybox grep -q 'Version: 1.19.34-3' && test -x /opt/etc/init.d/S28mihomo && test ! -e /opt/etc/init.d/S99mihomo && printf 'FINAL_%s\\n' V3_S28_OK || exit 1",
+      "expect": "FINAL_V3_S28_OK"
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "timeout_sec": 180,
+      "send": "/opt/etc/init.d/S28mihomo restart >/opt/lab/s28-restart.log 2>&1; ok=0; i=0; while [ \"$i\" -lt 20 ]; do if pidof mihomo >/dev/null 2>&1; then ok=1; break; fi; /opt/bin/busybox sleep 2; i=$((i+1)); done; [ \"$ok\" = 1 ] && printf 'MIHOMO_%s\\n' PROC_ALIVE || exit 1",
+      "expect": "MIHOMO_FINAL_RUNNING"
+    },
+    {
+      "action": "telnet",
+      "port": 8023,
+      "greeting": "Login:|\\(config\\)>",
+      "send": [
+        "admin",
+        "{password}",
+        "system reboot"
+      ],
+      "expect": "\\(config\\)>",
+      "timeout_sec": 120
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "reboot: Restarting system",
+      "timeout_sec": 240
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Boot and Recovery Environment",
+      "timeout_sec": 240
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Starting kernel",
+      "timeout_sec": 240
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "Brought up 4 CPUs",
+      "timeout_sec": 240
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "configured init script",
+      "timeout_sec": 300
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "system ready",
+      "timeout_sec": 300
+    },
+    {
+      "action": "wait_serial",
+      "pattern": "waiting for connections",
+      "timeout_sec": 300
+    },
+    {
+      "action": "sleep",
+      "seconds": 20
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "timeout_sec": 240,
+      "send": "ok=0; i=0; while [ \"$i\" -lt 30 ]; do if pidof mihomo >/dev/null 2>&1; then ok=1; break; fi; /opt/bin/busybox sleep 3; i=$((i+3)); done; [ \"$ok\" = 1 ] && printf 'AUTOSTART_%s\\n' MIHOMO_RUNNING || exit 1",
+      "expect": "AUTOSTART_MIHOMO_RUNNING"
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "timeout_sec": 120,
+      "send": "/opt/bin/opkg status mihomo | /opt/bin/busybox grep -q 'Version: 1.19.34-3' && test -x /opt/etc/init.d/S28mihomo && printf 'GEN2_%s\\n' V3_STILL_OK || exit 1",
+      "expect": "GEN2_V3_STILL_OK"
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "timeout_sec": 120,
+      "send": "/opt/bin/busybox grep -q 'lab-upgrade-marker' /opt/etc/mihomo/config.yaml && printf 'CONFIG_%s\\n' SURVIVED_REBOOT || exit 1",
+      "expect": "CONFIG_SURVIVED_REBOOT"
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "timeout_sec": 120,
+      "send": "n=0; [ -f /proc/net/tcp6 ] && n=$((n+$(/opt/bin/busybox grep -Ec '00000000000000000000000000000000:1ED2 [0-9A-F]+:[0-9A-F]{4} 0A ' /proc/net/tcp6 || true))); [ \"$n\" -ge 1 ] && printf 'PORT_%s\\n' \"GEN2_LISTENING\" || exit 1",
+      "expect": "PORT_GEN2_LISTENING"
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "timeout_sec": 120,
+      "send": "n=$(pidof mihomo | /opt/bin/busybox wc -w); [ \"$n\" = 1 ] && printf 'SINGLE_%s\\n' MIHOMO_PROC || exit 1",
+      "expect": "SINGLE_MIHOMO_PROC"
+    },
+    {
+      "action": "ssh",
+      "port": 8022,
+      "timeout_sec": 120,
+      "send": "cd / && /opt/bin/busybox sync && printf 'SYNC_%s\\n' COMPLETE",
+      "expect": "SYNC_COMPLETE"
+    }
+  ]
+}

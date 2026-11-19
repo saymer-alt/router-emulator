@@ -15,15 +15,27 @@ on:
     paths:
       - '.github/workflows/mt7621-telemt-lab.yml'
       - 'lab/mt7621/telemt_lab.py'
+      - 'lab/mt7621/mihomo_s28_lab.py'
       - 'lab/test_mt7621_telemt.py'
+      - 'lab/test_mt7621_mihomo_s28.py'
       - 'lab/scenarios/ported-mt7621-telemt.json'
       - 'lab/scenarios/ported-mt7621-telemt-panel.json'
+      - 'lab/scenarios/ported-mt7621-mihomo-s28.json'
       - 'lab/mt7621/fixtures/S99telemtlab'
       - 'lab/mt7621/fixtures/S99telemtlab-panel'
       - 'lab/mt7621/fixtures/telemt-lab.toml'
       - 'lab/mt7621/fixtures/broken-telemt.toml'
       - 'lab/test_mt7621_telemt_panel.py'
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: 'Guest scenario: panel-g (TeleMT default, unchanged) or mihomo-s28 (PR #67 revision-aware Mihomo artifacts)'
+        type: choice
+        required: false
+        default: panel-g
+        options:
+          - panel-g
+          - mihomo-s28
 
 permissions:
   contents: read
@@ -50,7 +62,7 @@ jobs:
         if: env.TELEMT_TOKEN != ''
         run: echo "acquired=true" >> "$GITHUB_OUTPUT"
       - name: Download the getfb TeleMT Core artifact from entware-go
-        if: steps.gate.outputs.acquired == 'true'
+        if: steps.gate.outputs.acquired == 'true' && inputs.scenario != 'mihomo-s28'
         uses: actions/download-artifact@v4
         with:
           # the NEW separately named experimental Core 3.5.17-2fb1 of
@@ -63,7 +75,7 @@ jobs:
           path: ${{ runner.temp }}/telemt-ipk
 
       - name: Download frozen MIPSel Panel Lite artifact from entware-go
-        if: steps.gate.outputs.acquired == 'true'
+        if: steps.gate.outputs.acquired == 'true' && inputs.scenario != 'mihomo-s28'
         uses: actions/download-artifact@v4
         with:
           name: telemt-panel-lite-mipsel-experimental
@@ -72,12 +84,48 @@ jobs:
           github-token: ${{ secrets.TELEMT_IPK_TOKEN }}
           path: ${{ runner.temp }}/telemt-ipk
 
+      - name: Download the CI-built Mihomo -3 MIPSel artifact from entware-go
+        if: steps.gate.outputs.acquired == 'true' && inputs.scenario == 'mihomo-s28'
+        uses: actions/download-artifact@v4
+        with:
+          # PR #67 revision-aware no-publish matrix (S28 init, PKG_RELEASE 3,
+          # entware-go run 44565066188).  The upgrade base is the published
+          # -2 latest asset, fetched next; mihomo_s28_lab pins both bytes
+          # before any guest work.
+          name: mihomo-1.19.34-mipsel
+          repository: saymer-alt/entware-go
+          run-id: 44565066188
+          github-token: ${{ secrets.TELEMT_IPK_TOKEN }}
+          path: ${{ runner.temp }}/telemt-ipk
+
+      - name: Fetch the published -2 latest asset for the upgrade base
+        if: steps.gate.outputs.acquired == 'true' && inputs.scenario == 'mihomo-s28'
+        env:
+          GH_TOKEN: ${{ secrets.TELEMT_IPK_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release download latest --repo saymer-alt/entware-go \
+            --pattern 'mihomo_1.19.34-2_mipsel-3.4.ipk' \
+            --dir "$RUNNER_TEMP/telemt-ipk" --clobber
+          # The CI artifact nests the -3 IPK under mipsel-3.4/.../packages/;
+          # flatten both pins to the top level for the auditor and re-upload.
+          find "$RUNNER_TEMP/telemt-ipk" -mindepth 2 -name '*.ipk' \
+            -exec cp -n {} "$RUNNER_TEMP/telemt-ipk/" \;
+          ls -1 "$RUNNER_TEMP/telemt-ipk"/*.ipk
+
       - name: Audit both immutable IPK pins and ABI before guest handoff
-        if: steps.gate.outputs.acquired == 'true'
+        if: steps.gate.outputs.acquired == 'true' && inputs.scenario != 'mihomo-s28'
         shell: bash
         run: |
           set -euo pipefail
           python3 -m lab.mt7621.telemt_lab --audit-ipks --ipk-dir "$RUNNER_TEMP/telemt-ipk"
+
+      - name: Audit both immutable Mihomo IPK pins and ABI before guest handoff
+        if: steps.gate.outputs.acquired == 'true' && inputs.scenario == 'mihomo-s28'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m lab.mt7621.mihomo_s28_lab --audit-ipks --ipk-dir "$RUNNER_TEMP/telemt-ipk"
 
       - name: Publish pinned IPK artifact for the guest job
         if: steps.gate.outputs.acquired == 'true'
@@ -195,18 +243,31 @@ jobs:
           name: telemt-ipk-pinned
           path: ${{ runner.temp }}/telemt-ipk
 
-      - name: Launch actual QEMU with the pinned TeleMT IPK scenario
+      - name: Launch actual QEMU with the pinned IPK scenario
         shell: bash
+        env:
+          GUEST_SCENARIO: ${{ inputs.scenario || 'panel-g' }}
         run: |
           set -euo pipefail
-          python3 lab/mt7621/telemt_lab.py \
-            --emulator-root . \
-            --nand-dir "$RUNNER_TEMP/mt7621-nand" \
-            --workspace "$RUNNER_TEMP/mt7621-workspace" \
-            --credentials-file "$RUNNER_TEMP/mt7621-credentials.json" \
-            --ipk-dir "$RUNNER_TEMP/telemt-ipk" \
-            --scenario panel-g \
-            --max-seconds 2100
+          if [ "$GUEST_SCENARIO" = "mihomo-s28" ]; then
+            python3 lab/mt7621/mihomo_s28_lab.py \
+              --emulator-root . \
+              --nand-dir "$RUNNER_TEMP/mt7621-nand" \
+              --workspace "$RUNNER_TEMP/mt7621-workspace" \
+              --credentials-file "$RUNNER_TEMP/mt7621-credentials.json" \
+              --ipk-dir "$RUNNER_TEMP/telemt-ipk" \
+              --scenario mihomo-s28 \
+              --max-seconds 2400
+          else
+            python3 lab/mt7621/telemt_lab.py \
+              --emulator-root . \
+              --nand-dir "$RUNNER_TEMP/mt7621-nand" \
+              --workspace "$RUNNER_TEMP/mt7621-workspace" \
+              --credentials-file "$RUNNER_TEMP/mt7621-credentials.json" \
+              --ipk-dir "$RUNNER_TEMP/telemt-ipk" \
+              --scenario panel-g \
+              --max-seconds 2100
+          fi
 
       - name: Report only safe action counts (no UART)
         if: always()
