@@ -205,10 +205,18 @@ class ScenarioTests(unittest.TestCase):
 
     def test_dual_stack_port_regex_and_single_proc_checks(self):
         text = json.dumps(self.scenario)
+        # The KN-1913 dual-stack form (:::7890 in /proc/net/tcp6) must stay
+        # accepted, but the QEMU ported image has no IPv6, where Go binds
+        # 0.0.0.0:7890 in /proc/net/tcp instead (run 44598183577) — both
+        # listening forms count; the functional proof is the egress step.
         self.assertIn("00000000000000000000000000000000:1ED2", text)
+        self.assertIn("00000000:1ED2 [0-9A-F]+:[0-9A-F]{4} 0A ", text)
         self.assertNotIn(":1ED1", text)
         self.assertNotIn(":1ED3", text)
         self.assertIn("wc -w", text)
+        for step in self.scenario["steps"]:
+            if "1ED2" in str(step.get("send", "")):
+                self.assertIn("/proc/net/tcp ", step["send"])
 
     def test_every_ssh_step_has_expect(self):
         for index, step in enumerate(self.scenario["steps"]):
