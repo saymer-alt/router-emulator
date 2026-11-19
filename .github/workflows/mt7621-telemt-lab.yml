@@ -95,11 +95,13 @@ jobs:
           set -euo pipefail
           # Priority-1 source per the release review: public verified release
           # assets with immutable SHA256.  -3 is the published S28 set
-          # (1.19.34-3); -2 is the preserved rollback archive release
-          # mihomo-1.19.34-2 (S99 upgrade base).  mihomo_s28_lab re-pins both
-          # bytes before any guest work; a changed upstream set fails closed.
+          # (1.19.34-3, tag `latest` — pinned by tag, not by the moving
+          # /releases/latest pointer, which now resolves to the rollback
+          # archive release); -2 is the preserved mihomo-1.19.34-2 archive.
+          # mihomo_s28_lab re-pins both bytes before any guest work; a
+          # changed upstream set fails closed.
           curl -fsSL -o "$RUNNER_TEMP/telemt-ipk/mihomo_1.19.34-3_mipsel-3.4.ipk" \
-            https://github.com/saymer-alt/entware-go/releases/latest/download/mihomo_1.19.34-3_mipsel-3.4.ipk
+            https://github.com/saymer-alt/entware-go/releases/download/latest/mihomo_1.19.34-3_mipsel-3.4.ipk
           curl -fsSL -o "$RUNNER_TEMP/telemt-ipk/mihomo_1.19.34-2_mipsel-3.4.ipk" \
             https://github.com/saymer-alt/entware-go/releases/download/mihomo-1.19.34-2/mihomo_1.19.34-2_mipsel-3.4.ipk
           ls -1 "$RUNNER_TEMP/telemt-ipk"/*.ipk

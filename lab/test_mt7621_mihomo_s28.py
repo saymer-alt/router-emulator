@@ -186,7 +186,7 @@ class WorkflowTests(unittest.TestCase):
         # release assets of saymer-alt/entware-go (priority-1 source from the
         # release review; the CI-artifact source needed cross-repo actions:read).
         self.assertIn(
-            "https://github.com/saymer-alt/entware-go/releases/latest/download/"
+            "https://github.com/saymer-alt/entware-go/releases/download/latest/"
             "mihomo_1.19.34-3_mipsel-3.4.ipk", workflow)
         self.assertIn(
             "https://github.com/saymer-alt/entware-go/releases/download/"
