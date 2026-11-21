@@ -15,7 +15,7 @@
     },
     {
       "url": "https://github.com/saymer-alt/entware-go/releases/download/latest/mihomo_1.19.34-2_aarch64-3.10.ipk",
-      "fetch_url": "https://github.com/saymer-alt/entware-go/releases/download/latest/mihomo_1.19.34-2_aarch64-3.10.ipk",
+      "fetch_url": "https://github.com/saymer-alt/entware-go/releases/download/mihomo-1.19.34-2/mihomo_1.19.34-2_aarch64-3.10.ipk",
       "filename": "mihomo_1.19.34-2_aarch64-3.10.ipk",
       "sha256": "ed5385fec56c31cd411780c41c0bd99ca204c068723f4095b568b781718bdcf8"
     },
