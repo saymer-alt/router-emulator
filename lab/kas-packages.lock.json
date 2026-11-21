@@ -312,8 +312,8 @@
       "Architecture": "aarch64-3.10_kn",
       "Installed-Size": "645120",
       "Filename": "iptables_1.4.21-6_aarch64-3.10_kn.ipk",
-      "Size": "203287",
-      "SHA256sum": "36999650d64ace11ccbdfd8cc66b68ccad0b2d1d32ffcdb8a36fe2ab26a1cf15",
+      "Size": "203173",
+      "SHA256sum": "ab565e4ee9c77069d02f7d0e9fa1c72f07716fb493e4cf57e9eb3513babb26c1",
       "Description": " IP firewall administration tool.",
       "feed": "keenetic",
       "url": "https://bin.entware.net/aarch64-k3.10/keenetic/iptables_1.4.21-6_aarch64-3.10_kn.ipk"
